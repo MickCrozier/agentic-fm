@@ -136,7 +136,7 @@ fi
 # Verify fm-xml-export-exploder is available
 # ---------------------------------------------------------------------------
 if ! command -v fm-xml-export-exploder &>/dev/null; then
-    error "fm-xml-export-exploder is not installed or not in PATH. Install it from https://github.com/nicktahoe/fm-xml-export-exploder and ensure the binary is available on your PATH."
+    error "fm-xml-export-exploder is not installed or not in PATH. Install it from https://github.com/bc-m/fm-xml-export-exploder and ensure the binary is available on your PATH."
 fi
 
 # ---------------------------------------------------------------------------
