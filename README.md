@@ -16,6 +16,10 @@ FileMaker provides a few input/output methods as XML which provide a clear defin
 
 The goals of this project is to provide the guidance and context needed by agentic processes for creating reliable scripts and other FileMaker related elements which can be taken from AI back into FileMaker Pro.
 
+# Architecture
+
+For a detailed view of the data pipeline, the context hierarchy, artifact inventory, and guidelines for adding new features, see [ARCHITECTURE.md](ARCHITECTURE.md).
+
 # Project Structure
 
 ```
