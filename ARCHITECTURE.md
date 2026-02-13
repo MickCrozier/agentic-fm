@@ -42,6 +42,7 @@ The AI combines these inputs to produce fmxmlsnippet output in `agent/sandbox/`,
 | CONTEXT.example.json | `agent/CONTEXT.example.json` | Manual (checked in) | Schema reference and realistic example |
 | Snippet examples | `agent/snippet_examples/` | Manual (checked in) | Canonical fmxmlsnippet templates for each step type |
 | Generated scripts | `agent/sandbox/` | AI agent | fmxmlsnippet output ready for clipboard import |
+| Validation script | `agent/scripts/validate_snippet.py` | Manual (checked in) | Post-generation validation of fmxmlsnippet output |
 
 ## Context Hierarchy
 
@@ -107,6 +108,7 @@ The AI follows a mandatory sequence when generating fmxmlsnippet output:
 4. If a reference is missing from CONTEXT.json, search the relevant `agent/context/*.index` file.
 5. Only fall back to `agent/xml_parsed/` as a last resort.
 6. Write the resulting fmxmlsnippet to `agent/sandbox/`.
+7. Run `validate_snippet.py` to check the output for structural and reference errors before handing it to the user.
 
 Output rules:
 
@@ -140,6 +142,20 @@ Generates AI-optimised index files from the exploded XML.
 - Uses `xmllint --xpath` (ships with macOS; `libxml2-utils` on Linux).
 - Clears and regenerates the output directory on each run.
 - Run after `fmparse.sh` whenever the solution XML changes.
+
+### validate_snippet.py
+
+Validates fmxmlsnippet output in `agent/sandbox/` for common errors before pasting into FileMaker.
+
+```
+python agent/scripts/validate_snippet.py [file_or_directory] [options]
+```
+
+- Defaults to validating all files in `agent/sandbox/`.
+- Auto-detects `agent/CONTEXT.json` for reference cross-checking.
+- Checks: well-formed XML, correct root element, no `<Script>` wrapper, required step attributes, paired step balancing (If/End If, Loop/End Loop, Open Transaction/Commit Transaction), Else/Else If ordering, known step names (against snippet_examples), and field/layout/script ID cross-references against CONTEXT.json.
+- Use `--context <path>` to specify an alternate CONTEXT.json, `--snippets <path>` for a custom snippet_examples directory, or `--quiet` for errors-only output.
+- Exit code 0 = all files passed, 1 = one or more files failed.
 
 ### Context() custom function
 

@@ -78,6 +78,11 @@ Only fall back to grepping `agent/xml_parsed/` if the needed information is not 
 3. Copy the EXACT XML structure from the snippet_examples file
 4. Substitute the specific IDs/names/values from CONTEXT.json
 
+**MANDATORY: After writing a script to agent/sandbox/, you MUST:**
+
+5. Run `python agent/scripts/validate_snippet.py agent/sandbox/<script_name>` to validate the output
+6. Fix any errors reported by the validator before presenting the script to the user
+
 # Lookup methodology
 
 When creating scripts that reference FileMaker objects (layouts, fields, table occurrences, etc.), follow this process:
