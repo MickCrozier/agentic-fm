@@ -236,12 +236,19 @@ fi
     "$XML_PARSED_DIR"
 
 # ---------------------------------------------------------------------------
-# Step 5: Report results
+# Step 5: Report parse results
 # ---------------------------------------------------------------------------
 FILE_COUNT="$(find "$XML_PARSED_DIR" -type f | wc -l | tr -d ' ')"
 DIR_COUNT="$(find "$XML_PARSED_DIR" -type d | wc -l | tr -d ' ')"
 
 echo ""
-msg "Done!"
+msg "Parse complete."
 msg "  Archived to: xml_exports/$SOLUTION_NAME/$(basename "$ARCHIVE_DIR")/"
 msg "  Parsed into: agent/xml_parsed/ ($FILE_COUNT files in $DIR_COUNT directories)"
+
+# ---------------------------------------------------------------------------
+# Step 6: Regenerate context index files
+# ---------------------------------------------------------------------------
+echo ""
+msg "Running fmcontext.sh to regenerate agent/context/..."
+"$SCRIPT_DIR/fmcontext.sh"
