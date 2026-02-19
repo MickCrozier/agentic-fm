@@ -1,0 +1,292 @@
+---
+import Base from '../layouts/Base.astro';
+import PageHeader from '../components/PageHeader.astro';
+import CTA from '../components/CTA.astro';
+
+const base = import.meta.env.BASE_URL;
+---
+
+<Base
+  title="Documentation"
+  description="Complete reference documentation for agentic-fm — the AI-powered scripting toolchain for FileMaker Pro."
+>
+  <PageHeader
+    title="Documentation"
+    description="Everything you need to understand and use agentic-fm effectively."
+  />
+
+  <div class="mx-auto max-w-4xl px-6 py-16">
+    <div class="prose-section">
+      <h2 id="background">Background</h2>
+      <p>
+        FileMaker Pro is a closed environment — logic and schema live inside a binary file, not text files.
+        Three XML formats provide the bridge between FileMaker and external tooling:
+      </p>
+      <ul>
+        <li>
+          <strong>Database Design Report (DDR)</strong> — a full solution export. An older format that Claris is moving away from; not used by this project.
+        </li>
+        <li>
+          <strong>Save a Copy as XML</strong> — the modern export format covering scripts, layouts, schema, and more. This is the format agentic-fm uses as input.
+        </li>
+        <li>
+          <strong>fmxmlsnippet</strong> — the clipboard format FileMaker uses to copy and paste individual objects. This is the output format AI uses to deliver generated code back into FileMaker.
+        </li>
+      </ul>
+    </div>
+
+    <hr class="my-12 border-zinc-200 dark:border-zinc-800" />
+
+    <div class="prose-section">
+      <h2 id="workflow">Workflow</h2>
+      <p>The core workflow is a six-step loop between FileMaker and your AI editor:</p>
+
+      <div class="mt-6 space-y-4">
+        <div class="flex gap-4">
+          <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-100 text-sm font-semibold text-primary-700 dark:bg-primary-900/30 dark:text-primary-400">1</span>
+          <div>
+            <p class="font-medium text-zinc-900 dark:text-white">Export and parse</p>
+            <p class="mt-1 text-sm text-zinc-600 dark:text-zinc-400">In FileMaker, run "Explode XML" to export and parse the current solution into <code>agent/xml_parsed/</code>.</p>
+          </div>
+        </div>
+        <div class="flex gap-4">
+          <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-100 text-sm font-semibold text-primary-700 dark:bg-primary-900/30 dark:text-primary-400">2</span>
+          <div>
+            <p class="font-medium text-zinc-900 dark:text-white">Push context</p>
+            <p class="mt-1 text-sm text-zinc-600 dark:text-zinc-400">Navigate to the target layout and run "Push Context" with a task description. This writes <code>agent/CONTEXT.json</code>.</p>
+          </div>
+        </div>
+        <div class="flex gap-4">
+          <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-100 text-sm font-semibold text-primary-700 dark:bg-primary-900/30 dark:text-primary-400">3</span>
+          <div>
+            <p class="font-medium text-zinc-900 dark:text-white">AI generates code</p>
+            <p class="mt-1 text-sm text-zinc-600 dark:text-zinc-400">AI reads <code>CONTEXT.json</code> + <code>snippet_examples</code> to generate fmxmlsnippet output in <code>agent/sandbox/</code>.</p>
+          </div>
+        </div>
+        <div class="flex gap-4">
+          <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-100 text-sm font-semibold text-primary-700 dark:bg-primary-900/30 dark:text-primary-400">4</span>
+          <div>
+            <p class="font-medium text-zinc-900 dark:text-white">Validate</p>
+            <p class="mt-1 text-sm text-zinc-600 dark:text-zinc-400"><code>validate_snippet.py</code> runs automatically to check for structural errors, missing attributes, and unbalanced blocks.</p>
+          </div>
+        </div>
+        <div class="flex gap-4">
+          <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-100 text-sm font-semibold text-primary-700 dark:bg-primary-900/30 dark:text-primary-400">5</span>
+          <div>
+            <p class="font-medium text-zinc-900 dark:text-white">Load to clipboard</p>
+            <p class="mt-1 text-sm text-zinc-600 dark:text-zinc-400"><code>clipboard.py</code> writes the validated snippet to the clipboard in the correct binary format.</p>
+          </div>
+        </div>
+        <div class="flex gap-4">
+          <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-100 text-sm font-semibold text-primary-700 dark:bg-primary-900/30 dark:text-primary-400">6</span>
+          <div>
+            <p class="font-medium text-zinc-900 dark:text-white">Paste into FileMaker</p>
+            <p class="mt-1 text-sm text-zinc-600 dark:text-zinc-400">Paste the fmxmlsnippet directly at the desired insertion point in the Script Workspace.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <hr class="my-12 border-zinc-200 dark:border-zinc-800" />
+
+    <div class="prose-section">
+      <h2 id="companion-scripts">Companion Scripts</h2>
+      <p>
+        <code>filemaker/agentic-fm.xml</code> contains three companion scripts that connect FileMaker to the toolchain.
+        Paste them into your Script Workspace to install.
+      </p>
+
+      <div class="mt-6 space-y-4">
+        <div class="rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
+          <h4 class="font-semibold text-zinc-900 dark:text-white">Get agentic-fm path</h4>
+          <p class="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+            One-time setup. Prompts you to select the repo folder and stores the path in <code>$$AGENTIC.FM</code>.
+          </p>
+        </div>
+        <div class="rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
+          <h4 class="font-semibold text-zinc-900 dark:text-white">Explode XML</h4>
+          <p class="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+            Saves a copy as XML and calls <code>fmparse.sh</code> to archive and explode it into <code>agent/xml_parsed/</code>.
+            Requires the <a href="https://www.monkeybreadsoftware.com/filemaker/" target="_blank" rel="noopener noreferrer" class="text-primary-600 underline decoration-primary-600/30 hover:decoration-primary-600 dark:text-primary-400">MBS Plugin</a> for shell execution.
+          </p>
+        </div>
+        <div class="rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
+          <h4 class="font-semibold text-zinc-900 dark:text-white">Push Context</h4>
+          <p class="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+            Prompts for a task description, calls <code>Context($task)</code>, and writes the result to <code>agent/CONTEXT.json</code>.
+            Run from whatever layout you are working on before starting an AI session.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <hr class="my-12 border-zinc-200 dark:border-zinc-800" />
+
+    <div class="prose-section">
+      <h2 id="agent-skills">Agent Skills</h2>
+      <p>
+        Skills are opt-in workflows that extend AI behavior. Invoke them naturally in conversation.
+      </p>
+
+      <div class="mt-6 overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="border-b border-zinc-200 text-left dark:border-zinc-800">
+              <th class="pb-3 pr-6 font-semibold text-zinc-900 dark:text-white">Skill</th>
+              <th class="pb-3 pr-6 font-semibold text-zinc-900 dark:text-white">What it does</th>
+              <th class="pb-3 font-semibold text-zinc-900 dark:text-white">Example triggers</th>
+            </tr>
+          </thead>
+          <tbody class="text-zinc-600 dark:text-zinc-400">
+            <tr class="border-b border-zinc-100 dark:border-zinc-800/50">
+              <td class="py-3 pr-6 font-medium text-zinc-900 dark:text-white">script-preview</td>
+              <td class="py-3 pr-6">Generates a numbered step outline for review before XML generation.</td>
+              <td class="py-3">"preview the script", "outline the steps"</td>
+            </tr>
+            <tr class="border-b border-zinc-100 dark:border-zinc-800/50">
+              <td class="py-3 pr-6 font-medium text-zinc-900 dark:text-white">script-review</td>
+              <td class="py-3 pr-6">Code review of existing scripts — logic flow, efficiency, correctness.</td>
+              <td class="py-3">"review this script", "check the logic"</td>
+            </tr>
+            <tr>
+              <td class="py-3 pr-6 font-medium text-zinc-900 dark:text-white">library-lookup</td>
+              <td class="py-3 pr-6">Searches the curated snippet library for reusable code.</td>
+              <td class="py-3">"use the HTTP request script", "add a timeout loop"</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <hr class="my-12 border-zinc-200 dark:border-zinc-800" />
+
+    <div class="prose-section">
+      <h2 id="tools">CLI Tools</h2>
+
+      <div class="mt-6 space-y-8">
+        <div>
+          <h3>fmparse.sh</h3>
+          <p>Archives a FileMaker XML export and parses it using <a href="https://github.com/bc-m/fm-xml-export-exploder" target="_blank" rel="noopener noreferrer" class="text-primary-600 underline decoration-primary-600/30 hover:decoration-primary-600 dark:text-primary-400">fm-xml-export-exploder</a>.</p>
+          <div class="mt-3 overflow-hidden rounded-lg border border-zinc-200 bg-zinc-950 dark:border-zinc-700">
+            <pre class="overflow-x-auto p-4 text-sm text-zinc-300"><code>./fmparse.sh -s "Solution Name" /path/to/export.xml [options]</code></pre>
+          </div>
+        </div>
+
+        <div>
+          <h3>fmcontext.sh</h3>
+          <p>Generates AI-optimized index files from exploded XML. Runs automatically at the end of <code>fmparse.sh</code>.</p>
+          <div class="mt-3 overflow-hidden rounded-lg border border-zinc-200 bg-zinc-950 dark:border-zinc-700">
+            <pre class="overflow-x-auto p-4 text-sm text-zinc-300"><code>./fmcontext.sh</code></pre>
+          </div>
+        </div>
+
+        <div>
+          <h3>validate_snippet.py</h3>
+          <p>Post-generation validator that checks fmxmlsnippet output for common errors. Runs automatically as part of the AI toolchain.</p>
+          <div class="mt-3 overflow-hidden rounded-lg border border-zinc-200 bg-zinc-950 dark:border-zinc-700">
+            <pre class="overflow-x-auto p-4 text-sm text-zinc-300"><code>python agent/scripts/validate_snippet.py [file_or_directory] [options]</code></pre>
+          </div>
+          <p class="mt-3">Checks include: well-formed XML, correct root element, no Script wrapper, step attributes, paired steps (If/End If, Loop/End Loop), known step names, and reference cross-checks against CONTEXT.json.</p>
+        </div>
+
+        <div>
+          <h3>clipboard.py</h3>
+          <p>Transfers fmxmlsnippet XML to/from the macOS clipboard using the correct binary descriptor classes.</p>
+          <div class="mt-3 overflow-hidden rounded-lg border border-zinc-200 bg-zinc-950 dark:border-zinc-700">
+            <pre class="overflow-x-auto p-4 text-sm text-zinc-300"><code># Write XML to clipboard (ready to paste into FileMaker)
+python agent/scripts/clipboard.py write agent/sandbox/myscript.xml
+
+# Read FM objects from clipboard to file
+python agent/scripts/clipboard.py read agent/sandbox/output.xml</code></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <hr class="my-12 border-zinc-200 dark:border-zinc-800" />
+
+    <div class="prose-section">
+      <h2 id="context-json">CONTEXT.json</h2>
+      <p>
+        Generated by the <code>Context</code> custom function in FileMaker before each script generation request.
+        Contains scoped context — only the tables, fields, layouts, scripts, relationships, and value lists relevant to the current task.
+      </p>
+      <p>The function introspects the live solution using design functions and <code>ExecuteSQL</code> queries against system tables. It automatically discovers:</p>
+      <ul>
+        <li>The current layout, its base table occurrence, and named objects</li>
+        <li>All table occurrences referenced on the layout with complete field lists</li>
+        <li>Relationship information via <code>GetTableDDL</code></li>
+        <li>All scripts, layouts, and value lists in the solution</li>
+      </ul>
+      <p>
+        Because the output is scoped to the current layout's context, AI receives exactly the information it needs without unnecessary noise.
+      </p>
+    </div>
+
+    <hr class="my-12 border-zinc-200 dark:border-zinc-800" />
+
+    <div class="prose-section">
+      <h2 id="coding-conventions">Coding Conventions</h2>
+      <p>
+        All AI-generated FileMaker code follows conventions defined in <code>agent/docs/CODING_CONVENTIONS.md</code>.
+        These cover variable naming prefixes (<code>$</code>, <code>$$</code>, <code>~</code>, <code>$$~</code>),
+        <code>Let()</code> formatting, operator spacing, boolean values, and control structure style.
+      </p>
+      <p>
+        You can — and probably should — customize these conventions to match your team's standards.
+        AI reads this file before writing any calculation or script logic and follows whatever rules you define.
+      </p>
+    </div>
+
+    <hr class="my-12 border-zinc-200 dark:border-zinc-800" />
+
+    <div class="prose-section">
+      <h2 id="reference-docs">FileMaker Reference Documentation</h2>
+      <p>
+        The <code>agent/docs/filemaker/</code> directory contains a script that fetches official FileMaker Pro reference
+        documentation from the Claris help site and converts it to Markdown. Useful for giving AI agents accurate,
+        up-to-date information about script step options, function syntax, and error codes.
+      </p>
+      <div class="mt-3 overflow-hidden rounded-lg border border-zinc-200 bg-zinc-950 dark:border-zinc-700">
+        <pre class="overflow-x-auto p-4 text-sm text-zinc-300"><code>cd agent/docs/filemaker
+python fetch_docs.py              # fetch everything
+python fetch_docs.py --steps      # script steps only
+python fetch_docs.py --functions  # functions only
+python fetch_docs.py --errors     # error codes only</code></pre>
+      </div>
+      <p class="mt-3 text-sm text-zinc-500 dark:text-zinc-500">
+        Note: Generated files are copyrighted by Claris International Inc. and excluded via .gitignore. For personal, non-commercial use only.
+      </p>
+    </div>
+  </div>
+
+  <CTA />
+</Base>
+
+<style>
+  @reference "../styles/global.css";
+  .prose-section h2 {
+    @apply text-2xl font-bold text-zinc-900 dark:text-white;
+  }
+  .prose-section h3 {
+    @apply text-lg font-semibold text-zinc-900 dark:text-white;
+  }
+  .prose-section p {
+    @apply mt-3 leading-relaxed text-zinc-600 dark:text-zinc-400;
+  }
+  .prose-section ul {
+    @apply mt-3 space-y-2 pl-5;
+  }
+  .prose-section li {
+    @apply list-disc text-zinc-600 dark:text-zinc-400;
+  }
+  .prose-section code {
+    @apply rounded bg-zinc-100 px-1.5 py-0.5 text-sm font-medium text-zinc-800 dark:bg-zinc-800 dark:text-zinc-200;
+  }
+  .prose-section pre code {
+    @apply bg-transparent p-0 font-normal text-inherit;
+  }
+  .prose-section a {
+    @apply text-primary-600 underline decoration-primary-600/30 hover:decoration-primary-600 dark:text-primary-400;
+  }
+</style>
