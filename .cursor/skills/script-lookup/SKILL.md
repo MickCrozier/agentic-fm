@@ -1,11 +1,11 @@
 ---
 name: script-lookup
-description: Locate a specific FileMaker script in the parsed XML export by script ID or script name, returning the matching `scripts_sanitized` and Save-As-XML paths (and any existing fmxmlsnippet version). Use when the user says "review/refactor/optimize/open/show" a script, mentions "script ID", or asks about a specific script by name.
+description: Locate a specific FileMaker script in the `agent/xml_parsed/` folder, resolving to the matching pair of scripts from `scripts_sanitized` - human-readable version - and the Save a Copy as XML (SaXML)  version. Use when the user says "review/refactor/optimize/open/show" a script, mentions "script ID", or asks about a specific script by name.
 ---
 
 # Script Lookup
 
-This skill targets a single script within the project's parsed FileMaker XML export and related artifacts, using either:
+This skill targets a matching pair of files within the project's parsed FileMaker XML export and related artifacts, using either:
 
 - A **numerical script ID** (preferred when provided), or
 - A **script name** (exact/contains/fuzzy match).
@@ -17,22 +17,14 @@ It returns the best match and the file paths needed to review/refactor it safely
 When invoked:
 
 1. Extract **script ID** and/or **script name** from the user's request.
-2. Look for any existing **fmxmlsnippet** version to use as an editable base.
-3. Locate the paired parsed XML artifacts:
+2. Look for any existing **fmxmlsnippet** version to use as an editable base within these locations. In-progress work may be ongoing check this folder first.
+   - `agent/sandbox`
+3. Locate the paired parsed XML artifacts. These are the original references for anything from the previous step.
    - `scripts_sanitized` (readable)
    - `scripts` (Save-As-XML reference)
-4. Output the **Script match report** (template below).
+4. Output the **Script match report** (template below) also indicating location.
 5. Use `AskQuestion` to confirm this is the intended target script (see **Confirmation step** below).
 6. If confirmed and the user asked to **review/refactor/optimize**, proceed with the handoff workflow.
-
-## Where to look (precedence)
-
-There are multiple representations of "the same script" in this repo.
-
-### Preferred bases for edits (fmxmlsnippet)
-
-- `agent/sandbox/` (working copy for the current task)
-- `agent/scripts/` (stored fmxmlsnippet scripts, if present)
 
 ### Parsed XML artifacts (read-only reference)
 
@@ -66,7 +58,9 @@ Normalize name hints:
 Follow this order and stop at the first **high confidence** match:
 
 1. **ID match** (highest confidence)
-   - Find a script with that ID (often encoded in filenames like `... - ID 123...`).
+   - Find a script with that ID (The file name will always include the id such as `... - ID 123$`).
+   - Use `fd` first if avaiable.
+   - Use a variation of `find . -type f -name "*103*"` within the `agent/xml_parsed` and modify find as needed.
 2. **Exact name match** (case-insensitive)
 3. **Contains match** (all tokens present in candidate name)
 4. **Fuzzy match** (rank candidates; return top 3–5)
@@ -112,8 +106,8 @@ After presenting the Script match report, **always** use `AskQuestion` to confir
 
 Present a single question with the following structure:
 
-- **Prompt**: Include the script name and ID, e.g.:
-  `"Is this the correct script? — Script Name (ID: 123)"`
+- **Prompt**: Include the script name, ID and enclosing folder, e.g.:
+  `"Is this the correct script? — Script Name (ID: 123) in xml_parsed/scripts"`
 - **Options**:
   - `yes` — "Yes, proceed"
   - `no` — "No, that's not it — let me clarify"
