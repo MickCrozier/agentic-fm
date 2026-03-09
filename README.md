@@ -37,13 +37,13 @@ See **[filemaker/README.md](filemaker/README.md)** for the full dependency list 
 2. **Install the companion scripts** — load `filemaker/agentic-fm.xml` onto the clipboard using the `clipboard.py write` command, then paste into the Script Workspace in FileMaker:
 
    ```bash
-   python agent/scripts/clipboard.py write filemaker/agentic-fm.xml
+   python3 agent/scripts/clipboard.py write filemaker/agentic-fm.xml
    ```
 
 3. **Start the companion server** — the companion server is a lightweight HTTP server that FileMaker calls via `Insert from URL` to run shell commands. Start it before running FileMaker companion scripts:
 
    ```bash
-   python agent/scripts/companion_server.py
+   python3 agent/scripts/companion_server.py
    ```
 
    The server listens on port 8765 by default. Keep it running in a terminal while you work.
@@ -57,7 +57,7 @@ See **[filemaker/README.md](filemaker/README.md)** for the full dependency list 
 # ⚡ Workflow
 
 ```
-0. Start companion server: python agent/scripts/companion_server.py (keep running in background)
+0. Start companion server: python3 agent/scripts/companion_server.py (keep running in background)
 1. In FileMaker, run "Explode XML" to export and parse the current solution into agent/xml_parsed/
 2. Navigate to the target layout and run "Push Context" with a task description → writes agent/CONTEXT.json
 3. AI reads CONTEXT.json + step catalog to generate fmxmlsnippet output in agent/sandbox/
@@ -202,7 +202,7 @@ A keyword-indexed manifest at `agent/docs/knowledge/MANIFEST.md` enables fast lo
 | **Explode XML**         | Saves a copy of the current solution as XML and calls `fmparse.sh` via the companion server to archive and explode it into `agent/xml_parsed/`. Run this whenever the solution schema or scripts change.                     |
 | **Push Context**        | Prompts for a task description, calls `Context($task)`, and writes the result directly to `agent/CONTEXT.json`. The generated context includes a `generated_at` timestamp for staleness detection. Run this from whatever layout you are working on before starting an AI scripting session. |
 
-**Requirement:** The **Explode XML** script communicates with `agent/scripts/companion_server.py` via `Insert from URL`. Start the companion server before running this script (`python agent/scripts/companion_server.py`, port 8765). The other two scripts use only native FileMaker steps.
+**Requirement:** The **Explode XML** script communicates with `agent/scripts/companion_server.py` via `Insert from URL`. Start the companion server before running this script (`python3 agent/scripts/companion_server.py`, port 8765). The other two scripts use only native FileMaker steps.
 
 # fmparse.sh
 
@@ -284,7 +284,7 @@ A post-generation validation tool that checks `fmxmlsnippet` output for common e
 **Usage:**
 
 ```bash
-python agent/scripts/validate_snippet.py [file_or_directory] [options]
+python3 agent/scripts/validate_snippet.py [file_or_directory] [options]
 ```
 
 With no arguments it validates all files in `agent/sandbox/`. It auto-detects `agent/CONTEXT.json` when present.
@@ -339,11 +339,11 @@ The `agent/docs/filemaker/` directory contains a script that fetches the officia
 
 ```bash
 cd agent/docs/filemaker
-python fetch_docs.py              # fetch everything
-python fetch_docs.py --steps      # script steps only
-python fetch_docs.py --functions  # functions only
-python fetch_docs.py --errors     # error codes only
-python fetch_docs.py --force      # re-download cached files
+python3 fetch_docs.py              # fetch everything
+python3 fetch_docs.py --steps      # script steps only
+python3 fetch_docs.py --functions  # functions only
+python3 fetch_docs.py --errors     # error codes only
+python3 fetch_docs.py --force      # re-download cached files
 ```
 
 **Outputs** (written relative to `agent/docs/filemaker/`):
@@ -362,8 +362,8 @@ See [filemaker/README.md](filemaker/README.md) for full installation instruction
 
 - **[fm-xml-export-exploder](https://github.com/bc-m/fm-xml-export-exploder/releases/latest)** — required by `fmparse.sh` and the **Explode XML** FileMaker script. Place the binary at `~/bin/fm-xml-export-exploder` or set `FM_XML_EXPLODER_BIN` to the full path.
 - **xmllint** — required by `fmcontext.sh`. Ships with macOS via libxml2. On Linux: `apt-get install libxml2-utils`.
-- **Python 3** — required by `clipboard.py`, `validate_snippet.py`, and `companion_server.py`. All three use stdlib only; no virtualenv is needed. Run directly with `python agent/scripts/...`.
-- **companion_server.py** — lightweight HTTP server on port 8765 that FileMaker calls via `Insert from URL` to run shell commands. Replaces the MBS FileMaker Plugin for shell execution. Start with `python agent/scripts/companion_server.py`.
+- **Python 3** — required by `clipboard.py`, `validate_snippet.py`, and `companion_server.py`. All three use stdlib only; no virtualenv is needed. Run directly with `python3 agent/scripts/...`. macOS ships Python 3 at `/usr/bin/python3`; for a newer version install via [Homebrew](https://brew.sh): `brew install python`.
+- **companion_server.py** — lightweight HTTP server on port 8765 that FileMaker calls via `Insert from URL` to run shell commands. Replaces the MBS FileMaker Plugin for shell execution. Start with `python3 agent/scripts/companion_server.py`.
 - **MBS FileMaker Plugin** _(legacy)_ — no longer required. Older installations that still use MBS for shell execution will continue to work, but new setups should use `companion_server.py` instead.
 - **Node.js 18+** — required by the webviewer (`webviewer/`). Optional if you only use the CLI/IDE workflow.
 
