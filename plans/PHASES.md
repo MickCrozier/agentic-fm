@@ -28,10 +28,78 @@ git worktree remove /worktrees/schema-build
 | `planned` | Scoped in VISION.md, not yet started |
 | `active` | Worktree exists, work in progress |
 | `merged` | Branch merged to main, worktree removed |
+| `future` | Identified in VISION.md, deferred to a future cycle |
 
 ---
 
-## Phase 1 — Layout Design & XML2 Generation
+## Prerequisites
+
+### Snapshot Testing
+
+Before launching any phase, establish a lightweight snapshot test harness that validates generated XML against known-good examples. This replaces FileMaker paste-testing as the primary development-time validation gate. FM paste-testing remains the final validation step before merge.
+
+**Scope**:
+- Test framework that compares generated fmxmlsnippet output against snapshot files
+- Snapshot fixtures for each step type used by existing skills
+- Integration with `validate_snippet.py` as a baseline check
+- Run as a pre-merge gate for every phase branch
+
+### Deployment Module (automation tiers)
+
+Build the pluggable deployment module described in `VISION.md` → Automation Tiers. This is cross-cutting infrastructure consumed by every skill that produces fmxmlsnippet output, so it must exist before Phase 1.
+
+**Scope**:
+- `agent/scripts/deploy.py` (or similar) — a thin dispatcher that selects the deployment tier at runtime
+- **Tier 1 (universal)**: load clipboard via `clipboard.py write`, print paste instructions
+- **Tier 2 (MBS)**: generate a FileMaker script that calls `Clipboard.SetFileMakerData` + `ScriptWorkspace.OpenScript` + `Menubar.RunMenuCommand(57637)` to auto-paste
+- **Tier 3 (MBS + AppleScript)**: additionally create scripts via AppleScript UI automation before pasting
+- Tier detection: check for MBS availability (via OData script call or developer config), check Accessibility permission
+- Developer opt-in: a config setting (e.g. `agent/config/automation.json`) that controls the default tier and allows per-invocation override
+- Every skill calls the deployment module after validation; the module handles the tier-appropriate workflow
+
+**Design constraint**: Tier 1 must always work. Tiers 2 and 3 are enhancements — if they fail, the module falls back to Tier 1 and reports what happened. No skill should break because a plugin is missing or Accessibility access is denied.
+
+---
+
+## Phase 1 — Multi-Script Scaffold
+
+**Status**: `planned`
+**Branch**: `feature/multi-script`
+**Worktree**: `/worktrees/multi-script`
+**Vision ref**: What Makes This Hard → Untitled Placeholder Technique; Skills → `multi-script-scaffold`
+
+This is the proof-of-concept phase. It validates the worktree workflow, skill authoring process, and FM integration loop with a low-risk, self-contained skill before scaling up.
+
+**Scope**:
+- Implement the `multi-script-scaffold` skill — calculate placeholder count, guide creation, capture IDs via Push Context, generate all scripts in one pass with correct Perform Script wiring, walk developer through renames
+- Integrate with `context-refresh` to capture Untitled script IDs before generation
+- Integrate with the deployment module — at Tier 1 the developer pastes each script manually; at Tier 2 MBS auto-pastes into each placeholder; at Tier 3 AppleScript creates the placeholders and MBS pastes, fully autonomous
+- Test against a 3-script and a 5-script interdependent system
+
+---
+
+## Phase 2 — Script Tooling Expansion
+
+**Status**: `planned`
+**Branch**: `feature/script-tooling`
+**Worktree**: `/worktrees/script-tooling`
+**Vision ref**: Skills → `script-refactor`, `script-test`, `script-debug`, `implementation-plan`
+
+**Scope**:
+- Complete the `script-refactor` skill
+- Complete the `script-test` skill — companion verification script via `fm-debug`
+- Complete the `script-debug` skill — systematic reproduce/isolate/fix workflow
+- Complete the `implementation-plan` skill — decompose requirements before generation
+
+**Prerequisite**: Confirm `fm-debug` skill is stable before starting `script-test`.
+
+---
+
+## Phase 3 — Layout Design & OData Schema (parallel pair)
+
+Two independent workstreams that can run concurrently once Phases 1–2 have validated the workflow.
+
+### Phase 3a — Layout Design & XML2 Generation
 
 **Status**: `planned`
 **Branch**: `feature/layout-design`
@@ -46,92 +114,32 @@ git worktree remove /worktrees/schema-build
 
 **Explicitly out of scope**: Layout container creation (permanently manual), responsive design for native FM layouts.
 
----
-
-## Phase 2 — OData Schema Tooling
+### Phase 3b — OData Schema Tooling
 
 **Status**: `planned`
 **Branch**: `feature/schema-tooling`
 **Worktree**: `/worktrees/schema-tooling`
-**Vision ref**: Tooling Infrastructure → Field Definition and Schema Reference; Skills → `schema-plan`, `schema-build`, `relationship-spec`, `odata-connect`
+**Vision ref**: Tooling Infrastructure → Field Definition and Schema Reference; Skills → `schema-plan`, `schema-build`
 
 **Scope**:
-- Complete the `odata-connect` skill — Docker-hosted FM Server setup walkthrough
 - Complete the `schema-plan` skill — ERD as Mermaid in `plans/schema/`, extended to FM table occurrences
-- Complete the `schema-build` skill — OData REST calls to create tables and fields transactionally
-- Complete the `relationship-spec` skill — precise click-through checklist for the developer
+- Complete the `schema-build` skill — a single skill with sub-modes covering OData connection setup, table/field creation via OData REST calls, and relationship specification output as a click-through checklist
 - Validate OData field type mappings against live FM Server responses
 
 **Explicitly out of scope**: Relationship creation via API (permanently manual).
 
----
-
-## Phase 3 — Multi-Script Scaffold
-
-**Status**: `planned`
-**Branch**: `feature/multi-script`
-**Worktree**: `/worktrees/multi-script`
-**Vision ref**: What Makes This Hard → Untitled Placeholder Technique; Skills → `multi-script-scaffold`
-
-**Scope**:
-- Implement the `multi-script-scaffold` skill — calculate placeholder count, guide creation, capture IDs via Push Context, generate all scripts in one pass with correct Perform Script wiring, walk developer through renames
-- Integrate with `context-refresh` to capture Untitled script IDs before generation
-- Test against a 3-script and a 5-script interdependent system
+**Note**: The original plan had `odata-connect`, `schema-build`, and `relationship-spec` as three separate skills. These are combined into a single `schema-build` skill with sub-modes to reduce interface overhead for what is a single sequential workflow.
 
 ---
 
-## Phase 4 — Script Tooling Expansion
-
-**Status**: `planned`
-**Branch**: `feature/script-tooling`
-**Worktree**: `/worktrees/script-tooling`
-**Vision ref**: Skills → `script-refactor`, `script-test`, `script-debug`, `implementation-plan`
-
-**Scope**:
-- Complete the `script-refactor` skill
-- Complete the `script-test` skill — companion verification script via `fm-debug`
-- Complete the `script-debug` skill — systematic reproduce/isolate/fix workflow
-- Complete the `implementation-plan` skill — decompose requirements before generation
-
----
-
-## Phase 5 — Solution-Level Skills
-
-**Status**: `planned`
-**Branch**: `feature/solution-level`
-**Worktree**: `/worktrees/solution-level`
-**Vision ref**: Skills → `solution-blueprint`, `solution-audit`, `solution-docs`, `function-create`, `privilege-design`
-
-**Scope**:
-- Complete the `solution-blueprint` skill — full ordered build sequence from plain-English description
-- Complete the `solution-audit` skill — technical debt, naming, anti-pattern analysis
-- Complete the `solution-docs` skill — auto-generated documentation from xml_parsed
-- Complete the `function-create` skill — custom function generation
-- Complete the `privilege-design` skill — privilege sets and account structure
-
----
-
-## Phase 6 — Web Migration
-
-**Status**: `planned`
-**Branch**: `feature/migrate-web`
-**Worktree**: `/worktrees/migrate-web`
-**Vision ref**: Tooling Infrastructure → Migration Tooling; Skills → `migrate-out`
-
-**Scope**:
-- Complete the `migrate-out` skill — DDR XML → SQL schema, REST API design, UI component specs
-- Build on and extend the `migrate-filemaker` open-source foundation
-- Develop opinionated patterns for React + Supabase and Next.js full-stack target stacks
-- WebDirect HTML capture as supplementary UI reference
-
----
-
-## Phase 7 — Data Tooling
+## Phase 4 — Data Tooling
 
 **Status**: `planned`
 **Branch**: `feature/data-tooling`
 **Worktree**: `/worktrees/data-tooling`
 **Vision ref**: Skills → `data-seed`, `data-migrate`
+
+**Depends on**: Phase 3b (OData Schema Tooling)
 
 **Scope**:
 - Complete the `data-seed` skill — realistic seed/test data via OData
@@ -139,13 +147,45 @@ git worktree remove /worktrees/schema-build
 
 ---
 
-## Phase 8 — Native & Inbound Migration
+## Future Potential
 
-**Status**: `planned`
-**Branch**: `feature/migrate-native-in`
-**Worktree**: `/worktrees/migrate-native-in`
+The following phases are identified in `VISION.md` but deferred to a future cycle. They depend on the current phases being complete and stable, and some represent a different product category (migration) that should not compete for attention with core FM development skills.
+
+### Solution-Level Skills
+
+**Status**: `future`
+**Vision ref**: Skills → `solution-blueprint`, `solution-audit`, `solution-docs`, `function-create`, `privilege-design`
+
+**Depends on**: All current phases merged and stable.
+
+`solution-blueprint` is the most ambitious skill in the roadmap — it orchestrates multiple sub-skills in sequence. When implemented, it should ship first as a **planning-only skill** that produces a build sequence document and guides the developer through manual invocations of each sub-skill. Full orchestration can follow once all sub-skills are proven stable.
+
+**Scope** (when activated):
+- `solution-blueprint` — full ordered build sequence from plain-English description (planning-only v1)
+- `solution-audit` — technical debt, naming, anti-pattern analysis
+- `solution-docs` — auto-generated documentation from xml_parsed
+- `function-create` — custom function generation
+- `privilege-design` — privilege sets and account structure
+
+### Web Migration
+
+**Status**: `future`
+**Vision ref**: Tooling Infrastructure → Migration Tooling; Skills → `migrate-out`
+
+Migration out of FileMaker is a different product category from core FM development assistance. While there is demand for it, the developers using agentic-fm are primarily building in FileMaker. Deferred until core skills are mature.
+
+**Scope** (when activated):
+- `migrate-out` — DDR XML → SQL schema, REST API design, UI component specs
+- Build on the `migrate-filemaker` open-source foundation
+- Opinionated patterns for React + Supabase and Next.js target stacks
+
+### Native & Inbound Migration
+
+**Status**: `future`
 **Vision ref**: Skills → `migrate-native`, `migrate-in`
 
-**Scope**:
-- Complete the `migrate-native` skill — FM layout XML → SwiftUI/UIKit Xcode project
-- Complete the `migrate-in` skill — SQL DDL / ORM / spreadsheet → FM via OData + clipboard
+**Depends on**: Layout Design (Phase 3a) + OData Schema (Phase 3b).
+
+**Scope** (when activated):
+- `migrate-native` — FM layout XML → SwiftUI/UIKit Xcode project
+- `migrate-in` — SQL DDL / ORM / spreadsheet → FM via OData + clipboard

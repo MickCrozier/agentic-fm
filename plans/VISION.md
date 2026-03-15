@@ -194,6 +194,106 @@ FileMaker's closed nature creates specific challenges that shape how this projec
 4. **Runtime observation requires explicit instrumentation**: The agent cannot run scripts or observe FM state directly. Three feedback loops bridge this gap: **Push Context** (current layout state → `CONTEXT.json`), **Explode XML** (full solution → `xml_parsed/`), and **Agentic-fm Debug** (runtime state → `debug/output.json`). When the developer has set up an OData connection to the hosted solution, the agent can trigger these scripts programmatically via `POST /fmi/odata/v4/{database}/Script/{ScriptName}` — closing the loop without any manual step. Without OData, the developer runs them manually in FM Pro.
 5. **XML format complexity**: The fmxmlsnippet format has its own rules distinct from FileMaker's internal XML. The step catalog and snippet examples codify these rules.
 
+## Automation Tiers — Pluggable Deployment
+
+The core workflow described in [The Bridge](#the-bridge) positions the developer as the deployment mechanism: the agent generates XML, `clipboard.py` loads it, and the developer pastes with `⌘V`. This works universally and has no dependencies.
+
+However, two macOS-specific technologies can progressively automate the paste step, reducing or eliminating human involvement for script operations. **These are optional modules, not core dependencies.** Every skill must work without them; when present, they accelerate the workflow.
+
+### Tier 1: Clipboard (universal, no dependencies)
+
+The current default. The agent generates fmxmlsnippet XML, `clipboard.py` writes it to the clipboard, and the developer pastes it into the appropriate FileMaker workspace. Works on macOS and Windows, requires no plugins, and is the universal fallback for every operation.
+
+```
+Agent generates XML  →  clipboard.py writes to clipboard  →  Developer pastes (⌘V)
+```
+
+### Tier 2: MBS Plugin (macOS, requires commercial plugin)
+
+The [MBS Plugin](https://www.mbsplugins.eu/) (~€228/year) provides 32 ScriptWorkspace functions that give programmatic access to FileMaker's Script Workspace. The critical capability: **automated paste into existing scripts without human intervention.**
+
+The pattern:
+
+```
+1. MBS("Clipboard.SetFileMakerData"; "ScriptStep"; $xml)    // load XML to clipboard
+2. MBS("ScriptWorkspace.OpenScript"; "TargetScript")         // navigate to script
+3. MBS("ScriptWorkspace.SelectLine"; -1)                     // position cursor
+4. MBS("Menubar.RunMenuCommand"; 57637)                      // trigger Paste
+```
+
+Key MBS capabilities for agent workflows:
+
+| Function | What it enables |
+|---|---|
+| `ScriptWorkspace.OpenScript` | Navigate to any script by name (with folder support) |
+| `ScriptWorkspace.SelectLine` / `SelectLines` | Position cursor or select a range for replacement |
+| `ScriptWorkspace.ScriptText` | Read back script content for verification |
+| `ScriptWorkspace.ScriptNames` / `ScriptPaths` | Discover all scripts in the solution |
+| `ScriptWorkspace.SetScriptListSearch` | Search the script list programmatically |
+| `ScriptWorkspace.SetFocusToScriptList` | Ensure focus is correct before paste |
+| `Clipboard.SetFileMakerData` | Write fmxmlsnippet XML to clipboard in FM's binary format (**works on Mac and Windows**) |
+| `Menubar.RunMenuCommand` | Trigger any FM menu command by ID (**works on Mac and Windows**) |
+| `SyntaxColoring.AddContextMenuCommand` | Install custom right-click commands in the Script Workspace |
+
+Constraints:
+- `ScriptWorkspace.*` functions are **macOS only** (Clipboard and Menubar functions work cross-platform)
+- **Cannot create new scripts** — can only paste into existing ones
+- **Cannot rename, delete, or reorder scripts**
+- **Paste cannot execute while a FM script is running** — must use `Schedule.EvaluateAfterDelay` to defer execution until the triggering script exits and the workspace regains focus
+
+### Tier 3: MBS + macOS Accessibility / AppleScript (macOS, requires plugin + Accessibility permission)
+
+macOS Accessibility APIs (AXUIElement) expose FileMaker Pro's UI elements — windows, menus, buttons, tabs, text fields — to programmatic control via AppleScript or JXA. This fills the gaps that MBS cannot cover.
+
+What AppleScript adds beyond MBS:
+- **Create new scripts** — `Cmd+N` in the Script Workspace, type name, Enter
+- **Create and rename script folders**
+- **Navigate Manage Database dialogs** — Tables and Fields tabs (feasible but complex)
+- **Navigate Manage Custom Functions** — proven by [FmClipTools](https://github.com/DanShockley/FmClipTools), an existing MIT-licensed toolkit
+- **Trigger any keyboard shortcut** — save (`Cmd+S`), run (`Cmd+R`), duplicate (`Cmd+D`)
+
+Constraints:
+- **Fragile** — sensitive to FM version changes, element naming, timing, and modal dialogs
+- The controlling application must be granted Accessibility access in System Settings
+- **Cannot automate the relationship graph** — it's a custom-rendered canvas, not individual accessible elements
+- **Cannot reliably automate layout object placement** — spatial positioning is too brittle
+- **Cannot automate drag-and-drop operations**
+- Process name has changed across FM versions ("FileMaker Pro" vs "FileMaker Pro Advanced" vs "Claris FileMaker Pro") — use bundle identifier for resilience
+
+### The pluggable deployment model
+
+Skills should not hardcode a deployment tier. Instead, every skill that produces fmxmlsnippet output follows a common pattern:
+
+1. **Generate** — produce XML to `agent/sandbox/`
+2. **Validate** — run `validate_snippet.py`
+3. **Deploy** — call the deployment module, which selects the appropriate tier:
+   - If MBS + AppleScript are available and the developer has opted in to full automation: create scripts if needed (AppleScript), navigate + paste (MBS), verify (MBS read-back or Explode XML)
+   - If MBS is available: navigate + paste into existing scripts (MBS), developer handles script creation
+   - If neither: load clipboard (`clipboard.py write`), instruct developer to paste
+
+The deployment tier is a **runtime decision**, not a build-time one. A developer can opt in to full automation for a multi-script scaffold workflow and fall back to manual paste for a one-off script fix. The agent should ask once per session (or read from a config) and adjust its instructions accordingly.
+
+This model means the Untitled Placeholder Technique described above becomes a spectrum:
+
+| Tier | Script creation | Paste | Verification |
+|---|---|---|---|
+| Tier 1 | Developer clicks **+** N times | Developer pastes (`⌘V`) | Developer confirms |
+| Tier 2 | Developer clicks **+** N times | MBS auto-pastes | MBS reads back script text |
+| Tier 3 | AppleScript creates N scripts | MBS auto-pastes | MBS reads back + Explode XML |
+
+At Tier 3, the full multi-script scaffold workflow — from "build me an invoicing system with 5 scripts" to verified scripts in the Script Workspace — requires no human intervention beyond approval.
+
+### MBS menu command IDs (reference)
+
+| ID | Command |
+|---|---|
+| 57634 | Copy |
+| 57635 | Cut |
+| 57637 | Paste |
+| 57632 | Delete |
+| 57642 | Select All |
+| 49182 | Duplicate |
+
 ## Skills
 
 Skills are the primary unit of capability in agentic-fm. Each skill is a focused, invocable workflow that the agent executes on demand. Together they form the toolkit the agent uses to cover the full scope of FileMaker development described in this vision.
@@ -337,13 +437,20 @@ Other migration paths — layout XML to SwiftUI/UIKit for native iOS/macOS, and 
 
 ### Skill Expansion Sequence
 
-The natural build order for new skills, based on dependency and demand:
+The build order for new skills, based on dependency, demand, and a gradual confidence-building approach. See `plans/PHASES.md` for the active implementation schedule and `plans/IMPLEMENTATION.md` for execution details.
 
-1. **Layout design + XML2 generation** — unlocks the full UI authoring workflow
-2. **OData schema tooling** — unlocks programmatic table/field creation for new solutions
-3. **Web migration skill** — highest-demand migration path, existing open-source foundation to build on
-4. **Native app migration skill** — layout XML → SwiftUI/UIKit, secondary priority
-5. **Inbound migration skill** — external schema/logic → FileMaker, tertiary priority
+**Current implementation cycle:**
+
+1. **Multi-script scaffold** — proof-of-concept; validates the workflow with the lowest-risk skill
+2. **Script tooling** (refactor, test, debug, implementation-plan) — expands core script development capabilities
+3. **Layout design + XML2 generation** and **OData schema tooling** — parallel pair; unlocks UI authoring and programmatic schema creation
+4. **Data tooling** (seed, migrate) — completes the data lifecycle via OData
+
+**Future potential** (deferred until core skills are mature):
+
+5. **Solution-level skills** — orchestration, auditing, documentation, custom functions, privilege design
+6. **Web migration** — highest-demand migration path, existing open-source foundation to build on
+7. **Native & inbound migration** — layout XML → SwiftUI/UIKit; external schema → FileMaker
 
 ## The Path Forward
 

@@ -1,6 +1,6 @@
 # Skill Interface Contracts
 
-Defines the agreed interfaces between skills — trigger phrases, inputs, outputs, and inter-skill dependencies. All Wave 1 agents must treat this document as authoritative before authoring any skill that calls or is called by another.
+Defines the agreed interfaces between skills — trigger phrases, inputs, outputs, and inter-skill dependencies. Agents must treat this document as authoritative before authoring any skill that calls or is called by another.
 
 ---
 
@@ -13,26 +13,34 @@ Defines the agreed interfaces between skills — trigger phrases, inputs, output
 
 ---
 
-## Setup & Connectivity
+## Infrastructure
 
-### `odata-connect`
+### Deployment module
 
-**Trigger phrases**: "set up OData", "connect OData", "configure OData", "OData walkthrough"
+Not a skill (not invoked by trigger phrase). A shared module (`agent/scripts/deploy.py`) called by every skill that produces fmxmlsnippet output. Documented here because it defines the interface between skills and the FileMaker deployment target.
 
-**Inputs**:
-- Developer has FileMaker Server running (Docker or native)
-- Database file name
+**Interface**:
+- **Input**: path to validated fmxmlsnippet XML file in `agent/sandbox/`, target script name (optional), deployment tier override (optional)
+- **Output**: deployment result — success/failure, tier used, verification result (if Tier 2/3)
+- **Behaviour by tier**:
+  - **Tier 1** (universal): runs `clipboard.py write`, prints paste instructions to the developer
+  - **Tier 2** (MBS): triggers a FileMaker script (via OData or developer) that calls `Clipboard.SetFileMakerData` + `ScriptWorkspace.OpenScript` + `Menubar.RunMenuCommand(57637)` to auto-paste, then reads back via `ScriptWorkspace.ScriptText` to verify
+  - **Tier 3** (MBS + AppleScript): additionally creates new scripts via AppleScript UI automation before pasting
+- **Tier selection**: reads `agent/config/automation.json` for the developer's default preference; skills can pass a tier override; if the requested tier fails, falls back to Tier 1
+- **Config format** (`agent/config/automation.json`):
+  ```json
+  {
+    "default_tier": 1,
+    "mbs_available": false,
+    "accessibility_granted": false
+  }
+  ```
 
-**Outputs**:
-- Developer has verified OData connectivity
-- Account with `fmodata` extended privilege confirmed
-- No file artifact — this is a guided walkthrough skill
-
-**Calls**: none
-
-**Called by**: `schema-build`, `data-seed`, `data-migrate`
+**Design constraint**: Tier 1 must always work. No skill should fail because a higher tier is unavailable.
 
 ---
+
+## Setup & Connectivity
 
 ### `context-refresh`
 
@@ -62,7 +70,7 @@ Defines the agreed interfaces between skills — trigger phrases, inputs, output
 
 **Calls**: none
 
-**Called by**: `solution-audit`, `solution-docs`, `migrate-out`, `migrate-native`
+**Called by**: `solution-audit` (future), `solution-docs` (future), `migrate-out` (future), `migrate-native` (future)
 
 ---
 
@@ -82,42 +90,34 @@ Defines the agreed interfaces between skills — trigger phrases, inputs, output
 
 **Calls**: none
 
-**Called by**: `solution-blueprint`
+**Called by**: `solution-blueprint` (future)
 
 ---
 
 ### `schema-build`
 
-**Trigger phrases**: "build schema", "create tables", "create fields", "run schema"
+**Trigger phrases**: "build schema", "create tables", "create fields", "run schema", "set up OData", "connect OData", "configure OData", "OData walkthrough", "relationship spec", "specify relationships", "define relationships", "relationship checklist"
+
+A single skill with three sub-modes covering OData connection setup, schema creation, and relationship specification. This consolidates what was originally three separate skills (`odata-connect`, `schema-build`, `relationship-spec`) into one workflow to reduce interface overhead.
 
 **Inputs**:
 - `plans/schema/{solution-name}-fm-model.md` produced by `schema-plan`
-- OData connection verified (`odata-connect` completed)
-- FM database name and OData base URL
+- FM database name and server details (for OData connection)
 
 **Outputs**:
+- OData connectivity verified (account with `fmodata` extended privilege confirmed)
 - Tables and fields created in live FM solution via OData
 - `plans/schema/{solution-name}-build-log.md` — record of what was created
-
-**Calls**: `odata-connect` (if connection not yet verified)
-
-**Called by**: `solution-blueprint`
-
----
-
-### `relationship-spec`
-
-**Trigger phrases**: "relationship spec", "specify relationships", "define relationships", "relationship checklist"
-
-**Inputs**:
-- `plans/schema/{solution-name}-fm-model.md`
-
-**Outputs**:
 - `plans/schema/{solution-name}-relationships.md` — click-through checklist: TO names, join fields, cardinality, cascade delete settings
+
+**Sub-modes**:
+- **connect** — walk developer through OData setup (Docker-hosted FM Server, account and privilege setup, SSL handling, connection verification)
+- **build** — execute table and field creation via OData REST calls, with transactional batching
+- **relationships** — derive relationship specification from the FM model: TO names, join fields, cardinality, cascade delete settings, formatted as a click-through checklist
 
 **Calls**: none
 
-**Called by**: `solution-blueprint`
+**Called by**: `solution-blueprint` (future)
 
 ---
 
@@ -130,15 +130,19 @@ Defines the agreed interfaces between skills — trigger phrases, inputs, output
 **Inputs**:
 - Description of the script system to build (number of scripts, interdependencies)
 - Developer has FM Pro open
+- Deployment tier preference (optional — defaults to `agent/config/automation.json`)
 
 **Outputs**:
-- Instruction to developer: how many Untitled placeholders to create
-- After `context-refresh`: all N scripts generated as fmxmlsnippet in `agent/sandbox/`
-- Rename checklist for the developer
+- All N scripts generated as fmxmlsnippet in `agent/sandbox/`
+- Deployment via the deployment module, tier-dependent:
+  - **Tier 1**: instruction to developer on how many placeholders to create, paste instructions per script, rename checklist
+  - **Tier 2**: instruction to developer on how many placeholders to create; MBS auto-pastes into each; rename checklist
+  - **Tier 3**: AppleScript creates N scripts automatically; MBS auto-pastes into each; agent renames via AppleScript; developer approves
+- Rename checklist (Tiers 1–2) or verification summary (Tier 3)
 
-**Calls**: `context-refresh` (to capture Untitled script IDs)
+**Calls**: `context-refresh` (to capture script IDs), deployment module (for output)
 
-**Called by**: `solution-blueprint`
+**Called by**: `solution-blueprint` (future)
 
 ---
 
@@ -156,7 +160,7 @@ Defines the agreed interfaces between skills — trigger phrases, inputs, output
 
 **Calls**: none
 
-**Called by**: `solution-blueprint`, `script-refactor`, `multi-script-scaffold`
+**Called by**: `script-refactor`, `multi-script-scaffold`, `solution-blueprint` (future)
 
 ---
 
@@ -174,7 +178,7 @@ Defines the agreed interfaces between skills — trigger phrases, inputs, output
 
 **Calls**: `script-lookup` (if target script not already in sandbox), `implementation-plan`
 
-**Called by**: `solution-audit`
+**Called by**: `solution-audit` (future)
 
 ---
 
@@ -231,7 +235,7 @@ Defines the agreed interfaces between skills — trigger phrases, inputs, output
 
 **Calls**: none
 
-**Called by**: `solution-blueprint`
+**Called by**: `solution-blueprint` (future)
 
 ---
 
@@ -247,7 +251,7 @@ Defines the agreed interfaces between skills — trigger phrases, inputs, output
 
 **Calls**: none
 
-**Called by**: `solution-blueprint`, `layout-design`
+**Called by**: `layout-design`, `solution-blueprint` (future)
 
 ---
 
@@ -265,11 +269,55 @@ Defines the agreed interfaces between skills — trigger phrases, inputs, output
 
 **Calls**: none
 
-**Called by**: `solution-blueprint`
+**Called by**: `solution-blueprint` (future)
 
 ---
 
-## Custom Functions & Configuration
+## Data
+
+### `data-seed`
+
+**Trigger phrases**: "seed data", "test data", "populate solution", "generate records"
+
+**Inputs**:
+- Schema exists in live FM solution
+- OData connection verified (via `schema-build` connect sub-mode)
+- Description of data volume and realism requirements
+
+**Outputs**:
+- Records created in live FM solution via OData
+- Summary of what was seeded
+
+**Calls**: none
+
+**Called by**: none (entry point skill)
+
+---
+
+### `data-migrate`
+
+**Trigger phrases**: "migrate data", "import records", "move data into FileMaker"
+
+**Inputs**:
+- Source data (CSV, SQL dump, JSON, API)
+- Field mapping between source and FM fields
+- OData connection verified (via `schema-build` connect sub-mode)
+
+**Outputs**:
+- Records created in live FM solution via OData
+- Migration summary with error count and field mapping log
+
+**Calls**: none
+
+**Called by**: none (entry point skill)
+
+---
+
+## Future Potential
+
+The following skill interfaces are defined for completeness but are **not part of the current implementation cycle**. They will be activated when the current phases are merged and stable. See `plans/PHASES.md` for status.
+
+---
 
 ### `function-create`
 
@@ -284,7 +332,7 @@ Defines the agreed interfaces between skills — trigger phrases, inputs, output
 
 **Calls**: none
 
-**Called by**: `solution-blueprint`
+**Called by**: `solution-blueprint` (future)
 
 ---
 
@@ -301,11 +349,9 @@ Defines the agreed interfaces between skills — trigger phrases, inputs, output
 
 **Calls**: none
 
-**Called by**: `solution-blueprint`
+**Called by**: `solution-blueprint` (future)
 
 ---
-
-## Solution-Level
 
 ### `solution-blueprint`
 
@@ -318,9 +364,11 @@ Defines the agreed interfaces between skills — trigger phrases, inputs, output
 - Ordered build sequence document in `plans/`
 - Calls sub-skills in sequence to produce all artifacts
 
-**Calls**: `schema-plan`, `schema-build`, `relationship-spec`, `multi-script-scaffold`, `function-create`, `layout-spec`, `layout-design`, `webviewer-build`, `privilege-design`
+**Calls**: `schema-plan`, `schema-build`, `multi-script-scaffold`, `function-create`, `layout-spec`, `layout-design`, `webviewer-build`, `privilege-design`
 
 **Called by**: none (entry point skill)
+
+**Implementation note**: Ship first as a planning-only skill that produces a build sequence document and guides the developer through manual invocations of each sub-skill. Full orchestration follows once all sub-skills are proven stable.
 
 ---
 
@@ -355,8 +403,6 @@ Defines the agreed interfaces between skills — trigger phrases, inputs, output
 **Called by**: none (entry point skill)
 
 ---
-
-## Migration
 
 ### `migrate-out`
 
@@ -407,46 +453,6 @@ Defines the agreed interfaces between skills — trigger phrases, inputs, output
 - FM script equivalents of source business logic in `agent/sandbox/`
 - Layout specifications for source UI equivalents
 
-**Calls**: `odata-connect`, `schema-build`
-
-**Called by**: none (entry point skill)
-
----
-
-## Data
-
-### `data-seed`
-
-**Trigger phrases**: "seed data", "test data", "populate solution", "generate records"
-
-**Inputs**:
-- Schema exists in live FM solution
-- OData connection verified
-- Description of data volume and realism requirements
-
-**Outputs**:
-- Records created in live FM solution via OData
-- Summary of what was seeded
-
-**Calls**: `odata-connect` (if not verified)
-
-**Called by**: none (entry point skill)
-
----
-
-### `data-migrate`
-
-**Trigger phrases**: "migrate data", "import records", "move data into FileMaker"
-
-**Inputs**:
-- Source data (CSV, SQL dump, JSON, API)
-- Field mapping between source and FM fields
-- OData connection verified
-
-**Outputs**:
-- Records created in live FM solution via OData
-- Migration summary with error count and field mapping log
-
-**Calls**: `odata-connect` (if not verified)
+**Calls**: `schema-build` (connect + build sub-modes)
 
 **Called by**: none (entry point skill)

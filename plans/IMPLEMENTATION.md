@@ -1,169 +1,219 @@
-# Agent Team Implementation Plan
+# Gradual Implementation Plan
 
-How to execute the agentic-fm build phases using parallel agent teams to minimise elapsed time.
+How to execute the agentic-fm build phases using a sequential, confidence-building approach. Each phase validates the workflow before the next scales up.
 
 ---
 
 ## Dependency graph
 
 ```
-Phase 1 (Layout)      ─┐
-Phase 2 (OData)       ─┤
-Phase 3 (Multi-Script) ┤──► Phase 5 (Solution-Level)
-Phase 4 (Script Tools) ┤
-Phase 6 (Web Migration)┘
-
-Phase 2 (OData) ───────────► Phase 7 (Data Tooling)
-
-Phase 1 + Phase 2 ─────────► Phase 8 (Native & Inbound)
+Prerequisites (Snapshot Testing)
+        │
+   Phase 1 (Multi-Script) ← proof-of-concept
+        │
+   Phase 2 (Script Tooling)
+        │
+   Phase 3a (Layout) ──┐
+                        ├── parallel pair
+   Phase 3b (OData)  ──┘
+        │
+   Phase 4 (Data Tooling) ← depends on Phase 3b
 ```
 
-Phases 1, 2, 3, 4, and 6 have no meaningful dependencies on each other. These form Wave 1 and run fully in parallel.
+---
+
+## Execution approach
+
+The original plan called for 5 agents running in parallel from day one. This revision takes a gradual approach:
+
+1. **Prove the workflow** with a single low-risk phase (Phase 1)
+2. **Expand incrementally** — one phase at a time, then a parallel pair
+3. **Defer ambitious orchestration** — solution-level and migration skills are future potential
+4. **Validate continuously** — snapshot tests gate every merge; FM paste-testing confirms final output
+
+This reduces coordination overhead, surfaces process issues early, and builds confidence before scaling up.
 
 ---
 
-## Wave structure
+## Prerequisites
 
-### Wave 1 — 5 agents in parallel
+These must be in place before Phase 1 begins.
 
-| Agent | Phase | Branch | Worktree | Key risk |
-|---|---|---|---|---|
-| A | Phase 1 — Layout & XML2 | `feature/layout-design` | `/worktrees/layout-design` | XML2 format validation requires real FM paste testing |
-| B | Phase 2 — OData Schema | `feature/schema-tooling` | `/worktrees/schema-tooling` | Requires live FM Server for OData validation |
-| C | Phase 3 — Multi-Script Scaffold | `feature/multi-script` | `/worktrees/multi-script` | Tight integration with Push Context — interface spec must be locked first |
-| D | Phase 4 — Script Tooling | `feature/script-tooling` | `/worktrees/script-tooling` | `script-test` depends on `fm-debug` being stable |
-| E | Phase 6 — Web Migration | `feature/migrate-web` | `/worktrees/migrate-web` | Mostly research and prompting work — lowest FM dependency |
+### 1. Snapshot testing infrastructure
 
-### Wave 2 — launch opportunistically as Wave 1 phases merge
+Establish a lightweight test harness before any agent produces skill files:
 
-| Agent | Phase | Branch | Worktree | Depends on |
-|---|---|---|---|---|
-| F | Phase 5 — Solution-Level | `feature/solution-level` | `/worktrees/solution-level` | All of Wave 1 |
-| G | Phase 7 — Data Tooling | `feature/data-tooling` | `/worktrees/data-tooling` | Phase 2 only — launch as soon as B merges |
-| H | Phase 8 — Native & Inbound | `feature/migrate-native-in` | `/worktrees/migrate-native-in` | Phases 1 + 2 |
+- Compare generated fmxmlsnippet output against known-good snapshot files
+- Integrate with `validate_snippet.py` as a baseline structural check
+- Cover each step type used by existing skills
+- Run as a pre-merge gate for every phase branch
+
+This replaces FileMaker paste-testing as the primary development-time validation. FM paste-testing remains the final validation step before merge.
+
+### 2. `plans/SKILL_INTERFACES.md` is final
+
+Every agent reads this before authoring any skill that calls or is called by another skill. The interface contracts (inputs, outputs, calls, called-by) define the seams between skills.
+
+### 3. Deployment module built
+
+The pluggable deployment module (`agent/scripts/deploy.py` or similar) must exist before Phase 1. It dispatches fmxmlsnippet output through the appropriate automation tier:
+
+- **Tier 1** (universal): `clipboard.py write` + paste instructions to developer
+- **Tier 2** (MBS Plugin, macOS): auto-paste into existing scripts via MBS ScriptWorkspace functions
+- **Tier 3** (MBS + AppleScript, macOS): create scripts via Accessibility UI automation, then auto-paste via MBS
+
+The module detects available capabilities at runtime and reads the developer's opt-in preference from `agent/config/automation.json`. Every skill calls it after validation; no skill hardcodes a deployment tier. See `VISION.md` → Automation Tiers for the full design.
+
+### 4. Shared infrastructure is locked
+
+The following files must not be modified by any agent without coordinator approval:
+- `agent/scripts/clipboard.py`
+- `agent/scripts/validate_snippet.py`
+- `agent/scripts/deploy.py` (deployment module)
+- `agent/catalogs/step-catalog-en.json`
+- `.claude/CLAUDE.md`
+- Companion server endpoints
+
+### 5. `fm-debug` skill is stable
+
+Phase 2's `script-test` skill depends on it. Confirm the current `fm-debug` implementation is production-ready before Phase 2 starts.
+
+### 6. Invoice Solution XML is current
+
+Phase 3a (XML2 generation) validates against `xml_parsed/` layout exports. Run `solution-export` to ensure these are up to date before Phase 3a begins.
 
 ---
 
-## Setup: worktrees and branches
+## Execution sequence
 
-Run these commands from the repository root before launching any agents. Each command creates the branch and checks it out in its own isolated worktree.
+### Phase 1 — Multi-Script Scaffold (proof-of-concept)
 
+**Purpose**: Validate the end-to-end workflow — worktree creation, skill authoring, snapshot testing, FM validation, merge — with the lowest-risk phase.
+
+**Setup**:
 ```bash
-# Wave 1
+git worktree add /worktrees/multi-script -b feature/multi-script
+```
+
+**Agent prompt**:
+> You are building the `multi-script-scaffold` skill for the agentic-fm project. Read `plans/VISION.md` (Untitled Placeholder Technique and Automation Tiers sections), `plans/SKILL_INTERFACES.md`, and existing skill files in `.claude/skills/` for format reference. The skill must integrate with `context-refresh` per the interface spec and use the deployment module (`agent/scripts/deploy.py`) for all output — the developer chooses whether to paste manually (Tier 1), have MBS auto-paste (Tier 2), or run fully autonomous with script creation + auto-paste (Tier 3). Test against a 3-script and a 5-script interdependent scenario. Do not modify shared infrastructure files.
+
+**Done when**:
+- Skill file passes snapshot tests
+- Generated fmxmlsnippet validates via `validate_snippet.py`
+- Tier 1: FM paste-test confirms correct script wiring
+- Tier 2/3 (if available): automated paste + read-back verification succeeds
+- Branch merged to main
+
+**Retrospective**: After merge, assess what worked and what to adjust before Phase 2.
+
+---
+
+### Phase 2 — Script Tooling
+
+**Purpose**: Expand the core script development capabilities with four complementary skills.
+
+**Setup**:
+```bash
+git worktree add /worktrees/script-tooling -b feature/script-tooling
+```
+
+**Agent prompt**:
+> You are building the script tooling skills for the agentic-fm project. Your scope is: `script-refactor`, `script-test`, `script-debug`, and `implementation-plan`. Read `plans/VISION.md` (Skills section), `plans/SKILL_INTERFACES.md`, and existing skill files for format reference. `script-test` must use `fm-debug` per the interface spec. Do not modify shared infrastructure files.
+
+**Done when**:
+- All four skill files pass snapshot tests
+- `script-test` companion scripts validate in FM via `fm-debug`
+- Branch merged to main
+
+---
+
+### Phase 3 — Layout & OData (parallel pair)
+
+**Purpose**: Two independent workstreams that can run concurrently. This is the first use of parallelism, after the workflow has been proven in Phases 1–2.
+
+**Setup**:
+```bash
 git worktree add /worktrees/layout-design -b feature/layout-design
 git worktree add /worktrees/schema-tooling -b feature/schema-tooling
-git worktree add /worktrees/multi-script -b feature/multi-script
-git worktree add /worktrees/script-tooling -b feature/script-tooling
-git worktree add /worktrees/migrate-web -b feature/migrate-web
+```
 
-# Wave 2 (create when ready to launch)
-git worktree add /worktrees/solution-level -b feature/solution-level
+**Agent prompt (3a — Layout & XML2)**:
+> You are building the layout skills for the agentic-fm project. Your scope is: `layout-design`, `layout-spec`, and `webviewer-build`. Read `plans/VISION.md` (Layout Objects section and Tooling Infrastructure → Layout Object Reference), `plans/SKILL_INTERFACES.md`, and existing skill files for format reference. Validate XML2 output against `agent/xml_parsed/` layout exports. Do not modify shared infrastructure files.
+
+**Agent prompt (3b — OData Schema)**:
+> You are building the schema tooling skills for the agentic-fm project. Your scope is: `schema-plan` and `schema-build` (a single skill covering OData connection, table/field creation, and relationship specification). Read `plans/VISION.md` (API-Managed Schema section), `plans/SKILL_INTERFACES.md`, and existing skill files for format reference. Document OData field type mappings. Do not modify shared infrastructure files.
+
+**Done when**:
+- Layout: XML2 objects paste correctly into FM Layout Mode
+- OData: Tables and fields created successfully via OData against a live FM Server
+- Both branches merged to main
+
+---
+
+### Phase 4 — Data Tooling
+
+**Purpose**: Complete the data lifecycle — seed and migrate records via OData.
+
+**Depends on**: Phase 3b merged (OData connectivity proven).
+
+**Setup**:
+```bash
 git worktree add /worktrees/data-tooling -b feature/data-tooling
-git worktree add /worktrees/migrate-native-in -b feature/migrate-native-in
 ```
 
-Verify all worktrees:
+**Agent prompt**:
+> You are building the data tooling skills for the agentic-fm project. Your scope is: `data-seed` and `data-migrate`. Read `plans/VISION.md` (Skills → Data section), `plans/SKILL_INTERFACES.md`, and existing skill files for format reference. Both skills require OData connectivity — reference the `schema-build` skill for connection patterns. Do not modify shared infrastructure files.
 
-```bash
-git worktree list
-```
-
-Remove a worktree after its branch is merged:
-
-```bash
-git worktree remove /worktrees/{phase-slug}
-```
+**Done when**:
+- Seed data creates realistic records in a live FM solution
+- Data migration handles field mapping and type coercion correctly
+- Branch merged to main
 
 ---
 
-## Prerequisites before launching Wave 1
+## FM validation
 
-These must be in place before agents start work. Doing this after agents begin risks incompatible assumptions baked into skill files.
-
-1. **`plans/SKILL_INTERFACES.md` is final** — every agent reads this before authoring any skill that calls or is called by another skill. The interface contracts (inputs, outputs, calls, called-by) define the seams between skills.
-
-2. **Shared infrastructure is locked** — the following files must not be modified by any agent without coordinator approval. Changes here affect every other agent's work:
-   - `agent/scripts/clipboard.py`
-   - `agent/scripts/validate_snippet.py`
-   - `agent/catalogs/step-catalog-en.json`
-   - `.claude/CLAUDE.md`
-   - Companion server endpoints
-
-3. **`fm-debug` skill is stable** — Phase 4's `script-test` skill depends on it. Confirm the current `fm-debug` implementation is production-ready before Agent D starts.
-
-4. **Invoice Solution XML is current** — Phase 1 (XML2 generation) validates against `xml_parsed/` layout exports. Run `solution-export` to ensure these are up to date before Agent A begins.
-
----
-
-## Agent prompts
-
-Each agent should be launched with a prompt containing:
-1. The full `plans/VISION.md`
-2. The phase scope from `plans/PHASES.md` for their specific phase
-3. `plans/SKILL_INTERFACES.md`
-4. Instruction to read `agent/docs/CODING_CONVENTIONS.md` and the relevant sections of `.claude/CLAUDE.md` before producing any output
-5. The constraint: do not modify shared infrastructure files (listed above)
-
-### Agent A — Layout & XML2
-
-> You are building Phase 1 of the agentic-fm project. Your scope is: the `layout-design`, `layout-spec`, and `webviewer-build` skills. Read `plans/VISION.md` (Layout Objects section and Tooling Infrastructure → Layout Object Reference), `plans/SKILL_INTERFACES.md`, and the existing skill files in `.claude/` for format reference. Produce skill markdown files. Validate XML2 output against `agent/xml_parsed/` layout exports. Do not modify shared infrastructure files.
-
-### Agent B — OData Schema
-
-> You are building Phase 2 of the agentic-fm project. Your scope is: the `odata-connect`, `schema-plan`, `schema-build`, and `relationship-spec` skills. Read `plans/VISION.md` (API-Managed Schema section), `plans/SKILL_INTERFACES.md`, and existing skill files for format reference. Document OData field type mappings. Do not modify shared infrastructure files.
-
-### Agent C — Multi-Script Scaffold
-
-> You are building Phase 3 of the agentic-fm project. Your scope is: the `multi-script-scaffold` skill. Read `plans/VISION.md` (Untitled Placeholder Technique section), `plans/SKILL_INTERFACES.md`, and existing skill files for format reference. The skill must integrate with `context-refresh` per the interface spec. Test against a 3-script and a 5-script interdependent scenario. Do not modify shared infrastructure files.
-
-### Agent D — Script Tooling
-
-> You are building Phase 4 of the agentic-fm project. Your scope is: the `script-refactor`, `script-test`, `script-debug`, and `implementation-plan` skills. Read `plans/VISION.md` (Skills section), `plans/SKILL_INTERFACES.md`, and existing skill files for format reference. `script-test` must use `fm-debug` per the interface spec. Do not modify shared infrastructure files.
-
-### Agent E — Web Migration
-
-> You are building Phase 6 of the agentic-fm project. Your scope is: the `migrate-out` skill. Read `plans/VISION.md` (Migrations → Migrating Out of FileMaker and Migration Tooling sections), `plans/SKILL_INTERFACES.md`, and the `migrate-filemaker` open-source project as a starting reference. Develop opinionated patterns for React + Supabase and Next.js target stacks. Do not modify shared infrastructure files.
-
----
-
-## The human bottleneck: FM validation
-
-Agents can produce skill files and fmxmlsnippet artifacts autonomously. They cannot validate them in FileMaker. This creates a testing queue that runs alongside the agent wave.
+Agents can produce skill files and fmxmlsnippet artifacts autonomously. They cannot validate them in FileMaker. This creates a testing bottleneck.
 
 **Handling it**:
+- Snapshot tests are the primary development-time gate — agents don't block on FM validation
+- FM validation is batched per phase — paste and verify each artifact as a phase nears completion
 - Each agent flags artifacts as ready for FM validation when produced
-- The agent continues with non-FM-dependent work (prompt logic, edge cases, documentation) rather than blocking
-- FM validation is batched — paste and verify each artifact as it becomes available, not all at once at the end
+- The agent continues with non-FM-dependent work (prompt logic, edge cases) rather than blocking
 
 **Validation checklist per skill**:
 - [ ] Trigger phrases invoke the skill correctly
 - [ ] Generated fmxmlsnippet passes `validate_snippet.py`
+- [ ] Generated XML matches snapshot expectations
 - [ ] Clipboard write succeeds without corruption
-- [ ] Pasted result appears correctly in the target FM workspace (Script Workspace, Manage Database, Layout Mode)
+- [ ] Pasted result appears correctly in the target FM workspace
 - [ ] Generated FM objects behave as expected at runtime
 
 ---
 
-## Merge and integration sequence
+## Merge sequence
 
-1. Phase 6 (Web Migration) is lowest-risk — merge first if ready; no other phase depends on it
-2. Phase 3 (Multi-Script) is largely self-contained — merge second
-3. Phases 1, 2, 4 — merge as validated; no ordering constraint between them
-4. Phase 7 — launch Agent G as soon as Phase 2 merges; it only needs OData connectivity
-5. Phase 8 — launch Agent H once Phases 1 and 2 are both merged
-6. Phase 5 (Solution-Level) — launch Agent F only after all other Wave 1 phases are merged and stable; it calls every other skill
+Phases merge in order: 1 → 2 → 3a/3b (either order) → 4.
+
+Each merge includes:
+1. Snapshot tests pass
+2. FM validation checklist complete
+3. Skill interfaces match `SKILL_INTERFACES.md` contracts
+4. `PHASES.md` status updated (`planned` → `merged`)
 
 ---
 
 ## Coordinator responsibilities
 
-One human (or a dedicated coordinator agent on `main`) should own:
+One human should own:
 
 - Approving any proposed changes to locked shared infrastructure files
-- Reviewing and merging PRs in the sequence above
-- Tracking the FM validation queue and unblocking agents when validation results are ready
-- Updating `plans/PHASES.md` status (`planned` → `active` → `merged`) as work progresses
-- Resolving any interface contract disagreements between agents before they diverge
+- Reviewing and merging PRs in sequence
+- Running the FM validation queue and unblocking agents when results are ready
+- Updating `plans/PHASES.md` status as work progresses
+- Resolving any interface contract disagreements before they diverge
+- Conducting a brief retrospective after Phase 1 to adjust process for subsequent phases
 
 ---
 
@@ -171,9 +221,9 @@ One human (or a dedicated coordinator agent on `main`) should own:
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
-| Agents make incompatible interface assumptions | High without prep | High | Lock `SKILL_INTERFACES.md` before launch |
-| Shared infrastructure conflicts between agents | Medium | High | Lock list enforced; all infra changes routed through coordinator |
-| FM validation bottleneck delays merge | High | Medium | Agents continue non-FM work while validation queues; batch paste sessions |
-| XML2 format assumptions incorrect | Medium | Medium | Agent A validates against `xml_parsed/` before finalising skill |
-| OData API behaviour differs from documentation | Medium | Medium | Agent B documents deviations in `plans/schema/odata-notes.md` |
-| `fm-debug` instability blocks Phase 4 | Low | Medium | Confirm fm-debug stability before launching Agent D |
+| Phase 1 reveals workflow issues | Medium | Low | That's the point — fix process before scaling |
+| FM validation bottleneck delays merge | High | Medium | Snapshot tests gate development; FM validation is batched |
+| XML2 format assumptions incorrect | Medium | Medium | Phase 3a validates against `xml_parsed/` before finalising |
+| OData API behaviour differs from docs | Medium | Medium | Phase 3b documents deviations in `plans/schema/odata-notes.md` |
+| `fm-debug` instability blocks Phase 2 | Low | Medium | Confirm fm-debug stability as prerequisite |
+| Combined `schema-build` skill too large | Low | Medium | Sub-modes keep concerns separated within one skill file |
