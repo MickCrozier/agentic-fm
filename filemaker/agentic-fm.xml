@@ -430,7 +430,7 @@
       </Step>
       <Step enable="False" id="61" name="Insert Text">
         <SelectAll state="False"/>
-        <Text>INTERACTIVE MODE (FM Pro):&#xD;  Run with no parameter. Prompts for task description, writes CONTEXT.json directly via file steps.&#xD;&#xD;SERVER MODE (OData via AGFMScriptBridge):&#xD;  Pass JSON parameter with keys:&#xD;    task          &#x2014; task description string&#xD;    repo_path     &#x2014; absolute POSIX path to the agentic-fm project root on the companion server host&#xD;    companion_url &#x2014; base URL of the companion server (e.g. http://host.docker.internal:8765)&#xD;&#xD;  CONTEXT.json is written by the companion server at {repo_path}/agent/CONTEXT.json.&#xD;&#xD;RETURNS (server mode): JSON { success, path } or { success, error }</Text>
+        <Text>INTERACTIVE MODE (FM Pro):&#xD;  Run with no parameter. Prompts for task description, writes CONTEXT.json directly via file steps.&#xD;&#xD;SERVER MODE (OData via AGFMScriptBridge):&#xD;  Pass JSON parameter with keys:&#xD;    task          &#x2014; task description string&#xD;    repo_path     &#x2014; absolute POSIX path to the agentic-fm project root on the companion server host&#xD;    companion_url &#x2014; base URL of the companion server (e.g. http://host.docker.internal:8765)&#xD;    layout        &#x2014; (optional) layout name to navigate to before generating context&#xD;&#xD;  CONTEXT.json is written by the companion server at {repo_path}/agent/CONTEXT.json.&#xD;&#xD;RETURNS (server mode): JSON { success, path } or { success, error }</Text>
         <Field>$README</Field>
       </Step>
       <Step enable="True" id="89" name="# (comment)"/>
@@ -441,6 +441,9 @@
         <Value>
           <Calculation><![CDATA[Get ( ScriptParameter )]]></Calculation>
         </Value>
+        <Repetition>
+          <Calculation><![CDATA[1]]></Calculation>
+        </Repetition>
         <Name>$input</Name>
       </Step>
       <Step enable="True" id="68" name="If">
@@ -451,24 +454,58 @@
         <Value>
           <Calculation><![CDATA[JSONGetElement ( $input ; "task" )]]></Calculation>
         </Value>
+        <Repetition>
+          <Calculation><![CDATA[1]]></Calculation>
+        </Repetition>
         <Name>$task</Name>
       </Step>
       <Step enable="True" id="141" name="Set Variable">
         <Value>
           <Calculation><![CDATA[JSONGetElement ( $input ; "companion_url" )]]></Calculation>
         </Value>
+        <Repetition>
+          <Calculation><![CDATA[1]]></Calculation>
+        </Repetition>
         <Name>$companionUrl</Name>
       </Step>
       <Step enable="True" id="141" name="Set Variable">
         <Value>
           <Calculation><![CDATA[JSONGetElement ( $input ; "repo_path" )]]></Calculation>
         </Value>
+        <Repetition>
+          <Calculation><![CDATA[1]]></Calculation>
+        </Repetition>
         <Name>$repoPath</Name>
       </Step>
+      <Step enable="True" id="89" name="# (comment)"/>
+      <Step enable="True" id="89" name="# (comment)">
+        <Text>Navigate to the requested layout before generating context (keeps both operations in the same FM session)</Text>
+      </Step>
+      <Step enable="True" id="141" name="Set Variable">
+        <Value>
+          <Calculation><![CDATA[JSONGetElement ( $input ; "layout" )]]></Calculation>
+        </Value>
+        <Repetition>
+          <Calculation><![CDATA[1]]></Calculation>
+        </Repetition>
+        <Name>$layout</Name>
+      </Step>
+      <Step enable="True" id="68" name="If">
+        <Restore state="False"/>
+        <Calculation><![CDATA[not IsEmpty ( $layout )]]></Calculation>
+      </Step>
+      <Step enable="True" id="1" name="Perform Script">
+        <Script id="288" name="AGFMGoToLayout"/>
+      </Step>
+      <Step enable="True" id="70" name="End If"/>
+      <Step enable="True" id="89" name="# (comment)"/>
       <Step enable="True" id="141" name="Set Variable">
         <Value>
           <Calculation><![CDATA[Context ( $task )]]></Calculation>
         </Value>
+        <Repetition>
+          <Calculation><![CDATA[1]]></Calculation>
+        </Repetition>
         <Name>$context</Name>
       </Step>
       <Step enable="True" id="141" name="Set Variable">
@@ -478,6 +515,9 @@
 	[ "context" ; $context ; JSONString ]
 )]]></Calculation>
         </Value>
+        <Repetition>
+          <Calculation><![CDATA[1]]></Calculation>
+        </Repetition>
         <Name>$payload</Name>
       </Step>
       <Step enable="True" id="160" name="Insert from URL">
@@ -496,6 +536,9 @@
         <Value>
           <Calculation><![CDATA[Get ( LastError )]]></Calculation>
         </Value>
+        <Repetition>
+          <Calculation><![CDATA[1]]></Calculation>
+        </Repetition>
         <Name>$httpError</Name>
       </Step>
       <Step enable="True" id="68" name="If">
@@ -577,7 +620,7 @@
           <InputField UsePasswordCharacter="False">
             <Field>$task</Field>
             <Label>
-              <Calculation><![CDATA["Task"]]></Calculation>
+              <Calculation><![CDATA["Task: "]]></Calculation>
             </Label>
           </InputField>
           <InputField UsePasswordCharacter="False">
@@ -597,6 +640,27 @@
       <Step enable="True" id="141" name="Set Variable">
         <Value>
           <Calculation><![CDATA[Context ( $task )]]></Calculation>
+        </Value>
+        <Repetition>
+          <Calculation><![CDATA[1]]></Calculation>
+        </Repetition>
+        <Name>$context</Name>
+      </Step>
+      <Step enable="True" id="141" name="Set Variable">
+        <Value>
+          <Calculation><![CDATA[JSONGetElement ( $$AGENTIC.FM ; "path" ) & "agent/context/snapshot.xml"]]></Calculation>
+        </Value>
+        <Repetition>
+          <Calculation><![CDATA[1]]></Calculation>
+        </Repetition>
+        <Name>$snapshotPath</Name>
+      </Step>
+      <Step enable="True" id="141" name="Set Variable">
+        <Value>
+          <Calculation><![CDATA[JSONSetElement ( $context ;
+	[ "snapshot_path" ; "agent/context/snapshot.xml" ; JSONString ] ;
+	[ "snapshot_timestamp" ; GetAsText ( Get ( CurrentTimestamp ) ) ; JSONString ]
+)]]></Calculation>
         </Value>
         <Repetition>
           <Calculation><![CDATA[1]]></Calculation>
@@ -632,13 +696,7 @@
         <Restore state="False"/>
         <Calculation><![CDATA[$exists]]></Calculation>
       </Step>
-      <Step enable="True" id="89" name="# (comment)">
-        <Text>Not the best method but this will delete the existing file.</Text>
-      </Step>
-      <Step enable="True" id="132" name="Export Field Contents">
-        <CreateDirectories state="False"/>
-        <AutoOpen state="False"/>
-        <CreateEmail state="False"/>
+      <Step enable="True" id="197" name="Delete File">
         <UniversalPathList>$target</UniversalPathList>
       </Step>
       <Step enable="True" id="70" name="End If"/>
@@ -674,6 +732,15 @@
       </Step>
       <Step enable="True" id="196" name="Close Data File">
         <Calculation><![CDATA[$fileID]]></Calculation>
+      </Step>
+      <Step enable="True" id="89" name="# (comment)">
+        <Text>Save snapshot for agent data context</Text>
+      </Step>
+      <Step enable="True" id="152" name="Save Records as Snapshot Link">
+        <CreateDirectories state="True"/>
+        <CreateEmail state="False"/>
+        <SaveType value="BrowsedRecords"/>
+        <UniversalPathList>$snapshotPath</UniversalPathList>
       </Step>
       <Step enable="True" id="87" name="Show Custom Dialog">
         <Title>
@@ -837,6 +904,160 @@
 	[ "success" ; True ; JSONBoolean ] ;
 	[ "script" ; $script ; JSONString ] ;
 	[ "result" ; $result ; JSONString ]
+)]]></Calculation>
+        </Step>
+      </Script>
+      <Script includeInMenu="False" SiriShortcutVisible="False" runFullAccess="False" id="315" name="AGFMEvaluation">
+        <Step enable="True" id="89" name="# (comment)">
+          <Text>PURPOSE: Evaluate a FileMaker calculation expression server-side and return the result.</Text>
+        </Step>
+        <Step enable="False" id="61" name="Insert Text">
+          <SelectAll state="False"/>
+          <Text>CALLED BY: agent via OData &#x2192; AGFMScriptBridge&#xD;&#xD;PARAMETER: JSON object&#xD;  expression &#x2014; the FM calculation string to evaluate (required)&#xD;  layout     &#x2014; layout name to navigate to before evaluating (optional; recommended for field-reference calcs)&#xD;&#xD;RETURNS:&#xD;  { success: true,  error_code: 0,    result: "...", expression: "...", layout: "..." }&#xD;  { success: false, error_code: &lt;N&gt;, result: "",    expression: "...", layout: "..." }&#xD;&#xD;SIDE EFFECT: saves snapshot-eval.xml to Get(DocumentsPath) for agent context verification.&#xD;  Agent reads layout field in snapshot and confirms it matches agent/CONTEXT.json current_layout.name.&#xD;&#xD;EXAMPLE call via AGFMScriptBridge:&#xD;  { "script": "AGFMEvaluation", "parameter": "{\"expression\": \"Sum ( LineItems::ExtendedPrice )\", \"layout\": \"Invoices Details\"}" }</Text>
+          <Field>$README</Field>
+        </Step>
+        <Step enable="True" id="89" name="# (comment)"/>
+        <Step enable="True" id="89" name="# (comment)">
+          <Text>Parse parameters</Text>
+        </Step>
+        <Step enable="True" id="141" name="Set Variable">
+          <Value>
+            <Calculation><![CDATA[Get ( ScriptParameter )]]></Calculation>
+          </Value>
+          <Repetition>
+            <Calculation><![CDATA[1]]></Calculation>
+          </Repetition>
+          <Name>$input</Name>
+        </Step>
+        <Step enable="True" id="68" name="If">
+          <Restore state="False"/>
+          <Calculation><![CDATA[JSONGetElementType ( $input ; "" ) ≠ JSONObject]]></Calculation>
+        </Step>
+        <Step enable="True" id="103" name="Exit Script">
+          <Calculation><![CDATA[JSONSetElement ( "{}" ;
+	[ "success" ; False ; JSONBoolean ] ;
+	[ "error" ; "Invalid parameter: expected JSON object" ; JSONString ]
+)]]></Calculation>
+        </Step>
+        <Step enable="True" id="70" name="End If"/>
+        <Step enable="True" id="89" name="# (comment)"/>
+        <Step enable="True" id="141" name="Set Variable">
+          <Value>
+            <Calculation><![CDATA[JSONGetElement ( $input ; "expression" )]]></Calculation>
+          </Value>
+          <Repetition>
+            <Calculation><![CDATA[1]]></Calculation>
+          </Repetition>
+          <Name>$expression</Name>
+        </Step>
+        <Step enable="True" id="141" name="Set Variable">
+          <Value>
+            <Calculation><![CDATA[JSONGetElement ( $input ; "layout" )]]></Calculation>
+          </Value>
+          <Repetition>
+            <Calculation><![CDATA[1]]></Calculation>
+          </Repetition>
+          <Name>$layout</Name>
+        </Step>
+        <Step enable="True" id="89" name="# (comment)"/>
+        <Step enable="True" id="68" name="If">
+          <Restore state="False"/>
+          <Calculation><![CDATA[IsEmpty ( $expression )]]></Calculation>
+        </Step>
+        <Step enable="True" id="103" name="Exit Script">
+          <Calculation><![CDATA[JSONSetElement ( "{}" ;
+	[ "success" ; False ; JSONBoolean ] ;
+	[ "error" ; "Missing required key: expression" ; JSONString ]
+)]]></Calculation>
+        </Step>
+        <Step enable="True" id="70" name="End If"/>
+        <Step enable="True" id="89" name="# (comment)"/>
+        <Step enable="True" id="89" name="# (comment)">
+          <Text>Navigate to layout if provided</Text>
+        </Step>
+        <Step enable="True" id="68" name="If">
+          <Restore state="False"/>
+          <Calculation><![CDATA[not IsEmpty ( $layout )]]></Calculation>
+        </Step>
+        <Step enable="True" id="6" name="Go to Layout">
+          <LayoutDestination value="LayoutNameByCalc"/>
+          <Calculation><![CDATA[$layout]]></Calculation>
+          <Layout>
+            <Calculation><![CDATA[$layout]]></Calculation>
+          </Layout>
+        </Step>
+        <Step enable="True" id="141" name="Set Variable">
+          <Value>
+            <Calculation><![CDATA[Get ( LastError )]]></Calculation>
+          </Value>
+          <Repetition>
+            <Calculation><![CDATA[1]]></Calculation>
+          </Repetition>
+          <Name>$gotoError</Name>
+        </Step>
+        <Step enable="True" id="68" name="If">
+          <Restore state="False"/>
+          <Calculation><![CDATA[$gotoError ≠ 0]]></Calculation>
+        </Step>
+        <Step enable="True" id="103" name="Exit Script">
+          <Calculation><![CDATA[JSONSetElement ( "{}" ;
+	[ "success" ; False ; JSONBoolean ] ;
+	[ "error_code" ; $gotoError ; JSONNumber ] ;
+	[ "error" ; "Go to Layout failed — layout not found: " & $layout ; JSONString ] ;
+	[ "expression" ; $expression ; JSONString ]
+)]]></Calculation>
+        </Step>
+        <Step enable="True" id="70" name="End If"/>
+        <Step enable="True" id="70" name="End If"/>
+        <Step enable="True" id="89" name="# (comment)"/>
+        <Step enable="True" id="89" name="# (comment)">
+          <Text>Evaluate &#x2014; EvaluationError returns 0 if valid, FM error code otherwise</Text>
+        </Step>
+        <Step enable="True" id="141" name="Set Variable">
+          <Value>
+            <Calculation><![CDATA[EvaluationError ( $expression )]]></Calculation>
+          </Value>
+          <Repetition>
+            <Calculation><![CDATA[1]]></Calculation>
+          </Repetition>
+          <Name>$errorCode</Name>
+        </Step>
+        <Step enable="True" id="141" name="Set Variable">
+          <Value>
+            <Calculation><![CDATA[If ( $errorCode = 0 ; Evaluate ( $expression ) ; "" )]]></Calculation>
+          </Value>
+          <Repetition>
+            <Calculation><![CDATA[1]]></Calculation>
+          </Repetition>
+          <Name>$result</Name>
+        </Step>
+        <Step enable="True" id="89" name="# (comment)"/>
+        <Step enable="True" id="89" name="# (comment)">
+          <Text>Save verification snapshot for agent context check</Text>
+        </Step>
+        <Step enable="True" id="141" name="Set Variable">
+          <Value>
+            <Calculation><![CDATA[Get ( DocumentsPath ) & "snapshot-eval.xml"]]></Calculation>
+          </Value>
+          <Repetition>
+            <Calculation><![CDATA[1]]></Calculation>
+          </Repetition>
+          <Name>$snapshotPath</Name>
+        </Step>
+        <Step enable="True" id="152" name="Save Records as Snapshot Link">
+          <CreateDirectories state="False"/>
+          <CreateEmail state="False"/>
+          <SaveType value="BrowsedRecords"/>
+          <UniversalPathList>$snapshotPath</UniversalPathList>
+        </Step>
+        <Step enable="True" id="89" name="# (comment)"/>
+        <Step enable="True" id="103" name="Exit Script">
+          <Calculation><![CDATA[JSONSetElement ( "{}" ;
+	[ "success" ; $errorCode = 0 ; JSONBoolean ] ;
+	[ "error_code" ; $errorCode ; JSONNumber ] ;
+	[ "result" ; $result ; JSONString ] ;
+	[ "expression" ; $expression ; JSONString ] ;
+	[ "layout" ; Get ( LayoutName ) ; JSONString ]
 )]]></Calculation>
         </Step>
       </Script>
@@ -1237,7 +1458,7 @@
         </Step>
         <Step enable="False" id="61" name="Insert Text">
           <SelectAll state="False"/>
-          <Text>CALLED BY: companion server /trigger endpoint via AppleScript&#xD;  The companion sets the job via POST /pending before firing do script.&#xD;  This script GETs /pending to retrieve: target (script name), auto_save (bool).&#xD;&#xD;RETURNS: JSON { success, script } or { success, error }&#xD;&#xD;REQUIRES: MBS Plugin with ScriptWorkspace and Menubar functions&#xD;&#xD;WARNING: FileMaker will block script execution with a dialog if any scripts have&#xD;  unsaved changes. Ensure AGFMPaste itself is saved before running deployments.&#xD;  auto_save uses "Save All Scripts" which saves all open scripts in the workspace.&#xD;&#xD;NOTE: Menubar command IDs &#x2014; Select All: 57636, Paste: 57637&#xD;  Verify these against MBS docs if paste behaviour is unexpected.</Text>
+          <Text>CALLED BY: companion server /trigger endpoint via AppleScript&#xD;  The companion sets the job via POST /pending before firing do script.&#xD;  This script GETs /pending to retrieve: target (script name), auto_save (bool), select_all (bool).&#xD;&#xD;PARAMETERS (from /pending JSON):&#xD;  target      &#x2014; name of the script to paste into&#xD;  auto_save   &#x2014; if true, saves all scripts after paste&#xD;  select_all  &#x2014; if true (default), runs Select All before paste (replaces all steps)&#xD;               if false, pastes after existing steps (append mode)&#xD;&#xD;RETURNS: JSON { success, script, auto_save, select_all } or { success, error }&#xD;&#xD;REQUIRES: MBS Plugin with ScriptWorkspace and Menubar functions&#xD;&#xD;WARNING: FileMaker will block script execution with a dialog if any scripts have&#xD;  unsaved changes. Ensure Agentic-fm Paste itself is saved before running deployments.&#xD;  auto_save uses "Save All Scripts" which saves all open scripts in the workspace.&#xD;&#xD;NOTE: Replace sequence is Cmd+A &#x2192; Delete (key code 51) &#x2192; Cmd+V.&#xD;  The Script Workspace does NOT overwrite a selection on paste &#x2014; selected steps&#xD;  must be explicitly deleted before pasting or the new steps are appended.&#xD;  System Events keystrokes are used (not MBS Menubar commands) because MBS&#xD;  commands are panel-focus-sensitive and unreliable in the Script Workspace.&#xD;&#xD;DIAGNOSTIC: If you hear a system beep after a deploy with auto_save enabled,&#xD;  the paste likely failed &#x2014; Cmd+S beeps when the script has no unsaved changes.</Text>
           <Field>$README</Field>
         </Step>
         <Step enable="True" id="89" name="# (comment)"/>
@@ -1265,6 +1486,13 @@
           </Value>
           <Name>$autoSave</Name>
         </Step>
+        <Step enable="True" id="141" name="Set Variable">
+          <Value>
+            <Calculation><![CDATA[If ( JSONGetElementType ( $pendingJSON ; "select_all" ) = JSONBoolean
+	and JSONGetElement ( $pendingJSON ; "select_all" ) = False ; False ; True )]]></Calculation>
+          </Value>
+          <Name>$selectAll</Name>
+        </Step>
         <Step enable="True" id="68" name="If">
           <Restore state="False"/>
           <Calculation><![CDATA[IsEmpty ( $target )]]></Calculation>
@@ -1276,6 +1504,14 @@
 )]]></Calculation>
         </Step>
         <Step enable="True" id="70" name="End If"/>
+        <Step enable="True" id="89" name="# (comment)">
+          <Text>Bring FM to front before opening Script Workspace &#x2014; MBS and Open Script Workspace require FM to be frontmost</Text>
+        </Step>
+        <Step enable="True" id="67" name="Perform AppleScript">
+          <ContentType value="Text"/>
+          <Text>tell me to activate
+delay 1.0</Text>
+        </Step>
         <Step enable="True" id="89" name="# (comment)"/>
         <Step enable="True" id="88" name="Open Script Workspace"/>
         <Step enable="True" id="141" name="Set Variable">
@@ -1296,6 +1532,31 @@
         </Step>
         <Step enable="True" id="70" name="End If"/>
         <Step enable="True" id="89" name="# (comment)">
+          <Text>Click the step editor (SEFabricView) to ensure keyboard focus is there, not the script list</Text>
+        </Step>
+        <Step enable="True" id="67" name="Perform AppleScript">
+          <ContentType value="Calculation"/>
+          <Calculation><![CDATA["tell application \"System Events\"" & ¶ &
+"	tell process \"FileMaker Pro\"" & ¶ &
+"		set wsWindows to windows whose title contains \"Script Workspace\"" & ¶ &
+"		if (count of wsWindows) > 0 then" & ¶ &
+"			tell item 1 of wsWindows" & ¶ &
+"				tell splitter group 1" & ¶ &
+"					click button \"" & $target & "\"" & ¶ &
+"					delay 0.3" & ¶ &
+"					repeat with sa in scroll areas" & ¶ &
+"						try" & ¶ &
+"							click table 1 of sa" & ¶ &
+"							exit repeat" & ¶ &
+"						end try" & ¶ &
+"					end repeat" & ¶ &
+"				end tell" & ¶ &
+"			end tell" & ¶ &
+"		end if" & ¶ &
+"	end tell" & ¶ &
+"end tell"]]></Calculation>
+        </Step>
+        <Step enable="True" id="89" name="# (comment)">
           <Text>Busy-wait 0.5s to allow Script Workspace to finish rendering before paste</Text>
         </Step>
         <Step enable="True" id="141" name="Set Variable">
@@ -1313,17 +1574,29 @@
         </Step>
         <Step enable="True" id="73" name="End Loop"/>
         <Step enable="True" id="89" name="# (comment)"/>
-        <Step enable="True" id="141" name="Set Variable">
-          <Value>
-            <Calculation><![CDATA[MBS ( "Menubar.RunMenuCommand" ; 57636 )]]></Calculation>
-          </Value>
-          <Name>$selectResult</Name>
+        <Step enable="True" id="68" name="If">
+          <Restore state="False"/>
+          <Calculation><![CDATA[$selectAll]]></Calculation>
         </Step>
-        <Step enable="True" id="141" name="Set Variable">
-          <Value>
-            <Calculation><![CDATA[MBS ( "Menubar.RunMenuCommand" ; 57637 )]]></Calculation>
-          </Value>
-          <Name>$pasteResult</Name>
+        <Step enable="True" id="67" name="Perform AppleScript">
+          <ContentType value="Text"/>
+          <Text>tell application "System Events"
+	tell process "FileMaker Pro"
+		keystroke "a" using {command down}
+		delay 0.2
+		key code 51
+	end tell
+end tell</Text>
+        </Step>
+        <Step enable="True" id="70" name="End If"/>
+        <Step enable="True" id="67" name="Perform AppleScript">
+          <ContentType value="Text"/>
+          <Text>delay 0.5
+tell application "System Events"
+	tell process "FileMaker Pro"
+		keystroke "v" using {command down}
+	end tell
+end tell</Text>
         </Step>
         <Step enable="True" id="89" name="# (comment)"/>
         <Step enable="True" id="68" name="If">
@@ -1332,7 +1605,11 @@
         </Step>
         <Step enable="True" id="67" name="Perform AppleScript">
           <ContentType value="Text"/>
-          <Text>tell application "System Events" to keystroke "s" using {command down}</Text>
+          <Text>tell application "System Events"
+	tell process "FileMaker Pro"
+		keystroke "s" using {command down}
+	end tell
+end tell</Text>
         </Step>
         <Step enable="True" id="70" name="End If"/>
         <Step enable="True" id="89" name="# (comment)"/>
@@ -1340,7 +1617,8 @@
           <Calculation><![CDATA[JSONSetElement ( "{}" ;
 	[ "success" ; True ; JSONBoolean ] ;
 	[ "script" ; $target ; JSONString ] ;
-	[ "auto_save" ; $autoSave ; JSONBoolean ]
+	[ "auto_save" ; $autoSave ; JSONBoolean ] ;
+	[ "select_all" ; $selectAll ; JSONBoolean ]
 )]]></Calculation>
         </Step>
       </Script>
