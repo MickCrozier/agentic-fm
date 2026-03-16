@@ -22,6 +22,7 @@ Prompt.md
 agent/library/
 agent/sandbox/.autosave.json
 agent/config/removals.json
+agent/config/automation.json
 docker-compose.override.yml
 project.env
 

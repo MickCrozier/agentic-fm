@@ -1,3 +1,7 @@
+# Python
+
+Always use `python3` — never bare `python`. macOS does not ship a `python` binary; the system Python is only available as `python3`. No virtual environment is required for any script in this project — all scripts (`clipboard.py`, `validate_snippet.py`, `companion_server.py`, `deploy.py`) use the Python standard library only.
+
 # Overview
 
 This project is designed to create FileMaker scripts in the clipboard supported format of fmxmlsnippets. The following folders are used.

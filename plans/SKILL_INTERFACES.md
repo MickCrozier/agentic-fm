@@ -24,19 +24,51 @@ Not a skill (not invoked by trigger phrase). A shared module (`agent/scripts/dep
 - **Output**: deployment result — success/failure, tier used, verification result (if Tier 2/3)
 - **Behaviour by tier**:
   - **Tier 1** (universal): runs `clipboard.py write`, prints paste instructions to the developer
-  - **Tier 2** (MBS): triggers a FileMaker script (via OData or developer) that calls `Clipboard.SetFileMakerData` + `ScriptWorkspace.OpenScript` + `Menubar.RunMenuCommand(57637)` to auto-paste, then reads back via `ScriptWorkspace.ScriptText` to verify
-  - **Tier 3** (MBS + AppleScript): additionally creates new scripts via AppleScript UI automation before pasting
+  - **Tier 2** (MBS): companion server writes XML to clipboard (`clipboard.py`), then calls `osascript` to tell FM Pro to run a MBS paste script client-side (`Clipboard.SetFileMakerData` + `ScriptWorkspace.OpenScript` + `Menubar.RunMenuCommand(57637)`); reads back via `ScriptWorkspace.ScriptText` to verify. **Note**: MBS ScriptWorkspace functions are UI automation — they require FM Pro client-side execution and cannot run via OData (server-side).
+  - **Tier 3** (MBS + AppleScript): companion server additionally uses `osascript` to create N script placeholders in FM Pro's Script Workspace before pasting; otherwise identical to Tier 2
 - **Tier selection**: reads `agent/config/automation.json` for the developer's default preference; skills can pass a tier override; if the requested tier fails, falls back to Tier 1
 - **Config format** (`agent/config/automation.json`):
   ```json
   {
     "default_tier": 1,
-    "mbs_available": false,
-    "accessibility_granted": false
+    "project_tier": 3,
+    "fm_app_name": "FileMaker Pro — 22.0.4.406",
+    "companion_url": "http://local.hub:8765",
+    "tiers": {
+      "1": { "description": "Clipboard only", "requires": [] },
+      "2": { "description": "MBS auto-paste", "requires": ["mbs_plugin"] },
+      "3": { "description": "Full autonomy", "requires": ["mbs_plugin", "accessibility_permission"] }
+    }
   }
   ```
+  `fm_app_name` is used in `osascript` calls — must match the exact AppleScript application name (versioned, with em dash where applicable). `companion_url` is how the agent reaches the companion server from inside its container.
 
 **Design constraint**: Tier 1 must always work. No skill should fail because a higher tier is unavailable.
+
+---
+
+### Hosting topologies
+
+The full autonomous loop requires the agent to reach the FM solution's file system paths and (for Tier 2/3) trigger client-side script execution in FM Pro. The hosting topology determines what is possible.
+
+| Topology | OData available | Companion → FM Pro trigger | xml_parsed accessible |
+|---|---|---|---|
+| **FMS in Docker container** (current) | Yes — via container URL | Yes — `osascript` on host, FM Pro opens hosted file | Yes — via volume mount |
+| **FMS on local host** | Yes — via localhost | Yes — `osascript` on host | Yes — local project path |
+| **FMS on network machine** | Yes — via LAN URL | Yes if companion runs on same machine as FM Pro | Yes if project is on same machine |
+| **Local file only (no FMS)** | No | Yes — `osascript` triggers FM Pro directly | Yes — companion on same machine |
+
+**Key principle**: all scenarios are valid. The agent must never assume a specific topology. The companion server and the FM-side scripts must detect and adapt.
+
+**Detecting hosted vs local** — the `Get ( FilePath )` function reveals the hosting mode:
+- `fmnet://{server}/{database}` — file is open from a FileMaker Server (any topology)
+- `file:/{path}` (or `filewin:`, `filelinux:`, `filemac:`) — local file, no server
+
+The agentic-fm FM scripts (Push Context, Explode XML) should call `Get ( FilePath )` and branch:
+- **Hosted** (`fmnet:/`): OData triggering is available; server-mode parameter path works
+- **Local**: OData unavailable; interactive mode (dialog-driven, writes via file steps) is the only path; the companion server can still trigger scripts via `osascript → tell application FM Pro to perform script`
+
+The `osascript` trigger path in the companion server (`/trigger` endpoint, to be built) enables Tier 2/3 automation for both hosted and local files — it does not depend on OData.
 
 ---
 

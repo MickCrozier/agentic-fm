@@ -103,9 +103,9 @@ The bare minimum to start Phase 1:
 | # | Item | Status |
 |---|------|--------|
 | 1 | Companion server running on host (`COMPANION_BIND_HOST=0.0.0.0`) | [x] |
-| 2 | agentic-fm scripts installed | [ ] |
-| 5 | Push Context works end-to-end | [ ] |
-| 6 | Test solution identified | [ ] |
-| 7 | Automation tier chosen + `automation.json` created | [ ] |
-| 8 | `SKILL_INTERFACES.md` finalized | [ ] |
-| 9 | Shared infrastructure confirmed stable | [ ] |
+| 2 | agentic-fm scripts installed | [x] |
+| 5 | Push Context works end-to-end | [x] |
+| 6 | Test solution identified | [x] Invoice Solution |
+| 7 | Automation tier chosen + `automation.json` created | [x] Tier 1 default, Tier 3 project target |
+| 8 | `SKILL_INTERFACES.md` finalized | [x] |
+| 9 | Shared infrastructure confirmed stable | [x] |
