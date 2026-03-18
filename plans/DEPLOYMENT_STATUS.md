@@ -9,12 +9,12 @@ Session-persistent notes on what was built, every quirk discovered, and where to
 ### `agent/scripts/deploy.py`
 CLI + importable module. Reads `agent/config/automation.json`. Three tiers:
 - **Tier 1**: POSTs XML to companion `/clipboard`, returns paste instructions
-- **Tier 2**: `/clipboard` + `/trigger` → Agentic-fm Paste auto-pastes via MBS
-- **Tier 3**: `/clipboard` (pre-load) + `raw_applescript` via `/trigger` → creates+renames+saves new script, then Cmd+A+Cmd+V inline — no Agentic-fm Paste involved
+- **Tier 2**: Two-phase — Phase 1: `do script "Agentic-fm Paste"` opens script tab via MBS; Phase 2: companion fires `raw_applescript` for AXPress tab focus + paste from outside FM
+- **Tier 3**: Monolithic `raw_applescript` via companion — custom menu guard → Window menu file switch → Script Workspace → Cmd+N → rename → Cmd+V → Cmd+S
 
 CLI usage:
 ```bash
-python3 agent/scripts/deploy.py <xml_path> [target_script] [--tier N] [--auto-save] [--no-auto-save] [--replace | --append]
+python3 agent/scripts/deploy.py <xml_path> [target_script] [--tier N] [--auto-save] [--no-auto-save] [--replace | --append] [--file <fm_file_name>]
 ```
 
 **Tier 2 destructive-paste protection**: When deploying to an existing script via Tier 2 without `--replace` or `--append`, the CLI prompts:
@@ -25,9 +25,13 @@ Script 'My Script' will be modified.
   [c] Cancel
 Choice [r/a/c]:
 ```
-- `--replace`: skips prompt, always replaces (select all + paste)
+- `--replace`: skips prompt, always replaces (select all + delete + paste)
 - `--append`: skips prompt, always appends (paste only, no select all)
 - No flag: interactive prompt required before proceeding
+
+**Multi-file targeting**: `--file <name>` targets a specific FM document. When omitted, `_resolve_target_file()` auto-resolves from:
+1. `CONTEXT.json` → `solution` field
+2. `automation.json` → `solutions` keys (only if exactly 1 solution)
 
 ### `agent/config/automation.json`
 Key fields: `default_tier`, `project_tier`, `auto_save`, `fm_app_name`, `companion_url`.
@@ -37,23 +41,37 @@ Key fields: `default_tier`, `project_tier`, `auto_save`, `fm_app_name`, `compani
 - `fm_app_name` must match the exact AppleScript application name including em dash and version: `"FileMaker Pro — 22.0.4.406"`
 
 ### `agent/sandbox/Agentic-fm Paste.xml`
-MBS-powered FM script. Installed in the solution. Called by companion `/trigger` via AppleScript `do script`. Flow:
-1. `GET localhost:8765/pending` → retrieves `target` (script name), `auto_save` flag, `select_all` flag
-2. `Open Script Workspace` step
-3. `MBS("ScriptWorkspace.OpenScript"; $target)`
-4. 0.5s busy-wait loop (no Pause/Resume — it steals focus)
-5. If `$selectAll`: `MBS("Menubar.RunMenuCommand"; 57636)` — Select All (replace mode)
-6. `MBS("Menubar.RunMenuCommand"; 57637)` — Paste
-7. If `$autoSave`: `Perform AppleScript [ tell application "System Events" to keystroke "s" using {command down} ]`
+MBS-powered FM script. Installed in the solution. Called by companion `/trigger` via AppleScript `do script`. **Only opens the script tab** — paste is handled externally by deploy.py. Flow:
+1. `GET localhost:8765/pending` → retrieves `target` (script name)
+2. `tell me to activate` + `delay 1.0`
+3. `Open Script Workspace` step
+4. `MBS("ScriptWorkspace.OpenScript"; $target)`
+5. Exit Script with JSON result
 
-`select_all` defaults to `True` if absent from `/pending` JSON (safe default = replace). Set to `False` for append mode.
+The actual paste sequence (AXPress tab + Cmd+A → Delete → Cmd+V) runs from outside FM via deploy.py's Phase 2 `raw_applescript`. AXPress must run from outside FM — Perform AppleScript within FM causes Script Workspace to lose step editor focus.
 
 ### Companion server additions (`agent/scripts/companion_server.py`)
-New endpoints:
+Endpoints:
 - `GET /pending` — returns and clears `{target, auto_save, select_all}` job set by last `/trigger` call
 - `POST /pending` — sets the pending job directly (for testing); accepts `target`, `auto_save`, `select_all`
 - `POST /clipboard` — writes XML to macOS clipboard via `clipboard.py`
-- `POST /trigger` — fires `osascript` to `do script` in FM Pro; sets pending job before firing; accepts `select_all` (default `true`)
+- `POST /trigger` — fires `osascript` to `do script` in FM Pro or executes `raw_applescript`; accepts optional `target_file` for multi-file document targeting; sets pending job before firing
+
+### `agent/scripts/test_deploy.py`
+Interactive deployment test suite. 9 tests across 3 phases:
+- **Phase 1** (Foreground): T1, T2-R, T2-A, T2-AS, T3
+- **Phase 2** (Backgrounded): T2-R-BG, T3-BG
+- **Phase 3** (Multi-file): T2-MF, T3-MF
+
+```bash
+python3 agent/scripts/test_deploy.py --phase 1   # foreground, single file
+python3 agent/scripts/test_deploy.py --phase 2   # FM backgrounded
+python3 agent/scripts/test_deploy.py --phase 3   # multi-file targeting
+python3 agent/scripts/test_deploy.py --test T2-R  # single test
+python3 agent/scripts/test_deploy.py --cleanup    # remove test fixtures
+```
+
+Results logged to `agent/debug/test-deploy-results.json`.
 
 ---
 
@@ -65,20 +83,8 @@ New endpoints:
 ### Script Workspace menu item errors when already open
 `click menu item "Script Workspace..." of menu "Scripts" of menu bar 1` errors if the workspace is already open. Wrap in `try / end try` — if it errors the workspace is already open and you can proceed. If it succeeds, add `delay 1.0` before the next action.
 
-### Save required before `do script` in Tier 3
-After creating and renaming a script, it has unsaved changes. FM Pro blocks the next `do script` call (from Agentic-fm Paste) with an unsaved-scripts dialog. Always `keystroke "s" using {command down}` at the end of the Tier 3 AppleScript before returning.
-
 ### AppleScript parameter passing is broken in FM Pro 22
 `do script "ScriptName" given parameter:"value"` compiles without error but `Get(ScriptParameter)` returns empty inside the triggered script. `with parameter "string"` gives a syntax error. **Workaround**: companion server stores the target in `/pending` before firing `do script`. FM script GETs `/pending` via Insert from URL.
-
-### `Pause/Resume Script` steals focus
-Using `Pause/Resume Script [Duration: 0.5]` between `ScriptWorkspace.OpenScript` and the MBS menubar commands causes a system beep — the pause yields UI focus away from Script Workspace. **Use a busy-wait loop instead**:
-```
-Set Variable [ $waitUntil ; Get(CurrentHostTimestamp) + .5 / 86400 ]
-Loop
-  Exit Loop If [ Get(CurrentHostTimestamp) ≥ $waitUntil ]
-End Loop
-```
 
 ### `menu bar` and `menu bar 1` both fail in Perform AppleScript
 `tell me to do menu item "Save All Scripts" of menu "Scripts" of menu bar` → "variable bar not found"
@@ -91,7 +97,7 @@ Requires FM Pro to have Accessibility access in System Preferences → Privacy &
 Not a real MBS function. Use the System Events keystroke approach above.
 
 ### Agentic-fm Paste cannot deploy itself via Tier 2
-`do script "Agentic-fm Paste"` triggers the script, which then opens itself in Script Workspace and attempts to replace its own steps while it is currently executing. FileMaker reverts or blocks changes to a running script's steps. Small pastes (1 step) may appear to succeed; larger replacements silently fail. **Always use Tier 1 (manual paste) to update Agentic-fm Paste itself.** This is not a real-world limitation — in normal use Agentic-fm Paste deploys other scripts.
+`do script "Agentic-fm Paste"` triggers the script, which then opens itself in Script Workspace and attempts to replace its own steps while it is currently executing. FileMaker reverts or blocks changes to a running script's steps. **Always use Tier 1 (manual paste) to update Agentic-fm Paste itself.** This is not a real-world limitation — in normal use Agentic-fm Paste deploys other scripts.
 
 ### Script Workspace paste does NOT replace a selection — must delete first
 Cmd+A selects all script steps, but Cmd+V does **not** overwrite the selection. The new steps are appended instead. The correct replace sequence is:
@@ -102,7 +108,7 @@ Cmd+A selects all script steps, but Cmd+V does **not** overwrite the selection. 
 This is unlike standard text editors. Skipping the Delete step results in silent append regardless of what is selected.
 
 ### `Open Script Workspace` FM step requires FM to be frontmost
-When FM is backgrounded, `Open Script Workspace` runs but the workspace either doesn't open or opens behind other windows, making subsequent MBS and System Events operations unreliable. Fix: `tell me to activate` with `delay 1.0` must run **before** `Open Script Workspace`, giving macOS time to fully bring FM to front.
+When FM is backgrounded, `Open Script Workspace` runs but the workspace either doesn't open or opens behind other windows, making subsequent operations unreliable. Fix: `tell me to activate` with `delay 1.0` must run **before** `Open Script Workspace`, giving macOS time to fully bring FM to front.
 
 ### `window 1` and `front window` are unreliable in System Events for Script Workspace
 `tell window 1` errors with "Invalid index" when FM is backgrounded and the Script Workspace is not the first window in the accessibility tree. `front window` has the same underlying issue. **Use `windows whose title contains "Script Workspace"` to find the window by name.**
@@ -112,17 +118,28 @@ The Script Workspace split group contains two distinct focus zones:
 1. **Script list sidebar** (left) — `Cmd+A` here selects all scripts; `Delete` shows "delete all N scripts?" dialog
 2. **Step editor** (right) — `Cmd+A` here selects all steps; `Delete` removes them
 
-After `MBS("ScriptWorkspace.OpenScript")`, focus remains in the sidebar. The script tab opens (visible in the tab bar as `button [Scripting TabView]`) but is not active. Two clicks are required to get focus into the step editor:
-1. Click the tab button: `click button "$target" of splitter group 1` — activates the tab
-2. Click the SEFabricView: iterate `scroll areas` of the split group, `click table 1 of sa` — focuses the step editor
+After `MBS("ScriptWorkspace.OpenScript")`, focus remains in the sidebar. The script tab opens but is not active. **Solution**: `perform action "AXPress"` on the tab button (matched by `description`, not `name`) from outside FM. This must run via companion `osascript` — Perform AppleScript within FM loses the focus.
 
-**Current state**: two-click approach implemented in `agent/sandbox/Agentic-fm Paste.xml` but **not yet confirmed working**. This is where testing was left off.
+### Script Workspace tab buttons: match by description, not name
+Tab buttons in Script Workspace's splitter group have `name = missing value` but `description = "ScriptName"`. Use `every button whose description is "X"` + `perform action "AXPress"` to activate a tab and focus the step editor. `click button "X"` fails because it matches by name.
+
+### Perform AppleScript within FM loses Script Workspace step editor focus
+`Perform AppleScript` steps that use System Events to interact with Script Workspace cause focus to shift from the step editor back to the script list sidebar. This happens consistently regardless of timing delays. **AXPress on the tab button only works from outside FM** (companion `osascript`, Script Editor). This is why Tier 2 uses a two-phase approach: Phase 1 (`do script`) opens the script tab, Phase 2 (`raw_applescript` via companion) does AXPress + paste.
+
+### FM gates do-script privilege checks on the frontmost document
+`do script` via AppleScript checks `fmextscriptaccess` on the **frontmost** document, not the targeted document. If the wrong file is frontmost and lacks `fmextscriptaccess`, `do script` fails with `-10004` even when `tell (first document whose name contains "X")` targets a file that has the privilege. **Fix**: switch the target file's window to front via the Window menu before calling `do script`.
+
+### Custom menus can hide the Scripts menu
+FileMaker files with custom menu sets may not have the standard Scripts menu. The Tools menu (always present with developer tools) has Custom Menus > [Standard FileMaker Menus]. Switch to standard menus before any Scripts menu operations. After switching files via the Window menu, switch again — each file may have its own custom menu set.
+
+### New scripts have no steps — skip select/delete before paste
+Tier 3 creates a new script and pastes into it. `Cmd+A → Delete` in an empty script beeps (nothing to select/delete). Just `Cmd+V` directly — paste appends to the empty script.
+
+### Cmd+S after rename is unnecessary and beeps
+After `Cmd+N` + rename + Return in Script Workspace, the script name is accepted without needing `Cmd+S`. An extra save at this point beeps because there are no unsaved changes.
 
 ### Cmd+S shortcut opens Script Workspace but hits layout window when backgrounded
 `keystroke "s" using {command down, shift down}` was attempted as an alternative to the `Open Script Workspace` FM step. When FM layouts are frontmost, the keystroke is misinterpreted — FM shows the "Before typing, press Tab or click in a field" dialog. Do not use this approach; rely on the `Open Script Workspace` FM step with `tell me to activate` + `delay 1.0` before it.
-
-### MBS `Menubar.RunMenuCommand` is panel-focus-sensitive in Script Workspace
-`MBS("Menubar.RunMenuCommand"; 57636)` (Select All) operates on whatever panel is active in the Script Workspace. If focus lands on the script list panel (left) rather than the step editor (right), it selects scripts rather than steps — paste then treats it as an empty selection and appends silently. **Use System Events keystrokes instead**: `keystroke "a" using {command down}` and `keystroke "v" using {command down}` go directly to the frontmost FM Pro window and are not affected by which panel is focused.
 
 ### System beep after deploy = paste likely failed
 `Cmd+S` (auto_save) beeps when the script has no unsaved changes. If a developer hears a system beep immediately after a Tier 2 deploy with `auto_save` on, it almost certainly means the paste step didn't land — the script opened correctly but no steps were written, so FileMaker had nothing to save. Check that FM Pro was frontmost and the Script Workspace had focus.
@@ -131,24 +148,16 @@ After `MBS("ScriptWorkspace.OpenScript")`, focus remains in the sidebar. The scr
 When FileMaker executes a `Perform AppleScript` step, the script context is already inside FileMaker. `tell me` refers directly to the running FM application object. Using `tell application "FileMaker Pro" to activate` spawns an external AppleScript process talking back to FM, which can behave differently (slower, or not bringing the correct window to front). Always use `tell me to activate` in `Perform AppleScript` steps when the intent is to bring FileMaker itself to the foreground.
 
 ### AppleScript `activate` is required
-Without `activate` in the AppleScript template, FM Pro stays in the background. MBS commands execute against whatever window is frontmost (not FM). Added to all `/trigger` AppleScript templates.
+Without `activate` in the AppleScript template, FM Pro stays in the background. System Events commands execute against whatever window is frontmost (not FM). Added to all `/trigger` AppleScript templates.
 
 ### FM blocks script execution with unsaved-scripts dialog
-FileMaker will show a dialog and block `do script` if any scripts have unsaved changes in the Script Workspace. Agentic-fm Paste itself must be saved before running deployments. The `--auto-save` flag calls "Save All Scripts" at the end to clean up for subsequent runs.
+FileMaker will show a dialog and block `do script` if any scripts have unsaved changes in the Script Workspace. Agentic-fm Paste itself must be saved before running deployments. The `--auto-save` flag calls `Cmd+S` at the end to clean up for subsequent runs.
 
 ### `fmextscriptaccess` required
 The extended privilege "Allow Apple events and ActiveX to perform FileMaker operations" must be enabled on the account's privilege set in Manage Security. Without it, `do script` returns `-10004` at runtime. No compile error.
 
-### Script Workspace must be open before paste (cold-start timing)
-When Script Workspace is closed, `Open Script Workspace` + `ScriptWorkspace.OpenScript` triggers it to open and navigate. The 0.5s busy-wait is essential here — without it, the MBS paste commands fire before the workspace has finished rendering and either beep or paste into the wrong location.
-
-### MBS menubar command IDs for Script Workspace
-- `57636` = Select All (Edit menu in Script Workspace context)
-- `57637` = Paste (Edit menu in Script Workspace context)
-These were verified working for Tier 2. Do not change without testing.
-
-### MBS paste does not work after System Events manipulation of Script Workspace
-`Menubar.RunMenuCommand(57637)` (Paste) fails silently after System Events has been used to create/rename a script in Tier 3. System Events `keystroke "v" using {command down}` works correctly in the same state. Tier 3 therefore does not delegate to Agentic-fm Paste — it performs `Cmd+A` + `Cmd+V` inline at the end of the same AppleScript block, with the clipboard pre-loaded before the script fires.
+### MBS check syntax
+MBS functions return `"OK"` on success and error strings on failure. Check with `Left ( $result ; 2 ) ≠ "OK"`, not `Left ( $result ; 5 ) = "ERROR"`.
 
 ---
 
@@ -157,54 +166,28 @@ These were verified working for Tier 2. Do not change without testing.
 | Feature | Status |
 |---|---|
 | Tier 1 (clipboard + manual paste) | ✅ Working |
-| Tier 2 (auto-paste into existing script) | ✅ Working |
+| Tier 2 (two-phase: open tab + AXPress paste) | ✅ Working |
 | Tier 2 auto-save (`--auto-save`) | ✅ Working |
 | Tier 2 destructive-paste prompt (`--replace` / `--append`) | ✅ Working |
-| Tier 2 replace mode (Cmd+A → Delete → Cmd+V) | ✅ Working (FM foregrounded) |
-| Tier 2 replace mode with FM backgrounded | 🔴 In progress — focus not landing in step editor |
+| Tier 2 replace mode (AXPress tab + Cmd+A → Delete → Cmd+V) | ✅ Working |
+| Tier 2 replace mode with FM backgrounded | ✅ Working |
 | Tier 2 append mode (`select_all=false`) | ✅ Working |
 | `/pending` endpoint | ✅ Working |
-| Tier 3 (create + rename + save + inline paste via host AppleScript) | ✅ Working |
+| Tier 3 (monolithic: custom menu guard + create/rename/paste) | ✅ Working |
+| Multi-file targeting (`--file` / `target_file`) | ✅ Working |
+| `_resolve_target_file()` auto-resolution | ✅ Working |
 | Context refresh via `/trigger` → Push Context (client-side) | ✅ Working |
+| Interactive test suite (`test_deploy.py`) | ✅ Working (9/9 tests passing) |
 
 ---
 
 ## What to do next
 
-### 🔴 Fix Tier 2 replace with FM backgrounded (in progress)
-The two-click approach (tab button + SEFabricView) is implemented in `agent/sandbox/Agentic-fm Paste.xml` but not yet tested. To resume:
-
-1. Load and manually install the latest Agentic-fm Paste:
-   ```bash
-   python3 agent/scripts/deploy.py "agent/sandbox/Agentic-fm Paste.xml" --tier 1
-   ```
-   Then open **Agentic-fm Paste** in Script Workspace → **⌘A** → **⌘V**
-
-2. Use **Sandbox (ID 269)** as the test target — it's safe to overwrite
-3. Close workspace, background FM, run:
-   ```bash
-   python3 agent/scripts/deploy.py "agent/sandbox/test-steps.xml" "Sandbox" --tier 2 --replace
-   ```
-4. Check Sandbox has the 3 comments + 2 Set Variable steps
-5. If focus still lands in script list, open Accessibility Inspector and check where the scroll area containing SEFabricView sits in the split group index — may need to adjust which scroll area index is iterated
-
-**Do NOT use Agentic-fm Paste itself as the test target** — a script cannot reliably replace its own steps while executing (FM reverts or blocks changes to the running script).
-
-### Test context refresh via `/trigger`
-Verify the full Tier 2/3 context refresh path:
-1. Make sure FM Pro is open on the desired layout
-2. Call `POST /trigger` on companion with `{ "fm_app_name": "FileMaker Pro — 22.0.4.406", "script": "Push Context" }`
-3. Confirm FM Pro activates and shows the task-description dialog
-4. Confirm `agent/CONTEXT.json` is written with the correct layout and `snapshot_path`/`snapshot_timestamp` fields
-5. Confirm `agent/context/snapshot.xml` exists
-
-Expected failure mode: if Push Context (interactive mode) is not yet installed with the snapshot additions, `snapshot_path` will be absent from the output. Tier 1-install the updated `agent/sandbox/Push Context.xml` first.
-
-### Run Explode XML
-Once Agentic-fm Paste is confirmed stable, run `Explode XML` in FM Pro to export the solution and get Agentic-fm Paste (and any other agentic-fm scripts) into `xml_parsed/`. This is the canonical record of what's installed in the solution.
-
 ### Set `auto_save: true` in automation.json for project use
 When confident in the deployment loop, flip `auto_save` to `true` in `automation.json` to remove the `--auto-save` flag requirement.
+
+### Run Explode XML
+Agentic-fm Paste is confirmed stable. Run `Explode XML` in FM Pro to export the solution and get the latest agentic-fm scripts into `xml_parsed/`. This is the canonical record of what's installed in the solution.
 
 ### Build AGFMEvaluation script
 Once the deployment loop is stable, build the `AGFMEvaluation` FM script (see design below) and install it in the Invoice Solution. Then update `Push Context` to save a reference snapshot alongside `CONTEXT.json`.
@@ -307,9 +290,10 @@ After `AGFMEvaluation` returns, the agent can ask the companion to read `snapsho
 | File | Purpose |
 |---|---|
 | `agent/scripts/deploy.py` | Deployment module — CLI + importable |
+| `agent/scripts/test_deploy.py` | Interactive deployment test suite |
 | `agent/scripts/companion_server.py` | HTTP companion server on host |
 | `agent/config/automation.json` | Tier config, fm_app_name, companion_url, auto_save, webviewer_url |
-| `agent/sandbox/Agentic-fm Paste.xml` | FM script — MBS auto-paste (install in solution) |
+| `agent/sandbox/Agentic-fm Paste.xml` | FM script — opens script tab via MBS (install in solution) |
 | `agent/sandbox/AGFMEvaluation.xml` | FM script — server-side calc evaluator (planned, install in solution) |
 | `agent/CONTEXT.json` | Schema/layout context — written by Push Context, read by agent |
 | `agent/context/snapshot.xml` | Reference data snapshot — written by Push Context (planned) |
