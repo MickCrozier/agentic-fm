@@ -15,8 +15,11 @@ interface ChatPanelProps {
   promptMarker?: string;
   codingConventions?: string;
   knowledgeDocs?: string;
-  onInsertScript?: (script: string) => void;
+  customInstructions?: string;
+  baseSystemPrompt?: string;
+  onInsertScript?: (script: string, lineRange?: { start: number; end: number }) => void;
   onClearChat?: () => void;
+  scriptName?: string;
 }
 
 interface ChatMessage {
@@ -25,10 +28,11 @@ interface ChatMessage {
   streaming?: boolean;
 }
 
-export function ChatPanel({ context, steps, catalog, editorContent, promptMarker, codingConventions, knowledgeDocs, onInsertScript, onClearChat }: ChatPanelProps) {
+export function ChatPanel({ context, steps, catalog, editorContent, promptMarker, codingConventions, knowledgeDocs, customInstructions, baseSystemPrompt, onInsertScript, onClearChat, scriptName }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -40,7 +44,7 @@ export function ChatPanel({ context, steps, catalog, editorContent, promptMarker
     const userMsg: ChatMessage = { role: 'user', content: text };
     setMessages(prev => [...prev, userMsg]);
 
-    const systemPrompt = buildSystemPrompt({ context, steps, catalog, promptMarker, codingConventions, knowledgeDocs });
+    const systemPrompt = buildSystemPrompt({ context, steps, catalog, promptMarker, codingConventions, knowledgeDocs, customInstructions, baseSystemPrompt });
 
     // Include editor content as context with line numbers
     let contextMsg = '';
@@ -52,13 +56,17 @@ export function ChatPanel({ context, steps, catalog, editorContent, promptMarker
       contextMsg = `\n\nCurrent editor content:\n\`\`\`\n${numbered}\n\`\`\``;
     }
 
-    const apiMessages = [
-      { role: 'system', content: systemPrompt },
-      ...messages.map(m => ({ role: m.role, content: m.content })),
-      { role: 'user', content: text + contextMsg },
-    ];
+    // When resuming a session, send only the latest user message (CLI has the history).
+    // On first message, send full history with system prompt.
+    const apiMessages = sessionId
+      ? [{ role: 'user', content: text + contextMsg }]
+      : [
+          { role: 'system', content: systemPrompt },
+          ...messages.map(m => ({ role: m.role, content: m.content })),
+          { role: 'user', content: text + contextMsg },
+        ];
 
-    console.log(`[ai-chat] sending ${apiMessages.length} messages (system + ${messages.length} history + user)`);
+    console.log(`[ai-chat] sending ${apiMessages.length} messages (session=${sessionId ? 'resume' : 'new'})`);
 
     setIsStreaming(true);
     const controller = new AbortController();
@@ -72,7 +80,9 @@ export function ChatPanel({ context, steps, catalog, editorContent, promptMarker
       await streamChat(
         apiMessages,
         (event: ChatStreamEvent) => {
-          if (event.type === 'text' && event.text) {
+          if (event.type === 'session' && event.sessionId) {
+            setSessionId(event.sessionId);
+          } else if (event.type === 'text' && event.text) {
             setMessages(prev => {
               const updated = [...prev];
               updated[assistantIdx] = {
@@ -102,6 +112,7 @@ export function ChatPanel({ context, steps, catalog, editorContent, promptMarker
           }
         },
         controller.signal,
+        sessionId ?? undefined,
       );
     } catch (err) {
       console.error('[ai-chat] streamChat threw:', err);
@@ -120,7 +131,7 @@ export function ChatPanel({ context, steps, catalog, editorContent, promptMarker
       setIsStreaming(false);
       abortRef.current = null;
     }
-  }, [input, isStreaming, messages, context, steps, editorContent, promptMarker]);
+  }, [input, isStreaming, messages, context, steps, editorContent, promptMarker, sessionId]);
 
   const handleKeyDown = (e: KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -141,7 +152,14 @@ export function ChatPanel({ context, steps, catalog, editorContent, promptMarker
   return (
     <div class="flex flex-col h-full bg-neutral-900 border-l border-neutral-700">
       <div class="flex items-center justify-between px-3 py-1.5 bg-neutral-800 border-b border-neutral-700 text-xs text-neutral-400 select-none">
-        <span>AI Chat</span>
+        <span class="flex items-center gap-1 min-w-0">
+          <span>AI Chat</span>
+          {sessionId && scriptName && (
+            <span class="text-neutral-500 truncate max-w-[160px]" title={scriptName}>
+              — {scriptName}
+            </span>
+          )}
+        </span>
         {onClearChat && (
           <button
             onClick={onClearChat}

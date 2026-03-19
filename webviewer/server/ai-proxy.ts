@@ -12,6 +12,7 @@ interface ChatRequest {
   messages: { role: string; content: string }[];
   provider?: string;
   model?: string;
+  sessionId?: string;
 }
 
 /** Stream a chat completion, writing SSE events to the response */
@@ -29,7 +30,8 @@ export async function streamChat(
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
-    await streamClaudeCode(body.messages, model, res);
+    res.flushHeaders();
+    await streamClaudeCode(body.messages, model, res, body.sessionId);
     return;
   }
 
@@ -47,6 +49,7 @@ export async function streamChat(
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
 
   if (providerId === 'anthropic') {
     await streamAnthropic(body.messages, model, apiKey, res);

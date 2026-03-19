@@ -15,20 +15,26 @@ The `agent/` folder can be interacted with in three ways:
 
 ## Architecture Overview
 
-Three-panel single-page application:
+Multi-panel single-page application with resizable split panes and togglable panels:
 
 ```
-┌─────────────────────┬──────────────────────┬──────────────────┐
-│  Monaco Editor      │  XML Preview         │  AI Chat         │
-│  (HR script text)   │  (fmxmlsnippet)      │  (Anthropic /    │
-│                     │                      │   OpenAI /       │
-│  syntax highlight   │  live conversion     │   Claude Code)   │
-│  completions        │  from HR             │                  │
-│  diagnostics        │                      │                  │
-└─────────────────────┴──────────────────────┴──────────────────┘
-  Toolbar: Convert | Validate | Load Script | Clipboard | Settings
-  StatusBar: validation results, unresolved refs, draft restore notice
+┌──────────┬────────────────────────────────────┬──────────────────┐
+│          │  Monaco Editor                     │                  │
+│ Library  │  (HR script text)                  │  AI Chat         │
+│ Panel    │                                    │  (Anthropic /    │
+│          │  syntax highlight, completions,    │   OpenAI /       │
+│ (toggle) │  diagnostics, script/calc modes    │   Claude Code)   │
+│          ├─────────── drag ───────────────────┤                  │
+│          │  XML Preview (fmxmlsnippet)        │  (toggle)        │
+│          │  live conversion from HR (toggle)  │                  │
+├──────────┴────────────────────────────────────┴──────────────────┤
+│  Agent Output Panel (diff editor, preview, result display)       │
+└──────────────────────────────────────────────────────────────────┘
+  Toolbar: New | Validate | Clipboard | Load Script | Library | Chat | XML | Settings
+  StatusBar: solution name, layout, context age, validation, unresolved refs, draft restore
 ```
+
+All panel positions and visibility states persist to both localStorage (instant) and server (debounced) via `src/layout-prefs.ts`.
 
 **Frontend**: Preact 10 + Monaco Editor 0.52 + Tailwind CSS 4
 **Build**: Vite 6 + TypeScript 5.7
@@ -52,25 +58,26 @@ webviewer/
 │   ├── claude-cli.ts          # Claude Code CLI integration (subprocess)
 │   ├── file-watcher.ts        # Watches CONTEXT.json, pushes WS event on change
 │   ├── python.ts              # Python subprocess helper (spawnPython)
-│   ├── settings.ts            # Persistent user settings (JSON file)
+│   ├── settings.ts            # AI provider settings (reads/writes .env.local)
 │   └── ws.ts                  # WebSocket setup for file-watcher events
 └── src/
     ├── App.tsx                # Root component — layout, state, toolbar actions
     ├── main.tsx               # Preact render entry
-    ├── styles.css             # Tailwind imports
+    ├── styles.css             # Tailwind imports + custom scrollbar styling
     ├── autosave.ts            # Dual-layer draft persistence
+    ├── layout-prefs.ts        # Panel visibility and sizing persistence
     ├── ai/
     │   ├── chat/              # ChatPanel, MessageList components
     │   ├── key-store.ts       # API key management (localStorage)
     │   ├── prompt/
     │   │   └── system-prompt.ts  # System prompt for AI chat context
-    │   ├── providers/         # anthropic.ts, openai.ts, claude-code.ts
+    │   ├── providers/         # anthropic.ts, openai.ts, claude-code.ts, registry.ts
     │   ├── settings/          # AISettings UI panel
     │   └── types.ts
     ├── api/
     │   └── client.ts          # Fetch wrappers for all server endpoints
     ├── bridge/
-    │   ├── detection.ts       # Detect FileMaker WebViewer runtime
+    │   ├── detection.ts       # Detect FileMaker Web Viewer runtime
     │   ├── fm-bridge.ts       # FileMaker.PerformScript() bridge API
     │   └── callbacks.ts       # Callback routing for FM→browser calls
     ├── context/
@@ -92,7 +99,6 @@ webviewer/
     │   │   ├── records.ts     # Export/Import Records, Save as PDF/Excel
     │   │   ├── windows.ts     # Move/Resize, Refresh, Scroll Window
     │   │   └── miscellaneous.ts
-    │   └── __tests__/
     ├── editor/
     │   ├── EditorPanel.tsx    # Monaco editor wrapper
     │   ├── editor.config.ts   # Monaco editor configuration (font, tabs, whitespace, guides)
@@ -101,13 +107,18 @@ webviewer/
     │   │   ├── monarch.ts            # Syntax tokenizer (tokenizes HR script)
     │   │   ├── completion.ts         # Step name completions from catalog
     │   │   ├── diagnostics.ts        # Live validation markers
-    │   │   └── theme.ts              # FileMaker dark color theme
+    │   │   ├── fm-functions.ts        # FileMaker function database for completions
+    │   │   ├── theme.ts              # FileMaker color theme
+    │   │   ├── themes.ts             # Theme preset manager (light/dark/Solarized)
+    │   │   └── theme-import.ts       # Theme loading utility
     │   └── xml-preview/
     │       └── XmlPreview.tsx        # Side-by-side fmxmlsnippet viewer
     └── ui/
         ├── Toolbar.tsx               # Top action bar
         ├── StatusBar.tsx             # Bottom status/error display
-        └── LoadScriptDialog.tsx      # Script search & load modal
+        ├── LoadScriptDialog.tsx      # Script search & load modal
+        ├── LibraryPanel.tsx          # Library browser with save dialog
+        └── AgentOutputPanel.tsx      # Agent output display (diff, preview, results)
 ```
 
 ---
@@ -116,29 +127,39 @@ webviewer/
 
 All endpoints are served by the Vite dev middleware in `server/api.ts`. The `agentDir()` function resolves to the sibling `agent/` folder; `mainAgentDir()` follows worktree links to the main repo (see [Path Resolution](#path-resolution) below).
 
-| Method | Endpoint                                | Description                                                                       |
-| ------ | --------------------------------------- | --------------------------------------------------------------------------------- |
-| GET    | `/api/context`                          | Returns `agent/CONTEXT.json`                                                      |
-| GET    | `/api/settings`                         | Returns user settings                                                             |
-| POST   | `/api/settings`                         | Updates user settings                                                             |
-| POST   | `/api/chat`                             | Streams AI chat (SSE) via `ai-proxy.ts`                                           |
+| Method | Endpoint                                | Description                                                                                                     |
+| ------ | --------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| GET    | `/api/context`                          | Returns `agent/CONTEXT.json`                                                                                    |
+| GET    | `/api/settings`                         | Returns user settings (provider, model, configured providers — no raw API keys)                                 |
+| POST   | `/api/settings`                         | Updates user settings (provider, model, API keys, prompt marker)                                                |
+| POST   | `/api/chat`                             | Streams AI chat (SSE) via `ai-proxy.ts`                                                                         |
+| GET    | `/api/custom-instructions`              | Returns `agent/config/.custom-instructions.md` content                                                          |
+| POST   | `/api/custom-instructions`              | Saves or deletes custom instructions file                                                                       |
+| GET    | `/api/docs`                             | Returns combined `CODING_CONVENTIONS.md` and all knowledge base docs                                            |
 | GET    | `/api/index/:name?solution=<sol>`       | Parses and returns `agent/context/<sol>/<name>.index` as JSON rows (auto-detects solution when only one exists) |
-| GET    | `/api/step-catalog`                     | Returns `agent/catalogs/step-catalog-en.json`                                     |
-| GET    | `/api/steps`                            | Lists all snippet XML files from `snippet_examples/steps/`                        |
-| GET    | `/api/snippet/:category/:step`          | Returns XML content of a specific snippet file                                    |
-| POST   | `/api/validate`                         | Runs `validate_snippet.py` on posted XML; returns `{valid, errors, warnings}`     |
-| POST   | `/api/clipboard/write`                  | Writes posted XML to macOS clipboard via `clipboard.py write`                     |
-| POST   | `/api/clipboard/read`                   | Reads FM objects from macOS clipboard via `clipboard.py read`                     |
-| POST   | `/api/convert/hr-to-xml`                | Stub (conversion is client-side; exists for headless use)                         |
-| POST   | `/api/convert/xml-to-hr`                | Stub (conversion is client-side; exists for headless use)                         |
-| GET    | `/api/scripts/search?q=<query>`         | Searches `scripts.index` by ID, exact name, or token match; returns top 20        |
-| GET    | `/api/scripts/load?id=<id>&name=<name>` | Loads script HR (`.txt`) and converts SaXML to snippet via `fm_xml_to_snippet.py` |
-| GET    | `/api/autosave`                         | Returns `agent/config/.autosave.json`                                             |
-| POST   | `/api/autosave`                         | Saves draft to `agent/config/.autosave.json`                                      |
-| DELETE | `/api/autosave`                         | Deletes the autosave file                                                         |
-| GET    | `/api/sandbox`                          | Lists `.xml` files in `agent/sandbox/`                                            |
-| GET    | `/api/sandbox/:filename`                | Returns contents of a sandbox XML file                                            |
-| POST   | `/api/sandbox/:filename`                | Writes content to a sandbox XML file                                              |
+| GET    | `/api/step-catalog`                     | Returns `agent/catalogs/step-catalog-en.json`                                                                   |
+| GET    | `/api/steps`                            | Lists all snippet XML files from `snippet_examples/steps/`                                                      |
+| GET    | `/api/snippet/:category/:step`          | Returns XML content of a specific snippet file                                                                  |
+| POST   | `/api/validate`                         | Runs `validate_snippet.py` on posted XML; returns `{valid, errors, warnings}`                                   |
+| POST   | `/api/clipboard/write`                  | Writes posted XML to macOS clipboard via `clipboard.py write`                                                   |
+| POST   | `/api/clipboard/read`                   | Reads FM objects from macOS clipboard via `clipboard.py read`                                                   |
+| POST   | `/api/convert/hr-to-xml`                | Stub (conversion is client-side; exists for headless use)                                                       |
+| POST   | `/api/convert/xml-to-hr`                | Stub (conversion is client-side; exists for headless use)                                                       |
+| GET    | `/api/scripts/search?q=<query>`         | Searches `scripts.index` by ID, exact name, or token match; returns top 20                                      |
+| GET    | `/api/scripts/load?id=<id>&name=<name>` | Loads script HR (`.txt`) and converts SaXML to snippet via `fm_xml_to_snippet.py`                               |
+| GET    | `/api/layout-prefs`                     | Returns `agent/config/.layout-prefs.json` (panel visibility/sizing)                                             |
+| POST   | `/api/layout-prefs`                     | Saves layout preferences                                                                                        |
+| GET    | `/api/autosave`                         | Returns `agent/config/.autosave.json`                                                                           |
+| POST   | `/api/autosave`                         | Saves draft to `agent/config/.autosave.json`                                                                    |
+| DELETE | `/api/autosave`                         | Deletes the autosave file                                                                                       |
+| GET    | `/api/library`                          | Enumerates all `.xml` and `.md` files in `agent/library/` by category                                           |
+| GET    | `/api/library/item?path=<path>`         | Returns contents of a specific library item file                                                                |
+| POST   | `/api/library/save`                     | Saves a library item to disk (with path traversal protection)                                                   |
+| GET    | `/api/agent-output`                     | Returns `agent/config/.agent-output.json` (CLI agent output for webviewer)                                      |
+| DELETE | `/api/agent-output`                     | Deletes the agent output file                                                                                   |
+| GET    | `/api/sandbox`                          | Lists `.xml` files in `agent/sandbox/`                                                                          |
+| GET    | `/api/sandbox/:filename`                | Returns contents of a sandbox XML file                                                                          |
+| POST   | `/api/sandbox/:filename`                | Writes content to a sandbox XML file                                                                            |
 
 ---
 
@@ -217,7 +238,9 @@ Three provider options, selected in the AI Settings panel:
 | OpenAI          | `src/ai/providers/openai.ts`                               | Direct API key, streams via SSE                                        |
 | Claude Code CLI | `server/claude-cli.ts` + `src/ai/providers/claude-code.ts` | Spawns `claude` subprocess; no API key needed if already authenticated |
 
-The system prompt (`src/ai/prompt/system-prompt.ts`) provides the AI with context about the current CONTEXT.json, the step catalog, and FileMaker script conventions.
+Provider registration is managed by `src/ai/providers/registry.ts`, which exposes the available providers to the settings UI and chat system.
+
+The system prompt (`src/ai/prompt/system-prompt.ts`) provides the AI with context about the current CONTEXT.json, the step catalog, FileMaker script conventions, and any custom instructions configured by the developer. Coding conventions and knowledge base docs are fetched from the server via `/api/docs` and injected into the system prompt alongside the step catalog signatures and formatted CONTEXT.json. Custom instructions (`/api/custom-instructions`) are appended when present, giving the developer a way to add per-session behavioral guidance without modifying the system prompt source.
 
 ### CLI/IDE vs Webviewer AI — Capability Comparison
 
@@ -238,24 +261,23 @@ The two interaction modes use fundamentally different context delivery strategie
 | Output format                   | fmxmlsnippet XML → written to `agent/sandbox/`      | HR script text → converted client-side   |
 | Multi-step workflows            | Full agentic tool use                               | Single-turn chat                         |
 
-The CLI agent can also access the full `agent/library/` of reusable snippets, the `snippet_examples/` templates for complex steps, and can run arbitrary shell commands as part of its toolchain. None of these are available to the webviewer AI.
+The CLI agent can also access the `snippet_examples/` templates for complex steps and can run arbitrary shell commands as part of its toolchain. The `agent/library/` of reusable snippets is available in the webviewer via the Library panel (`/api/library` endpoints) but is not injected into the AI system prompt.
 
 ### Token Budget (Webviewer)
 
 Every AI request in the webviewer carries a fixed system prompt overhead. With all resources injected, the breakdown is:
 
-| Resource                               | Approx. tokens       | Notes                                        |
-| -------------------------------------- | -------------------- | -------------------------------------------- |
-| Base instructions                      | ~400                 | Format rules, output constraints             |
-| Step catalog (known signatures)        | ~3,800               | 197 steps with HR signatures                 |
-| CONTEXT.json (formatted)               | ~500 – 2,000         | Varies by solution size                      |
-| Coding conventions                     | ~2,100               | `agent/docs/CODING_CONVENTIONS.md`           |
-| Knowledge docs — `field-references.md` | ~1,275               |                                              |
-| Knowledge docs — `found-sets.md`       | ~3,000               |                                              |
-| Knowledge docs — `terminology.md`      | ~11,400              | Largest single doc (~73% of knowledge total) |
-| **Total (approximate)**                | **~22,500 – 24,000** | Before conversation history                  |
+| Resource                        | Approx. tokens       | Notes                                                                                                 |
+| ------------------------------- | -------------------- | ----------------------------------------------------------------------------------------------------- |
+| Base instructions               | ~400                 | Format rules, output constraints                                                                      |
+| Step catalog (known signatures) | ~3,800               | 197 steps with HR signatures                                                                          |
+| CONTEXT.json (formatted)        | ~500 – 2,000         | Varies by solution size                                                                               |
+| Coding conventions              | ~2,100               | `agent/docs/CODING_CONVENTIONS.md`                                                                    |
+| Knowledge docs (all)            | ~24,000              | 14 focused docs (~98 KB total); largest are `found-sets.md` (~12 KB) and `error-handling.md` (~10 KB) |
+| Custom instructions             | variable             | Developer-defined via `/api/custom-instructions`; 0 when not configured                               |
+| **Total (approximate)**         | **~31,000 – 33,000** | Before conversation history and custom instructions                                                   |
 
-`terminology.md` dominates — it is a broad FileMaker terminology reference (~45 KB) rather than targeted behavioral guidance. As the knowledge base grows, blanket injection will become increasingly expensive.
+The knowledge base was previously dominated by a single ~45 KB `terminology.md` file. That glossary has since been moved to `agent/docs/reference/` (not injected) and the knowledge folder split into 14 focused behavioral documents. The total injection cost is higher, but each document is targeted guidance rather than broad reference material.
 
 ### Trade-offs and Mitigations
 
@@ -269,9 +291,9 @@ Options for managing token cost as the knowledge base grows:
 
 ---
 
-## FileMaker WebViewer Runtime
+## FileMaker Web Viewer Runtime
 
-The webviewer's **primary runtime environment is a FileMaker WebViewer object**, not a standalone browser. FileMaker embeds a WebKit-based webview that loads the Vite dev server URL. While the app functions fully in a browser (useful for development), any feature that interacts with FileMaker — context delivery, script loading, clipboard — is designed around the webviewer context.
+The webviewer's **primary runtime environment is a FileMaker Web Viewer object**, not a standalone browser. FileMaker embeds a WebKit-based webview that loads the Vite dev server URL. While the app functions fully in a browser (useful for development), any feature that interacts with FileMaker — context delivery, script loading, clipboard — is designed around the webviewer context.
 
 ### Context update paths
 
@@ -296,6 +318,18 @@ When running inside a FileMaker WebViewer object (vs. a browser), the bridge lay
 - **FM → Browser**: FileMaker calls a named JavaScript function via the WebViewer's `Perform JavaScript in Web Viewer` step
 - **Browser → FM** (`src/bridge/fm-bridge.ts`): Calls `FileMaker.PerformScript(name, param)` to trigger FM scripts
 - **Callbacks** (`src/bridge/callbacks.ts`): Routes incoming FileMaker calls to registered handlers
+
+### Global window functions
+
+The following functions are registered on `window` by `App.tsx` at mount time, making them callable from FileMaker's `Perform JavaScript in Web Viewer` step:
+
+| Function                               | Purpose                                                                                                                                                                                       |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `window.pushContext(json)`             | Receives CONTEXT.json directly from the Push Context companion script                                                                                                                         |
+| `window.loadScript(content)`           | Loads an existing script's HR text into the editor                                                                                                                                            |
+| `window.onClipboardReady()`            | FileMaker notifies the webviewer after a clipboard write completes                                                                                                                            |
+| `window.triggerAppAction(actionId)`    | Routes toolbar actions from custom menu items (e.g. `agfm.newScript`, `agfm.validate`, `agfm.clipboard`, `agfm.loadScript`, `agfm.toggleXmlPreview`, `agfm.toggleChat`, `agfm.toggleLibrary`) |
+| `window.triggerEditorAction(actionId)` | Routes Monaco editor actions (undo, redo, find, etc.) from custom menu items                                                                                                                  |
 
 The app functions fully in a browser without FileMaker present; the bridge layer degrades gracefully.
 
@@ -417,9 +451,32 @@ The fixed runtime options (`value`, `language`, `theme`, `automaticLayout`) rema
 
 ---
 
+## Agent Output Channel
+
+The agent output channel allows a CLI/IDE agent (e.g. Claude Code) to push results into the webviewer for review without the developer switching windows. This enables a workflow where the developer requests a script via the CLI, the agent writes the result, and the webviewer displays it for inspection, diffing, and clipboard deployment.
+
+- **CLI side**: The companion server's `POST /webviewer/push` endpoint writes output to `agent/config/.agent-output.json`
+- **Server side**: `GET /api/agent-output` serves the file; `DELETE /api/agent-output` clears it
+- **Client side**: `AgentOutputPanel.tsx` polls for output and displays it with a diff editor, preview pane, and result metadata
+
+---
+
+## Library Panel
+
+The Library panel (`src/ui/LibraryPanel.tsx`) provides browsable access to the `agent/library/` collection of reusable fmxmlsnippet code directly within the webviewer. It supports:
+
+- Category-organized browsing of scripts, steps, functions, fields, layouts, menus, and webviews
+- Reading library item contents for reference or adaptation
+- Saving new or modified items back to the library via `/api/library/save`
+
+The panel is togglable via the toolbar and its width is persisted in layout preferences.
+
+---
+
 ## Known Gaps / Future Work
 
 - **Index file fallback in id-resolver**: Unresolved layout/field/script names that are absent from CONTEXT.json currently emit `id=0`. Adding a fallback to `agent/context/*.index` files would resolve names from the full solution.
 - **Go to Related Record converter**: The hand-coded converter for this step is not yet implemented; falls back to catalog-driven (partial support).
 - **Set Variable repetition syntax**: `$name[rep]` repetition notation is passed through as-is without validation.
 - **Server-side conversion**: The `/api/convert/hr-to-xml` and `/api/convert/xml-to-hr` endpoints are stubs. A server-side converter would enable headless script conversion (CI pipelines, CLI calls without a browser).
+- **Agent output channel wiring**: The `/webviewer/push` endpoint and `AgentOutputPanel` are built, but skills have not yet been wired to push output automatically at the end of a build.

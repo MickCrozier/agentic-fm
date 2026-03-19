@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'preact/hooks';
 import * as monaco from 'monaco-editor';
 import { listProviders, getProvider } from '../providers/registry';
-import { fetchSettings, saveSettings } from '@/api/client';
+import { fetchSettings, saveSettings, fetchCustomInstructions, saveCustomInstructions } from '@/api/client';
 import {
   THEME_PRESETS,
   LIGHT_PRESETS,
@@ -39,6 +39,7 @@ export function AISettings({ onClose, onPresetChange }: AISettingsProps) {
   const [apiKey, setKey] = useState('');
   const [promptMarker, setPromptMarker] = useState('prompt');
   const [configuredProviders, setConfiguredProviders] = useState<string[]>([]);
+  const [customInstructions, setCustomInstructions] = useState('');
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState('');
   const [loading, setLoading] = useState(true);
@@ -63,6 +64,7 @@ export function AISettings({ onClose, onPresetChange }: AISettingsProps) {
       .catch(() => {
         setLoading(false);
       });
+    fetchCustomInstructions().then(setCustomInstructions).catch(() => {});
 
     // Load theme settings from localStorage
     setPresetId(loadSavedPresetId());
@@ -89,6 +91,8 @@ export function AISettings({ onClose, onPresetChange }: AISettingsProps) {
       } else {
         setConfiguredProviders(result.configuredProviders);
       }
+
+      await saveCustomInstructions(customInstructions);
 
       setKey('');
       setStatus('Saved');
@@ -245,6 +249,22 @@ export function AISettings({ onClose, onPresetChange }: AISettingsProps) {
                 />
                 <p class="text-xs text-neutral-500 mt-1">
                   Script comments starting with <code># {promptMarker}:</code> are treated as AI instructions.
+                </p>
+              </div>
+
+              {/* Custom Instructions */}
+              <div>
+                <label class="block text-xs text-neutral-400 mb-1">Custom instructions</label>
+                <textarea
+                  value={customInstructions}
+                  onInput={(e) => setCustomInstructions((e.target as HTMLTextAreaElement).value)}
+                  placeholder="Additional instructions injected into every AI request..."
+                  rows={5}
+                  class="w-full bg-neutral-700 text-neutral-200 text-xs rounded px-2 py-1.5 outline-none placeholder:text-neutral-500 font-mono resize-y"
+                />
+                <p class="text-xs text-neutral-500 mt-1">
+                  Injected as "Developer Instructions" in the system prompt. Also editable at{' '}
+                  <code>agent/config/.custom-instructions.md</code>.
                 </p>
               </div>
             </div>

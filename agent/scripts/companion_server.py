@@ -35,7 +35,7 @@ from socketserver import ThreadingMixIn
 # ---------------------------------------------------------------------------
 
 DEFAULT_PORT = 8765
-BIND_HOST = "127.0.0.1"
+BIND_HOST = os.environ.get("COMPANION_BIND_HOST", "127.0.0.1")
 REMOTE_VERSION_URL = "https://raw.githubusercontent.com/petrowsky/agentic-fm/main/version.txt"
 
 # Read version from version.txt at the repo root
@@ -56,6 +56,12 @@ VERSION = _read_local_version()
 
 _webviewer_proc: "subprocess.Popen | None" = None
 _webviewer_lock = threading.Lock()
+
+# Pending paste job — set by /trigger before firing AppleScript,
+# consumed by Agentic-fm Paste via GET /pending.
+# Shape: {"target": str, "auto_save": bool}
+_pending_job: dict = {}
+_pending_lock = threading.Lock()
 
 # ---------------------------------------------------------------------------
 # Logging setup
@@ -96,6 +102,8 @@ class CompanionHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/health":
             self._handle_health()
+        elif self.path == "/pending":
+            self._handle_pending_get()
         elif self.path == "/webviewer/status":
             self._handle_webviewer_status()
         else:
@@ -104,12 +112,22 @@ class CompanionHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path == "/explode":
             self._handle_explode()
+        elif self.path == "/context":
+            self._handle_context()
         elif self.path == "/debug":
             self._handle_debug()
+        elif self.path == "/clipboard":
+            self._handle_clipboard()
+        elif self.path == "/trigger":
+            self._handle_trigger()
+        elif self.path == "/pending":
+            self._handle_pending_post()
         elif self.path == "/webviewer/start":
             self._handle_webviewer_start()
         elif self.path == "/webviewer/stop":
             self._handle_webviewer_stop()
+        elif self.path == "/webviewer/push":
+            self._handle_webviewer_push()
         else:
             self._send_json({"error": "Not found"}, status=404)
 
@@ -207,6 +225,201 @@ class CompanionHandler(BaseHTTPRequestHandler):
 
         self._send_json(response, status=status)
 
+    def _handle_context(self):
+        try:
+            body = self._read_body()
+            payload = json.loads(body)
+        except (ValueError, OSError) as exc:
+            self._send_json({"success": False, "error": f"Invalid request: {exc}"}, status=400)
+            return
+
+        missing = [f for f in ("repo_path", "context") if not payload.get(f)]
+        if missing:
+            self._send_json(
+                {"success": False, "error": f"Missing required fields: {', '.join(missing)}"},
+                status=400,
+            )
+            return
+
+        repo_path = os.path.expanduser(payload["repo_path"])
+        context = payload["context"]
+
+        # Accept context as a pre-serialised string or a parsed object
+        if isinstance(context, str):
+            try:
+                json.loads(context)  # validate only
+            except ValueError as exc:
+                self._send_json({"success": False, "error": f"Invalid context JSON: {exc}"}, status=400)
+                return
+            context_str = context
+        else:
+            context_str = json.dumps(context, indent=2, ensure_ascii=False)
+
+        output_path = os.path.join(repo_path, "agent", "CONTEXT.json")
+
+        try:
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            with open(output_path, "w", encoding="utf-8") as f:
+                f.write(context_str)
+            log.info("CONTEXT.json written to %s", output_path)
+            self._send_json({"success": True, "path": output_path})
+        except Exception as exc:
+            log.exception("Failed to write CONTEXT.json: %s", exc)
+            self._send_json({"success": False, "error": str(exc)}, status=500)
+
+    def _handle_pending_get(self):
+        """Return and clear the pending paste job."""
+        global _pending_job
+        with _pending_lock:
+            job = _pending_job.copy()
+            _pending_job = {}
+        self._send_json(job)
+
+    def _handle_pending_post(self):
+        """Set the pending paste job."""
+        global _pending_job
+        try:
+            body = self._read_body()
+            payload = json.loads(body)
+        except (ValueError, OSError) as exc:
+            self._send_json({"success": False, "error": f"Invalid request: {exc}"}, status=400)
+            return
+        target = payload.get("target", "")
+        auto_save = bool(payload.get("auto_save", False))
+        select_all = bool(payload.get("select_all", True))
+        with _pending_lock:
+            _pending_job = {"target": target, "auto_save": auto_save, "select_all": select_all}
+        log.info("Pending job set: target=%r auto_save=%s select_all=%s", target, auto_save, select_all)
+        self._send_json({"success": True})
+
+    def _handle_trigger(self):
+        """
+        Trigger FM Pro to perform a named script via osascript.
+
+        Payload: { "fm_app_name": "FileMaker Pro — ...", "script": "name", "parameter": "..." }
+        Returns: { "success": bool, "stdout": str, "stderr": str }
+        """
+        try:
+            body = self._read_body()
+            payload = json.loads(body)
+        except (ValueError, OSError) as exc:
+            self._send_json({"success": False, "error": f"Invalid request: {exc}"}, status=400)
+            return
+
+        fm_app = payload.get("fm_app_name", "FileMaker Pro")
+        script = payload.get("script", "")
+        parameter = payload.get("parameter", "")
+        target_file = payload.get("target_file", "")
+
+        def as_str(s):
+            """Escape double-quotes for use inside an AppleScript double-quoted string."""
+            return s.replace("\\", "\\\\").replace('"', '\\"')
+
+        # raw_applescript bypasses the FM do script path — no script name required
+        raw = payload.get("raw_applescript", "")
+        if raw:
+            applescript = raw
+        elif not script:
+            self._send_json({"success": False, "error": "Missing required field: script"}, status=400)
+            return
+        else:
+            # Store the target and auto_save flag in the pending slot so the
+            # FM script can retrieve them via GET /pending (AppleScript parameter
+            # passing via "given parameter:" is unreliable in FM Pro 22).
+            if parameter:
+                global _pending_job
+                auto_save = bool(payload.get("auto_save", False))
+                select_all = bool(payload.get("select_all", True))
+                with _pending_lock:
+                    _pending_job = {"target": parameter, "auto_save": auto_save, "select_all": select_all}
+                log.info("Pending job set: target=%r auto_save=%s select_all=%s", parameter, auto_save, select_all)
+
+            # When target_file is provided, address the specific FM document
+            # by name instead of positional document 1. This ensures the
+            # correct file is targeted when multiple files are open.
+            if target_file:
+                doc_clause = f'tell (first document whose name contains "{as_str(target_file)}")'
+                log.info("Trigger: targeting document %r", target_file)
+            else:
+                doc_clause = "tell document 1"
+                log.info("Trigger: no target_file — using document 1")
+
+            applescript = (
+                f'tell application "{as_str(fm_app)}"\n'
+                f'    activate\n'
+                f'    {doc_clause}\n'
+                f'        do script "{as_str(script)}"\n'
+                f'    end tell\n'
+                f'end tell'
+            )
+
+        try:
+            result = subprocess.run(
+                ["osascript", "-e", applescript],
+                capture_output=True, text=True, timeout=30
+            )
+            success = result.returncode == 0
+            if success:
+                log.info("Trigger: ran '%s' in %s", script, fm_app)
+            else:
+                log.error("Trigger failed: %s", result.stderr)
+            self._send_json({
+                "success": success,
+                "stdout": result.stdout.strip(),
+                "stderr": result.stderr.strip(),
+            })
+        except subprocess.TimeoutExpired:
+            self._send_json({"success": False, "error": "osascript timed out after 30s"}, status=500)
+        except FileNotFoundError:
+            self._send_json({"success": False, "error": "osascript not found — is this macOS?"}, status=500)
+        except Exception as exc:
+            log.exception("Trigger handler error: %s", exc)
+            self._send_json({"success": False, "error": str(exc)}, status=500)
+
+    def _handle_clipboard(self):
+        """Accept XML content and write it to the macOS clipboard via clipboard.py."""
+        try:
+            body = self._read_body()
+            payload = json.loads(body)
+        except (ValueError, OSError) as exc:
+            self._send_json({"success": False, "error": f"Invalid request: {exc}"}, status=400)
+            return
+
+        xml = payload.get("xml", "")
+        if not xml:
+            self._send_json({"success": False, "error": "Missing required field: xml"}, status=400)
+            return
+
+        import tempfile
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        clipboard_py = os.path.join(script_dir, "clipboard.py")
+
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".xml", encoding="utf-8", delete=False
+            ) as tmp:
+                tmp.write(xml)
+                tmp_path = tmp.name
+
+            result = subprocess.run(
+                ["python3", clipboard_py, "write", tmp_path],
+                capture_output=True, text=True
+            )
+            os.unlink(tmp_path)
+
+            if result.returncode == 0:
+                log.info("Clipboard write succeeded")
+                self._send_json({"success": True})
+            else:
+                log.error("Clipboard write failed: %s", result.stderr)
+                self._send_json(
+                    {"success": False, "error": result.stderr or "clipboard.py returned non-zero"},
+                    status=500,
+                )
+        except Exception as exc:
+            log.exception("Clipboard handler error: %s", exc)
+            self._send_json({"success": False, "error": str(exc)}, status=500)
+
     def _handle_debug(self):
         try:
             body = self._read_body()
@@ -288,6 +501,51 @@ class CompanionHandler(BaseHTTPRequestHandler):
                 log.exception("Failed to stop webviewer: %s", exc)
                 self._send_json({"success": False, "error": str(exc)}, status=500)
 
+    def _handle_webviewer_push(self):
+        """
+        Write an agent output payload for the webviewer to pick up via polling.
+
+        Payload: { "type": "preview"|"diff"|"result", "content": "...", "before": "...", "repo_path": "..." }
+        Returns: { "success": bool }
+        """
+        try:
+            body = self._read_body()
+            payload = json.loads(body)
+        except (ValueError, OSError) as exc:
+            self._send_json({"success": False, "error": f"Invalid request: {exc}"}, status=400)
+            return
+
+        payload_type = payload.get("type", "")
+        if payload_type not in ("preview", "diff", "result"):
+            self._send_json({"success": False, "error": f"Unknown type: {payload_type!r}. Must be preview, diff, or result."}, status=400)
+            return
+
+        repo_path = payload.get("repo_path", "")
+        if not repo_path:
+            self._send_json({"success": False, "error": "Missing required field: repo_path"}, status=400)
+            return
+
+        repo_path = os.path.expanduser(repo_path)
+        output_path = os.path.join(repo_path, "agent", "config", ".agent-output.json")
+
+        import time
+        output = {
+            "type": payload_type,
+            "content": payload.get("content", ""),
+            "before": payload.get("before", ""),
+            "timestamp": time.time(),
+        }
+
+        try:
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            with open(output_path, "w", encoding="utf-8") as f:
+                json.dump(output, f, ensure_ascii=False, indent=2)
+            log.info("Agent output written to %s (type=%s)", output_path, payload_type)
+            self._send_json({"success": True, "path": output_path})
+        except Exception as exc:
+            log.exception("Failed to write agent output: %s", exc)
+            self._send_json({"success": False, "error": str(exc)}, status=500)
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -352,7 +610,7 @@ def main():
 
     log.info("companion_server v%s listening on %s:%d", VERSION, BIND_HOST, port)
     threading.Thread(target=_check_for_updates, daemon=True).start()
-    log.info("Endpoints: GET /health  GET /webviewer/status  POST /explode  POST /debug  POST /webviewer/start  POST /webviewer/stop")
+    log.info("Endpoints: GET /health  GET /webviewer/status  POST /explode  POST /context  POST /clipboard  POST /trigger  POST /debug  POST /webviewer/start  POST /webviewer/stop  POST /webviewer/push")
     log.info("Press Ctrl-C to stop.")
 
     try:

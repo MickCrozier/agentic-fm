@@ -191,7 +191,7 @@ Case (
 ## Commenting
 
 - Inline comments use `//`
-- Use `// MARK:` at the top of logical sections within a long script (similar to code folding markers)
+- Use `MARK: SectionName` (disabled `# (comment)`) at the top of logical sections within a long script (similar to code folding markers) — no `//` prefix
 - Comment the _why_, not the _what_ — avoid restating what the step obviously does
 - In Case/If branches, use `// Else` as a visual separator before Else steps
 - Script-level comments describe purpose, expected context, parameters, and return values
@@ -203,7 +203,7 @@ FileMaker's `# (comment)` step has two states — enabled and disabled — and b
 | HR syntax | Step state | XML | Use for |
 |-----------|-----------|-----|---------|
 | `# text` | Enabled (`enable="True"`) | `<Step enable="True" id="89" name="# (comment)"><Text>text</Text></Step>` | Visible annotations, PURPOSE line |
-| `#// text` | Disabled (`enable="False"`) | `<Step enable="False" id="89" name="# (comment)"><Text>// text</Text></Step>` | Section markers (`// MARK:`), structural dividers |
+| `#// text` | Disabled (`enable="False"`) | `<Step enable="False" id="89" name="# (comment)"><Text>MARK: SectionName</Text></Step>` | Section markers, structural dividers — use `MARK: SectionName` without any `//` prefix |
 | `#` | Enabled, blank | `<Step enable="True" id="89" name="# (comment)"/>` | Visual blank line between sections |
 
 The `//` prefix on a disabled comment is a visual convention borrowed from other languages — it signals "this step is off" in the same way `//` means a commented-out line. `// MARK:` headers always use the disabled form `#//` so they appear greyed out in the Script Workspace and do not clutter the active comment layer.

@@ -4,6 +4,7 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import type { ServerResponse } from 'node:http';
 
 interface AIMessage {
@@ -31,23 +32,31 @@ export function streamClaudeCode(
   messages: AIMessage[],
   model: string,
   res: ServerResponse,
+  sessionId?: string,
 ): Promise<void> {
   return new Promise((resolve) => {
     const systemMessage = messages.find(m => m.role === 'system')?.content ?? '';
-    const prompt = buildPrompt(messages);
 
-    const args = [
-      '-p', prompt,
-      '--output-format', 'stream-json',
-      '--verbose',
-    ];
+    const args: string[] = [];
+
+    if (sessionId) {
+      // Resuming an existing session — send only the latest user message
+      const conversationMessages = messages.filter(m => m.role !== 'system');
+      const latestUserMessage = conversationMessages[conversationMessages.length - 1]?.content ?? '';
+      args.push('-p', latestUserMessage, '--resume', sessionId, '--output-format', 'stream-json', '--verbose');
+    } else {
+      // First message — start a new session
+      const newId = randomUUID();
+      const prompt = buildPrompt(messages);
+      args.push('-p', prompt, '--session-id', newId, '--output-format', 'stream-json', '--verbose');
+
+      if (systemMessage) {
+        args.push('--system-prompt', systemMessage);
+      }
+    }
 
     if (model) {
       args.push('--model', model);
-    }
-
-    if (systemMessage) {
-      args.push('--system-prompt', systemMessage);
     }
 
     // Strip CLAUDECODE env var to prevent the child process from detecting
@@ -83,6 +92,7 @@ export function streamClaudeCode(
     // Track text we've already sent so we only forward new content.
     // Each `assistant` event contains the FULL message so far, not a delta.
     let sentTextLength = 0;
+    let capturedSessionId: string | null = null;
 
     proc.stdout!.on('data', (chunk: Buffer) => {
       buffer += chunk.toString();
@@ -95,6 +105,12 @@ export function streamClaudeCode(
         try {
           const event = JSON.parse(trimmed);
           console.log(`[ai-chat:cli] event type=${event.type}`);
+
+          // Capture session_id from the first event that has it
+          if (!capturedSessionId && event.session_id) {
+            capturedSessionId = event.session_id;
+            res.write(`data: ${JSON.stringify({ type: 'session', sessionId: capturedSessionId })}\n\n`);
+          }
 
           if (event.type === 'assistant' && event.message?.content) {
             // Extract all text blocks from the assistant message

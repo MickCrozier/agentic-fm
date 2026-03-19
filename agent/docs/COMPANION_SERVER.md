@@ -10,16 +10,14 @@ The companion server is a lightweight HTTP server that exposes `fmparse.sh` as a
 
 ## Starting the server
 
-The server is a single Python file with no external dependencies beyond the standard library. Activate the virtual environment first, then start:
+The server is a single Python file with no external dependencies beyond the standard library. No virtual environment is required — run it directly with `python3`:
 
 ```bash
-source .venv/bin/activate
-
 # Default port 8765
-python agent/scripts/companion_server.py
+python3 agent/scripts/companion_server.py
 
 # Custom port
-python agent/scripts/companion_server.py --port 9000
+python3 agent/scripts/companion_server.py --port 9000
 ```
 
 Startup log output:
@@ -35,14 +33,13 @@ Startup log output:
 To run the server in the background without blocking the terminal:
 
 ```bash
-source .venv/bin/activate
-python agent/scripts/companion_server.py &
+python3 agent/scripts/companion_server.py &
 ```
 
 stdout logging will mix with your shell session. Redirect to a log file if that is disruptive:
 
 ```bash
-python agent/scripts/companion_server.py > /tmp/companion_server.log 2>&1 &
+python3 agent/scripts/companion_server.py > /tmp/companion_server.log 2>&1 &
 ```
 
 ### Auto-start with launchd (Mac)
@@ -62,7 +59,7 @@ To have the server start automatically at login, create a launchd plist. Replace
 
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/yourname/agentic-fm/.venv/bin/python</string>
+        <string>/usr/bin/python3</string>
         <string>/Users/yourname/agentic-fm/agent/scripts/companion_server.py</string>
     </array>
 
@@ -157,7 +154,7 @@ Content-Length: <byte length of body>
   "solution_name": "Invoice Solution",
   "export_file_path": "/Users/yourname/Desktop/InvoiceSolution.xml",
   "repo_path": "/Users/yourname/agentic-fm",
-  "exploder_bin_path": "/usr/local/bin/fm-xml-export-exploder"
+  "exploder_bin_path": "~/bin/fm-xml-export-exploder"
 }
 ```
 
@@ -211,11 +208,117 @@ If `exploder_bin_path` is provided, it is injected into the subprocess environme
 
 ---
 
+### POST /context
+
+Writes a CONTEXT.json file to the agentic-fm project on the host. Called by the Push Context FM script in server mode.
+
+**Request body:**
+```json
+{ "repo_path": "/absolute/path/to/agentic-fm", "context": "{...}" }
+```
+`context` may be a pre-serialised JSON string or a parsed object.
+
+**Response:** `{ "success": true, "path": "/path/to/CONTEXT.json" }`
+
+---
+
+### GET /pending
+
+Returns and clears the pending paste job set by the most recent `/trigger` call. Called by the `Agentic-fm Paste` FM script to retrieve the target script name and `auto_save` flag without relying on AppleScript parameter passing (which is unreliable in FM Pro 22).
+
+**Response:**
+```json
+{ "target": "ScriptName", "auto_save": false }
+```
+
+Returns `{ "target": "", "auto_save": false }` if no pending job is set. The job is cleared on read (consumed once).
+
+---
+
+### POST /pending
+
+Sets the pending paste job directly (without triggering a script). Used for testing or custom trigger flows.
+
+**Request body:**
+```json
+{ "target": "ScriptName", "auto_save": true }
+```
+
+**Response:** `{ "success": true }`
+
+---
+
+### POST /clipboard
+
+Accepts fmxmlsnippet XML content and writes it to the macOS clipboard using `clipboard.py`. Used by `deploy.py` (Tier 1/2/3) so the agent container can load the clipboard without running `osascript` directly.
+
+**Request body:**
+```json
+{ "xml": "<?xml version=\"1.0\"?>..." }
+```
+
+**Response:** `{ "success": true }`
+
+---
+
+### POST /trigger
+
+Triggers FM Pro on the host to run a named FileMaker script via AppleScript (`osascript`). Used by `deploy.py` for Tier 2/3 automated paste via MBS.
+
+**Request body:**
+```json
+{
+  "fm_app_name": "FileMaker Pro — 22.0.4.406",
+  "script": "Agentic-fm Paste",
+  "parameter": "TargetScriptName"
+}
+```
+`parameter` is optional. `fm_app_name` must match the exact AppleScript application name (versioned, with em dash).
+
+The AppleScript template used:
+```applescript
+tell application "FileMaker Pro — 22.0.4.406"
+    activate
+    tell document 1
+        do script "Agentic-fm Paste" given parameter:"TargetScriptName"
+    end tell
+end tell
+```
+
+**Response:** `{ "success": bool, "stdout": str, "stderr": str }`
+
+**Parameter passing note:** FM Pro 22 does not reliably receive script parameters via `given parameter:` in `do script`. When `parameter` is provided, the server stores it in an internal pending job before firing AppleScript. The triggered FM script calls `GET /pending` via Insert from URL to retrieve the target and `auto_save` flag. The pending job is cleared on first read.
+
+**`auto_save` field:** Pass `"auto_save": true` to instruct `Agentic-fm Paste` to save all scripts after paste (via `Perform AppleScript: tell application "System Events" to keystroke "s" using {command down}`). Defaults to `false`.
+
+**Requirements:**
+- macOS only (`osascript` must be available on the host)
+- FM Pro must be running with the target solution open
+- The `fmextscriptaccess` extended privilege (**Allow Apple events and ActiveX to perform FileMaker operations**) must be enabled on the account's privilege set in Manage Security. Without it, `do script` returns a privilege violation error (`-10004`) at runtime.
+- For `auto_save`: FileMaker Pro must have Accessibility access granted in System Preferences → Privacy & Security → Accessibility so System Events can send keystrokes.
+- For `raw_applescript` override (Tier 3 script creation): include `"raw_applescript": "tell application..."` to execute arbitrary AppleScript instead of the default template.
+
+---
+
+### POST /debug
+
+Accepts a JSON payload of runtime debug state and writes it to `agent/debug/output.json` at the repo root. Called by the Agentic-fm Debug FM script.
+
+**Request body:** Any JSON object (typically `$$DEBUG` variable contents from FM).
+
+**Response:** `{ "success": true, "path": "/path/to/output.json" }`
+
+---
+
 ## Security
 
-The server binds exclusively to `127.0.0.1` (localhost). It is not reachable from other machines on the network — only processes running on the same machine can connect. No authentication is implemented, which is acceptable because the attack surface is limited to local processes already running under the same user account.
+**This project is designed exclusively for local development.** It assumes you are working on your own machine, behind a firewall, on a private network. It is not hardened for production use, multi-user environments, or any network-accessible deployment. Do not use it on a public network or expose any part of it to the internet.
+
+The server binds exclusively to `127.0.0.1` (localhost) by default. It is not reachable from other machines on the network — only processes running on the same machine can connect. No authentication is implemented, which is acceptable because the attack surface is limited to local processes already running under the same user account.
 
 Do not change `BIND_HOST` to `0.0.0.0` or expose the server through a reverse proxy. The `/explode` endpoint executes arbitrary shell scripts with the permissions of the user who started the server.
+
+> **Note for Docker users:** When running the agent in a container, `COMPANION_BIND_HOST=0.0.0.0` is required so the container can reach the host-side server. This is still safe as long as the host machine is on a private, firewalled network — the port should never be forwarded to a public interface.
 
 ---
 
@@ -293,7 +396,7 @@ ls /Users/yourname/agentic-fm/fmparse.sh
 `fmparse.sh` calls `fm-xml-export-exploder`. If the binary is not executable, the subprocess will fail with exit code 1 and `stderr` will contain a permission error. Fix it:
 
 ```bash
-chmod +x /usr/local/bin/fm-xml-export-exploder
+chmod +x ~/bin/fm-xml-export-exploder
 ```
 
 If the binary is in a non-standard location and not on `PATH`, supply its full path in the `exploder_bin_path` field of the request payload.

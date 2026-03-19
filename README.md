@@ -237,6 +237,27 @@ This enables a fully autonomous development loop: the agent generates code, read
 
 The three scripts in `filemaker/agentic-fm.xml` are expected to be present in any solution where you want this level of agent autonomy. Think of them as the bridge between the agent and the live FM environment.
 
+### Multi-file solutions
+
+FileMaker solutions often separate UI and data across multiple files. Each file is a distinct FM solution with its own OData endpoint, account, and export paths. `agent/config/automation.json` (gitignored) supports this with a `solutions` object keyed by FM file name:
+
+```json
+{
+  "solutions": {
+    "MyApp UI": {
+      "odata": { "base_url": "...", "database": "MyApp UI", "username": "...", "password": "...", "script_bridge": "AGFMScriptBridge" },
+      "explode_xml": { "repo_path": "...", "export_path": "...", "companion_url": "http://host.docker.internal:8765" }
+    },
+    "MyApp Data": {
+      "odata": { "base_url": "...", "database": "MyApp Data", "username": "...", "password": "...", "script_bridge": "AGFMScriptBridge" },
+      "explode_xml": { "repo_path": "...", "export_path": "...", "companion_url": "http://host.docker.internal:8765" }
+    }
+  }
+}
+```
+
+The agent matches the active solution by comparing the key to `CONTEXT.json["solution"]` (which reflects `Get(FileName)` at the time Push Context was run). Switch between files by running Push Context on the target layout in the target file — the agent picks up the correct OData config automatically.
+
 # fmparse.sh
 
 A command line tool, called from within FileMaker, that archives a FileMaker XML export and parses it into its component parts using [fm-xml-export-exploder](https://github.com/bc-m/fm-xml-export-exploder). Supports the data separation model -- each solution file is parsed independently and only its subdirectories are cleared on re-parse, preserving other solutions' data in `agent/xml_parsed/`.

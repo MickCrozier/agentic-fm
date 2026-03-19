@@ -23,11 +23,17 @@ interface EditorPanelProps {
   value: string;
   onChange: (value: string) => void;
   context: FMContext | null;
+  getLiveContent?: { current: (() => string) | null };
 }
 
-export function EditorPanel({ value, onChange, context }: EditorPanelProps) {
+export function EditorPanel({ value, onChange, context, getLiveContent }: EditorPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
+  const settingValueRef = useRef(false);
+  // Tracks the last value propagated FROM Monaco → parent via onChange.
+  // The sync effect only calls editor.setValue when value differs from this,
+  // meaning the change came from an external source (accept diff, load script).
+  const lastMonacoValue = useRef(value);
   const completionDisposable = useRef<monaco.IDisposable | null>(null);
   const lastSelectionRef = useRef<monaco.Selection | null>(null);
   const [catalog, setCatalog] = useState<StepCatalogEntry[]>([]);
@@ -71,6 +77,9 @@ export function EditorPanel({ value, onChange, context }: EditorPanelProps) {
 
     editorRef.current = editor;
 
+    // Expose live content getter for validation (bypasses debounce/state lag)
+    if (getLiveContent) getLiveContent.current = () => editor.getValue();
+
     // Expose global trigger for FileMaker "Perform JavaScript in Web Viewer"
     (window as any).triggerEditorAction = (actionId: string) => {
       editor.trigger('fm', actionId, null);
@@ -98,10 +107,16 @@ export function EditorPanel({ value, onChange, context }: EditorPanelProps) {
     };
 
     // Listen for changes — debounced to avoid re-rendering App on every keystroke
+    // Skip notifications triggered by our own setValue calls (settingValueRef guard)
     let changeTimer: ReturnType<typeof setTimeout> | undefined;
     editor.onDidChangeModelContent(() => {
+      if (settingValueRef.current) return;
       if (changeTimer) clearTimeout(changeTimer);
-      changeTimer = setTimeout(() => onChange(editor.getValue()), 150);
+      changeTimer = setTimeout(() => {
+        const val = editor.getValue();
+        lastMonacoValue.current = val;
+        onChange(val);
+      }, 150);
     });
 
     // Attach diagnostics
@@ -133,11 +148,15 @@ export function EditorPanel({ value, onChange, context }: EditorPanelProps) {
     updateConversionDiagnostics(model, result.errors);
   }, [value, context]);
 
-  // Sync value from parent (e.g. when loading a script)
+  // Sync value from parent only when it changed from an external source
+  // (accept diff, load script) — not when it echoes back from Monaco's own onChange.
   useEffect(() => {
     const editor = editorRef.current;
-    if (editor && editor.getValue() !== value) {
+    if (editor && value !== lastMonacoValue.current) {
+      settingValueRef.current = true;
       editor.setValue(value);
+      settingValueRef.current = false;
+      lastMonacoValue.current = value;
     }
   }, [value]);
 

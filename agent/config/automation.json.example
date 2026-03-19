@@ -1,0 +1,21 @@
+{
+  "default_tier": 1,
+  "project_tier": 1,
+  "auto_save": false,
+  "fm_app_name": "FileMaker Pro",
+  "companion_url": "http://localhost:8765",
+  "tiers": {
+    "1": {
+      "description": "Clipboard only — agent writes XML to clipboard, developer pastes with Cmd+V",
+      "requires": []
+    },
+    "2": {
+      "description": "MBS auto-paste — agent writes clipboard, MBS navigates Script Workspace and pastes",
+      "requires": ["mbs_plugin"]
+    },
+    "3": {
+      "description": "Full autonomy — AppleScript creates script placeholders, MBS auto-pastes",
+      "requires": ["mbs_plugin", "accessibility_permission"]
+    }
+  }
+}
