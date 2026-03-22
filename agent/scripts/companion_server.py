@@ -505,7 +505,7 @@ class CompanionHandler(BaseHTTPRequestHandler):
         """
         Write an agent output payload for the webviewer to pick up via polling.
 
-        Payload: { "type": "preview"|"diff"|"result", "content": "...", "before": "...", "repo_path": "..." }
+        Payload: { "type": "preview"|"diff"|"result"|"diagram"|"layout-preview", "content": "...", "before": "...", "styles": "...", "repo_path": "..." }
         Returns: { "success": bool }
         """
         try:
@@ -516,8 +516,8 @@ class CompanionHandler(BaseHTTPRequestHandler):
             return
 
         payload_type = payload.get("type", "")
-        if payload_type not in ("preview", "diff", "result"):
-            self._send_json({"success": False, "error": f"Unknown type: {payload_type!r}. Must be preview, diff, or result."}, status=400)
+        if payload_type not in ("preview", "diff", "result", "diagram", "layout-preview"):
+            self._send_json({"success": False, "error": f"Unknown type: {payload_type!r}. Must be preview, diff, result, diagram, or layout-preview."}, status=400)
             return
 
         repo_path = payload.get("repo_path", "")
@@ -535,6 +535,9 @@ class CompanionHandler(BaseHTTPRequestHandler):
             "before": payload.get("before", ""),
             "timestamp": time.time(),
         }
+        # Include optional styles field for layout-preview payloads
+        if payload.get("styles"):
+            output["styles"] = payload["styles"]
 
         try:
             os.makedirs(os.path.dirname(output_path), exist_ok=True)

@@ -292,9 +292,10 @@ export interface StepInfo {
 // --- Agent output ---
 
 export interface AgentOutput {
-  type: 'preview' | 'diff' | 'result';
+  type: 'preview' | 'diff' | 'result' | 'diagram' | 'layout-preview';
   content: string;
   before?: string;
+  styles?: string;
   timestamp?: number;
   available?: boolean;
 }

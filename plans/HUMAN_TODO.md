@@ -107,16 +107,25 @@ These are not prerequisites, but they recur during execution. Know them in advan
     - For `script-review`: review a script with subscripts, verify call-tree resolution loads all subscripts
     - Clean up any test scripts created during validation (`Debug Test`, `Debug Error Test`, `Debug Location Test`, `Debug Combined Test` from the 2026-03-22 session)
 
-15. **Phase 3a (Layout Design)** — You will need to:
+15. **Phase 3a (Layout Design)** — Not yet started. You will need to:
     - Create layout shells manually in FM Pro (name, base TO)
     - Paste XML2 layout objects onto each layout in Layout Mode
     - Verify object placement, field bindings, and portal configuration
 
-16. **Phase 3b (OData Schema)** — You will need to:
+16. **Phase 3b (OData Schema)** — Skills are built. You will need to:
+    - Test `schema-build` connect sub-mode: walk through OData setup, verify `$metadata` endpoint works
+    - Test `schema-build` build sub-mode: create a test table with fields via OData, verify in Manage Database
+    - Test `schema-plan`: describe a simple app, verify the Mermaid ERD output and FM model
+    - Test Mermaid rendering: push a `diagram` payload to the webviewer, verify SVG renders correctly
     - Manually create all relationships in the Manage Database > Relationships dialog (no API can do this)
     - Follow the click-through checklist the agent produces (TO names, join fields, cardinality, cascade delete)
 
-17. **All phases** — You are the FM validation bottleneck. For every phase:
+17. **Phase 4 (Data Tooling)** — Skills are built. You will need to:
+    - Test `data-seed`: seed test data into Invoice Solution (or a fresh schema), verify records appear correctly
+    - Test `data-migrate`: import a CSV or JSON file, verify field mapping and type coercion
+    - Verify foreign key resolution — child records correctly reference parent record PrimaryKeys
+
+18. **All phases** — You are the FM validation bottleneck. For every phase:
     - [ ] Paste generated artifacts and confirm they appear correctly
     - [ ] Run generated scripts and confirm runtime behaviour
     - [ ] Report results back so the agent can unblock

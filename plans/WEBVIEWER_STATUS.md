@@ -131,6 +131,8 @@ Add `"webviewer_url": "http://localhost:8080"` (port 8080, not 5173 — Vite is 
 | `preview` payload → read-only Monaco HR display | ✅ Working end-to-end (persistent editor, no disposal bug) |
 | `diff` payload → Monaco diff editor | ✅ Built — persistent editor, editable right pane (untested in FM WebKit) |
 | `result` payload → structured output display | ✅ Built — persistent editor (untested in FM WebKit) |
+| `diagram` payload → Mermaid SVG rendering | ✅ Built 2026-03-22 — mermaid.js lazy-loaded, dark theme, code-split into separate chunk. Companion type whitelist updated. Persistent container (never disposed). |
+| `layout-preview` payload → FM layout HTML preview | ✅ Built 2026-03-22 — Shadow DOM style isolation, persistent container, white viewport inside dark chrome, width indicator, Copy HTML button. Companion type whitelist updated. Optional `styles` field for theme CSS injection. |
 | Polling in FM WebKit (not browser) | 🔵 Not yet tested in FM WebViewer object |
 | Terminal fallback when webviewer unavailable | 🔵 Design only — no skills exist yet |
 
@@ -201,6 +203,26 @@ Stop the Vite server. Trigger a skill that produces HR output. Confirm:
 ### 7. FM WebKit polling reliability
 
 Open the webviewer inside a FileMaker WebViewer object (not a browser). Run step 2. Confirm the agent output panel appears within ~2s. This validates that polling survives FM WebKit's WebSocket/SSE unreliability.
+
+### 8. `diagram` payload → Mermaid rendering
+
+```bash
+curl -s -X POST -H "Content-Type: application/json" \
+  -d '{"type": "diagram", "content": "erDiagram\n    Clients ||--o{ Invoices : has\n    Invoices ||--o{ LineItems : contains\n    Clients {\n        string PrimaryKey PK\n        string Name\n        string Email\n    }\n    Invoices {\n        string PrimaryKey PK\n        string Number\n        date Date\n    }\n    LineItems {\n        string PrimaryKey PK\n        number Amount\n        number Qty\n    }"}' \
+  http://localhost:8765/webviewer/push
+```
+
+**Expected**: Agent output panel appears with an SVG ERD diagram (dark theme). Mermaid.js lazy-loads on first diagram payload. Diagram container is scrollable and centered. Header shows "Diagram" label in teal. "Copy Source" button copies raw Mermaid syntax to clipboard.
+
+### 9. `layout-preview` payload → FM layout HTML preview
+
+```bash
+curl -s -X POST -H "Content-Type: application/json" \
+  -d '{"type": "layout-preview", "content": "<div style=\"width:800px;background:white;padding:20px;font-family:Helvetica,sans-serif\"><h2 style=\"color:#333;margin:0 0 16px\">Invoice Details</h2><div style=\"display:grid;grid-template-columns:120px 1fr;gap:8px;margin-bottom:16px\"><label style=\"color:#666;font-size:12px;text-align:right;padding-top:4px\">Invoice #</label><input style=\"border:1px solid #ccc;padding:4px 8px;font-size:14px\" value=\"INV-001\" /><label style=\"color:#666;font-size:12px;text-align:right;padding-top:4px\">Client</label><input style=\"border:1px solid #ccc;padding:4px 8px;font-size:14px\" value=\"Acme Corp\" /></div><table style=\"width:100%;border-collapse:collapse;margin-top:16px\"><thead><tr style=\"background:#f5f5f5\"><th style=\"text-align:left;padding:6px;border-bottom:1px solid #ddd;font-size:12px;color:#666\">Description</th><th style=\"text-align:right;padding:6px;border-bottom:1px solid #ddd;font-size:12px;color:#666\">Amount</th></tr></thead><tbody><tr><td style=\"padding:6px;border-bottom:1px solid #eee\">Consulting</td><td style=\"text-align:right;padding:6px;border-bottom:1px solid #eee\">$500.00</td></tr></tbody></table></div>", "repo_path": "/path/to/roadmap"}' \
+  http://localhost:8765/webviewer/push
+```
+
+**Expected**: Agent output panel appears with a white layout preview inside the dark panel chrome. The HTML renders as a styled invoice form with fields, labels, and a line items table. Header shows "Layout Preview" label in amber. "Copy HTML" button copies the raw HTML content to clipboard. Width indicator below the viewport shows the rendered width in pixels. FM theme CSS (if provided via `styles` field) is injected into the shadow DOM and isolated from the webviewer's Tailwind styles.
 
 ---
 

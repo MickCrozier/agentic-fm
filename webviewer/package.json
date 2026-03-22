@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "marked": "^17.0.4",
+    "mermaid": "^11.13.0",
     "monaco-editor": "^0.52.2",
     "preact": "^10.25.4"
   },

@@ -11,11 +11,11 @@ How to execute the agentic-fm build phases using a sequential, confidence-buildi
         │
    Phase 2 (Script Tooling) ← skills built ✅, FM validation pending
         │
-   Phase 3a (Layout) ──┐
+   Phase 3a (Layout) ──┐ ← skills built ✅, FM validation pending
                         ├── parallel pair
-   Phase 3b (OData)  ──┘
+   Phase 3b (OData)  ──┘ ← skills built ✅, FM validation pending
         │
-   Phase 4 (Data Tooling) ← depends on Phase 3b
+   Phase 4 (Data Tooling) ← skills built ✅, FM validation pending
 ```
 
 ---
@@ -123,45 +123,54 @@ All four skills built in the `roadmap` worktree (no separate branch needed). The
 
 ### Phase 3 — Layout & OData (parallel pair)
 
-**Purpose**: Two independent workstreams that can run concurrently. This is the first use of parallelism, after the workflow has been proven in Phases 1–2.
+**Purpose**: Two independent workstreams that can run concurrently.
 
-**Setup**:
-```bash
-git worktree add /worktrees/layout-design -b feature/layout-design
-git worktree add /worktrees/schema-tooling -b feature/schema-tooling
-```
+#### Phase 3a — Layout & XML2 ✅ Skills Built (2026-03-22)
 
-**Agent prompt (3a — Layout & XML2)**:
-> You are building the layout skills for the agentic-fm project. Your scope is: `layout-design`, `layout-spec`, and `webviewer-build`. Read `plans/VISION.md` (Layout Objects section and Tooling Infrastructure → Layout Object Reference), `plans/SKILL_INTERFACES.md`, and existing skill files for format reference. Validate XML2 output against `agent/xml_parsed/` layout exports. Do not modify shared infrastructure files.
+Built in the `roadmap` worktree alongside Phase 3b.
 
-**Agent prompt (3b — OData Schema)**:
-> You are building the schema tooling skills for the agentic-fm project. Your scope is: `schema-plan` and `schema-build` (a single skill covering OData connection, table/field creation, and relationship specification). Read `plans/VISION.md` (API-Managed Schema section), `plans/SKILL_INTERFACES.md`, and existing skill files for format reference. Document OData field type mappings. Do not modify shared infrastructure files.
+**What was delivered**:
+- `layout-spec` — design conversation → written layout specification
+- `layout-design` — preview-first workflow: HTML with theme CSS → webviewer preview → iterate → XML2 or Web Viewer HTML
+- `webviewer-build` — full HTML/CSS/JS web app + FM bridge scripts for Web Viewer path
+- `extract_theme.py` — theme extraction tool: FM theme XML → `theme.css` + `theme-manifest.json` + `theme-classes.json`
+- `layout-preview` webviewer payload type with Shadow DOM style isolation
 
-**Done when**:
-- Layout: XML2 objects paste correctly into FM Layout Mode
-- OData: Tables and fields created successfully via OData against a live FM Server
-- Both branches merged to main
+**Key design decision**: Preview-first approach. The FM theme CSS constrains the design; the webviewer provides live preview; the approved design translates to either XML2 (native) or HTML (web viewer).
+
+**Remaining**:
+- [ ] FM validation: paste XML2 layout objects into Layout Mode
+- [ ] Test theme extraction on the Invoice Solution
+- [ ] Test layout preview in webviewer
+- [ ] Test `webviewer-build` FM bridge scripts
+
+#### Phase 3b — OData Schema ✅ Skills Built (2026-03-22)
+
+Built in the `roadmap` worktree (no separate branch needed).
+
+**What was delivered**:
+- `schema-plan` — natural language → Mermaid ERD + FM-specific model (TOs, relationship spec)
+- `schema-build` — three sub-modes: connect (OData setup), build (POST/PATCH table/field creation), relationships (click-through checklist)
+- Mermaid.js integrated into webviewer AgentOutputPanel — `diagram` payload type renders Mermaid as SVG
+- OData operations fully researched: endpoints, field type mappings, limitations, gotchas
+
+**Remaining**:
+- [ ] FM validation: test schema creation against live FM Server
+- [ ] Test Mermaid rendering in webviewer (browser + FM WebKit)
 
 ---
 
-### Phase 4 — Data Tooling
+### Phase 4 — Data Tooling ✅ Skills Built (2026-03-22)
 
-**Purpose**: Complete the data lifecycle — seed and migrate records via OData.
+Built in the `roadmap` worktree alongside Phase 3b.
 
-**Depends on**: Phase 3b merged (OData connectivity proven).
+**What was delivered**:
+- `data-seed` — generate realistic seed data, respect referential integrity, load via OData
+- `data-migrate` — import from CSV/JSON/SQL, auto-map fields, type coercion, chunked execution
 
-**Setup**:
-```bash
-git worktree add /worktrees/data-tooling -b feature/data-tooling
-```
-
-**Agent prompt**:
-> You are building the data tooling skills for the agentic-fm project. Your scope is: `data-seed` and `data-migrate`. Read `plans/VISION.md` (Skills → Data section), `plans/SKILL_INTERFACES.md`, and existing skill files for format reference. Both skills require OData connectivity — reference the `schema-build` skill for connection patterns. Do not modify shared infrastructure files.
-
-**Done when**:
-- Seed data creates realistic records in a live FM solution
-- Data migration handles field mapping and type coercion correctly
-- Branch merged to main
+**Remaining**:
+- [ ] FM validation: seed test data into Invoice Solution via OData
+- [ ] Test CSV/JSON import end-to-end
 
 ---
 

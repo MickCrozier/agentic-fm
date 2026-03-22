@@ -73,6 +73,7 @@ Cross-cutting output infrastructure consumed by every skill that produces HR scr
 5. ✅ `POST /webviewer/push` with `{ "type": "diff", "content": "...", "before": "..." }` opens Monaco diff editor
 6. ✅ When Vite is not running, skills detect unavailability and fall back to terminal-only output without error
 7. 🔵 End-to-end test inside FM WebViewer object (polling confirmed in browser, untested in FM WebKit)
+8. ✅ `POST /webviewer/push` with `{ "type": "diagram", "content": "<mermaid syntax>" }` renders Mermaid diagram as SVG (added 2026-03-22; mermaid.js lazy-loaded, dark theme, code-split into separate chunk)
 
 ---
 
@@ -140,49 +141,72 @@ Two independent workstreams that can run concurrently once Phases 1–2 have val
 
 ### Phase 3a — Layout Design & XML2 Generation
 
-**Status**: `planned`
-**Branch**: `feature/layout-design`
-**Worktree**: `/worktrees/layout-design`
+**Status**: `active` — skills + infrastructure built 2026-03-22, pending FM validation testing
 **Vision ref**: Tooling Infrastructure → Layout Object Reference; Skills → `layout-design`, `layout-spec`, `webviewer-build`
 
-**Scope**:
-- Complete the `layout-design` skill — design conversation, XML2 object generation, clipboard load
-- Complete the `layout-spec` skill — written blueprint output for manual builds
-- Complete the `webviewer-build` skill — full HTML/CSS/JS web viewer app + FM bridge scripts
-- Validate XML2 output format against `xml_parsed/` layout exports from a real solution
+**What was delivered**:
 
-**Explicitly out of scope**: Layout container creation (permanently manual), responsive design for native FM layouts.
+| Skill / Tool | File | Description |
+|---|---|---|
+| `layout-spec` | `.claude/skills/layout-spec/SKILL.md` | Design conversation → written layout specification (object list, field bindings, portal config, button wiring, style assignments) |
+| `layout-design` | `.claude/skills/layout-design/SKILL.md` | Preview-first workflow: generate HTML with FM theme CSS → push to webviewer → iterate → translate to XML2 fmxmlsnippet or Web Viewer HTML |
+| `webviewer-build` | `.claude/skills/webviewer-build/SKILL.md` | Full HTML/CSS/JS web app + FM bridge scripts (`FileMaker.PerformScript()` / `fmCallback()`) for Web Viewer path |
+| `extract_theme.py` | `agent/scripts/extract_theme.py` | Theme extraction tool: FM theme XML → `theme.css` + `theme-manifest.json` + `theme-classes.json` |
+| Layout preview | `webviewer/src/ui/AgentOutputPanel.tsx` | `layout-preview` payload type with Shadow DOM style isolation, white viewport, width indicator |
+
+**Key design decision**: Preview-first approach. The agent designs within the FM theme's CSS constraints, previews in the webviewer, iterates with the developer, then translates the approved design to either XML2 (native FM) or Web Viewer HTML. The theme CSS serves as both the design constraint and the production stylesheet.
+
+**Remaining for Phase 3a completion**:
+- [ ] FM validation: generate XML2 layout objects and paste into FM Layout Mode
+- [ ] Verify theme extraction captures all relevant CSS properties
+- [ ] Test layout preview end-to-end in webviewer (browser + FM WebKit)
+- [ ] Test `webviewer-build` bridge scripts (`Perform JavaScript in Web Viewer` / `FileMaker.PerformScript()`)
+- [ ] Verify XML2 clipboard format produces correct layout objects when pasted
+
+**Explicitly out of scope**: Layout container creation (permanently manual).
 
 ### Phase 3b — OData Schema Tooling
 
-**Status**: `planned`
-**Branch**: `feature/schema-tooling`
-**Worktree**: `/worktrees/schema-tooling`
+**Status**: `active` — skills built 2026-03-22, pending FM validation testing
 **Vision ref**: Tooling Infrastructure → Field Definition and Schema Reference; Skills → `schema-plan`, `schema-build`
 
-**Scope**:
-- Complete the `schema-plan` skill — ERD as Mermaid in `plans/schema/`, extended to FM table occurrences
-- Complete the `schema-build` skill — a single skill with sub-modes covering OData connection setup, table/field creation via OData REST calls, and relationship specification output as a click-through checklist
-- Validate OData field type mappings against live FM Server responses
+**What was delivered**:
+
+| Skill | File | Description |
+|---|---|---|
+| `schema-plan` | `.claude/skills/schema-plan/SKILL.md` | Design data model from natural language → Mermaid ERD + FM-specific model with TOs and relationship spec |
+| `schema-build` | `.claude/skills/schema-build/SKILL.md` | Three sub-modes: connect (OData setup walkthrough), build (POST/PATCH table/field creation via OData), relationships (click-through checklist for manual creation) |
+
+**Additional deliverables**:
+- Mermaid.js integrated into webviewer AgentOutputPanel — `diagram` payload type renders Mermaid syntax as SVG (lazy-loaded, dark theme, code-split)
+- OData schema operations fully researched and documented in skill files: endpoints, field type mappings, limitations, gotchas
+
+**Remaining for Phase 3b completion**:
+- [ ] FM validation: test `schema-build` connect + build sub-modes against live FM Server
+- [ ] Verify OData field type mappings produce correct FM field types
+- [ ] Test Mermaid rendering end-to-end in webviewer (browser and FM WebKit)
+- [ ] Confirm `schema-plan` Mermaid output renders correctly via `/webviewer/push`
 
 **Explicitly out of scope**: Relationship creation via API (permanently manual).
-
-**Note**: The original plan had `odata-connect`, `schema-build`, and `relationship-spec` as three separate skills. These are combined into a single `schema-build` skill with sub-modes to reduce interface overhead for what is a single sequential workflow.
 
 ---
 
 ## Phase 4 — Data Tooling
 
-**Status**: `planned`
-**Branch**: `feature/data-tooling`
-**Worktree**: `/worktrees/data-tooling`
+**Status**: `active` — skills built 2026-03-22, pending FM validation testing
 **Vision ref**: Skills → `data-seed`, `data-migrate`
 
-**Depends on**: Phase 3b (OData Schema Tooling)
+**What was delivered**:
 
-**Scope**:
-- Complete the `data-seed` skill — realistic seed/test data via OData
-- Complete the `data-migrate` skill — external source → FM via OData with field mapping and type coercion
+| Skill | File | Description |
+|---|---|---|
+| `data-seed` | `.claude/skills/data-seed/SKILL.md` | Generate realistic seed data, respect referential integrity (parent before child), load via OData POST |
+| `data-migrate` | `.claude/skills/data-migrate/SKILL.md` | Import from CSV/JSON/SQL, auto-map fields, type coercion, chunked execution, error tracking |
+
+**Remaining for Phase 4 completion**:
+- [ ] FM validation: seed test data into Invoice Solution via OData
+- [ ] Test CSV/JSON import end-to-end
+- [ ] Verify foreign key resolution across related tables
 
 ---
 
