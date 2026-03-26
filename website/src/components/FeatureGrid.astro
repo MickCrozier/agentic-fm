@@ -8,8 +8,8 @@ interface Feature {
 const features: Feature[] = [
   {
     icon: '🧠',
-    title: 'Context-Aware Generation',
-    description: 'AI receives scoped context from your live FileMaker solution — tables, fields, relationships, layouts, and scripts — so generated code uses real IDs and names.',
+    title: 'Solution Intelligence',
+    description: 'AI receives scoped context from your live FileMaker solution — tables, fields, relationships, layouts, scripts, and custom functions — so every action uses real IDs and names.',
   },
   {
     icon: '🔍',
@@ -23,15 +23,30 @@ const features: Feature[] = [
   },
   {
     icon: '📐',
-    title: 'Step-Level Editing',
-    description: 'Work at the individual script step level, not whole scripts. Faster iteration, less destructive, and avoids the duplication problem of full-script paste.',
+    title: 'Script Composition',
+    description: 'Generate, modify, and refactor scripts at the step level with full call-tree awareness. Faster iteration, less destructive, and avoids the duplication problem of full-script paste.',
   },
   {
     icon: '🖥️',
     title: 'Visual Script Editor',
     description: 'Write scripts in human-readable format with Monaco editor autocomplete, inline squiggle validation, live XML preview, and integrated AI chat — in your browser or embedded in FileMaker.',
   },
-{
+  {
+    icon: '🔎',
+    title: 'Solution Analysis',
+    description: 'Profile an entire solution — data model, business logic, UI layer, integrations, and health metrics. Understand what you have before deciding what to build.',
+  },
+  {
+    icon: '🗂️',
+    title: 'Schema Design & Construction',
+    description: 'Plan data models with ERD generation, then build tables and fields directly via OData. From whiteboard to working schema without leaving the conversation.',
+  },
+  {
+    icon: '🎨',
+    title: 'Layout Design',
+    description: 'Spec and preview layout objects, field bindings, portals, and button wiring through an interactive design conversation — then generate output for FileMaker or the web viewer.',
+  },
+  {
     icon: '⏱️',
     title: 'Context Staleness Detection',
     description: 'CONTEXT.json carries a timestamp. The validator warns when context is more than 60 minutes old, and the webviewer StatusBar shows context age with amber and red indicators.',
@@ -48,8 +63,8 @@ const features: Feature[] = [
   },
   {
     icon: '🛠️',
-    title: 'Agent Skills',
-    description: 'Opt-in workflows like script preview, code review, and library lookup that extend AI capabilities with structured, repeatable processes.',
+    title: '20+ Agent Skills',
+    description: 'Specialized workflows for solution analysis, debugging, refactoring, testing, schema building, layout design, and more — extending AI with structured, repeatable processes.',
   },
 ];
 ---
@@ -61,7 +76,7 @@ const features: Feature[] = [
         Built for FileMaker developers who use AI
       </h2>
       <p class="mt-4 text-lg text-zinc-600 dark:text-zinc-400">
-        Everything you need to bridge the gap between AI code generation and FileMaker's closed environment.
+        Everything you need to bridge the gap between AI and FileMaker's closed environment.
       </p>
     </div>
 

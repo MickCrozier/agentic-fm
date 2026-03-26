@@ -12,12 +12,12 @@ interface Props {
 
 const {
   title,
-  description = 'AI-powered script development for FileMaker Pro. Generate, modify, and validate fmxmlsnippet code with confidence.',
+  description = 'The agentic harness for empowering Claris FileMaker. Analyze solutions, generate/update scripts, design layouts, build schema & more.',
   ogTitle,
   ogDescription,
 } = Astro.props;
 
-const fullTitle = title === 'Home' ? 'agentic-fm — AI-Powered FileMaker Scripting' : `${title} — agentic-fm`;
+const fullTitle = title === 'Home' ? 'agentic-fm — The Agentic Harness for Claris FileMaker' : `${title} — agentic-fm`;
 const canonicalURL = new URL(Astro.url.pathname, Astro.site);
 const base = import.meta.env.BASE_URL;
 ---
