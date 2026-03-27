@@ -217,7 +217,7 @@ export function App() {
     setStatus('Validating...');
     setStatusDetail(null);
     const content = getLiveContent.current?.() ?? editorContent;
-    const { xml, errors } = hrToXml(content, context);
+    const { xml, errors, warnings } = hrToXml(content, context);
     if (errors.length > 0) {
       console.warn('[validate] conversion errors:', errors);
       const detail = errors.map((e: { line: number; message: string }) => `L${e.line}: ${e.message}`).join('\n');
@@ -228,8 +228,14 @@ export function App() {
     try {
       const result = await validateSnippet(xml);
       if (result.valid) {
-        setStatus('Validation passed');
-        setStatusDetail(null);
+        if (warnings.length > 0) {
+          const detail = warnings.map((w: { line: number; message: string }) => `L${w.line}: ${w.message}`).join('\n');
+          setStatus(`Validation passed (${warnings.length} unresolved reference(s) — FM resolves by name)`);
+          setStatusDetail(detail);
+        } else {
+          setStatus('Validation passed');
+          setStatusDetail(null);
+        }
       } else {
         const fullOutput = result.errors.join('\n');
         const countMatch = fullOutput.match(/FAILED \((\d+) error/);
@@ -244,7 +250,7 @@ export function App() {
 
   const handleClipboard = useCallback(async () => {
     setStatus('Converting & copying to clipboard...');
-    const { xml, errors } = hrToXml(editorContent, context);
+    const { xml, errors, warnings } = hrToXml(editorContent, context);
     if (errors.length > 0) {
       setStatus(`Cannot copy: ${errors.length} conversion error(s)`);
       return;
@@ -252,7 +258,10 @@ export function App() {
     try {
       const result = await clipboardWrite(xml);
       if (result.ok) {
-        setStatus('Copied to clipboard — ready to paste into FileMaker');
+        const warnMsg = warnings.length > 0
+          ? ` (${warnings.length} unresolved reference(s) — FM will resolve by name)`
+          : '';
+        setStatus('Copied to clipboard — ready to paste into FileMaker' + warnMsg);
         window.onClipboardReady?.();
       } else {
         setStatus(`Clipboard error: ${result.error}`);
@@ -400,6 +409,7 @@ export function App() {
                 onChange={setEditorContent}
                 context={context}
                 getLiveContent={getLiveContent}
+                editorMode={editorMode}
               />
             </div>
 

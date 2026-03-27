@@ -48,8 +48,9 @@ export function registerCompletionProviders(
 export function attachDiagnostics(
   editor: monaco.editor.IStandaloneCodeEditor,
   catalog?: StepCatalogEntry[],
+  editorMode?: 'script' | 'calc',
 ): monaco.IDisposable {
-  return createLintDiagnosticsProvider(editor, catalog ?? []);
+  return createLintDiagnosticsProvider(editor, catalog ?? [], editorMode);
 }
 
 export { LANGUAGE_ID };

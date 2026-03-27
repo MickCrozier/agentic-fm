@@ -253,12 +253,18 @@ export function createFieldCompletionProvider(
       const suggestions: monaco.languages.CompletionItem[] = [];
       let i = 0;
 
-      for (const table of Object.values(context.tables)) {
-        const to = table.to;
-        if (filterTO !== null && to !== filterTO) continue;
+      for (const [toKey, table] of Object.entries(context.tables)) {
+        const to = table.to ?? toKey;
+        // Match against both the JSON key and the .to field (supports
+        // both old format keyed by base table and new format keyed by TO)
+        if (filterTO !== null
+            && to.toLowerCase() !== filterTO.toLowerCase()
+            && toKey.toLowerCase() !== filterTO.toLowerCase()) continue;
 
+        // Use the matched name for field labels (prefer filterTO if it matched)
+        const displayTO = filterTO ?? to;
         for (const [fieldName, field] of Object.entries(table.fields)) {
-          const label = `${to}::${fieldName}`;
+          const label = `${displayTO}::${fieldName}`;
           suggestions.push({
             label,
             kind: monaco.languages.CompletionItemKind.Field,

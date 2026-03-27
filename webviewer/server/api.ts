@@ -242,6 +242,30 @@ export function apiMiddleware(): Plugin {
           return;
         }
 
+        // --- GET /api/lint-config ---
+        if (req.method === 'GET' && pathname === '/api/lint-config') {
+          // Merge built-in defaults with project-level overrides (same priority as Python)
+          const builtinPath = path.join(agent, 'fmlint', 'fmlint.config.json');
+          const projectPath = path.join(agent, 'config', 'fmlint.config.json');
+
+          let merged: Record<string, any> = {};
+          for (const cfgPath of [builtinPath, projectPath]) {
+            try {
+              const data = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+              const rules = data.rules ?? {};
+              for (const [id, val] of Object.entries(rules)) {
+                merged[id] = { ...(merged[id] ?? {}), ...(val as Record<string, any>) };
+              }
+            } catch {
+              // File not found or invalid — skip
+            }
+          }
+
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ rules: merged }));
+          return;
+        }
+
         // --- GET /api/steps ---
         if (req.method === 'GET' && pathname === '/api/steps') {
           const stepsDir = path.join(agent, 'snippet_examples', 'steps');

@@ -1,6 +1,6 @@
 # Python
 
-Always use `python3` — never bare `python`. macOS does not ship a `python` binary; the system Python is only available as `python3`. No virtual environment is required for any script in this project — all scripts (`clipboard.py`, `validate_snippet.py`, `companion_server.py`, `deploy.py`) use the Python standard library only.
+Always use `python3` — never bare `python`. macOS does not ship a `python` binary; the system Python is only available as `python3`. No virtual environment is required for any script in this project — all scripts (`clipboard.py`, `validate_snippet.py`, `companion_server.py`, `deploy.py`) and the `agent/fmlint/` package use the Python standard library only.
 
 # Overview
 
@@ -16,6 +16,7 @@ This project is designed to create FileMaker scripts in the clipboard supported 
   - _custom_menu_sets_ subfolder contains one XML file per custom menu set exported from the solution.
 - _catalogs/_ contains the step catalog (`step-catalog-en.json`) — a structured index of all FileMaker script steps with parameter definitions, types, enums, and HR signatures. This is the primary reference for step XML structure.
 - _snippet_examples_ is an **archival** reference folder. The step catalog is the single source of truth for step structure and behavioral notes. Read snippet_examples only when the catalog's `notes` field is insufficient.
+- _fmlint/_ is the FMLint linter package. Run via `python3 -m agent.fmlint` to validate fmxmlsnippet XML or human-readable scripts. See the `fmlint` skill for usage.
 
 # Session startup
 
@@ -341,8 +342,8 @@ Before writing a script, scan `agent/docs/knowledge/MANIFEST.md` for keyword mat
 
 **MANDATORY: After writing or updating a script within agent/sandbox/, you MUST:**
 
-6. Run `python3 agent/scripts/validate_snippet.py agent/sandbox/<script_name>` to validate the output
-7. Fix any errors reported by the validator before presenting the script to the user
+6. Run `python3 -m agent.fmlint agent/sandbox/<script_name>` to validate the output. FMLint checks structure, naming conventions, references, best practices, and calculations. For JSON output suitable for programmatic use, add `--format json`. The legacy `python3 agent/scripts/validate_snippet.py` is a backward-compatible shim that delegates to FMLint.
+7. Fix any errors reported by FMLint before presenting the script to the user. ERROR-severity diagnostics must be fixed; WARNING-severity should be reviewed.
 8. Once validation passes, deploy using `agent/scripts/deploy.py`. Use the tier appropriate for the situation (see `agent/config/automation.json`). When falling back to Tier 1 (manual paste), always present instructions in this exact format:
 
 > The script is on your clipboard. To install it:

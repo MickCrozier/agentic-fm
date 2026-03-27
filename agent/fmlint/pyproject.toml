@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fmlint"
+version = "0.1.0"
+description = "FileMaker code linter for fmxmlsnippet XML and human-readable scripts"
+readme = "../../README.md"
+license = "MIT"
+requires-python = ">=3.9"
+# No dependencies — stdlib only
+
+[project.scripts]
+fmlint = "agent.fmlint.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["../.."]
+include = ["agent.fmlint*"]

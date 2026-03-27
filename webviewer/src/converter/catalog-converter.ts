@@ -147,11 +147,29 @@ function emitBoolean(param: StepParam, hrValue: string | null): string {
 
   if (hrValue !== null) {
     const lower = hrValue.toLowerCase();
+    // Determine the HR-to-XML truth mapping.
+    // When invertedHr is true, the HR label is the opposite of the XML state:
+    //   e.g. "With dialog: Off" → NoInteract state="True" (no interaction = dialog off)
+    let hrMeansTrue: boolean;
     if (lower === 'on' || lower === 'true' || lower === 'yes') {
-      state = 'True';
+      hrMeansTrue = true;
     } else if (lower === 'off' || lower === 'false' || lower === 'no') {
-      state = 'False';
+      hrMeansTrue = false;
+    } else {
+      // Unrecognized value — try hrEnumValues mapping
+      hrMeansTrue = state === 'True';
+      if (param.hrEnumValues) {
+        for (const [xmlState, hrLabel] of Object.entries(param.hrEnumValues)) {
+          if (hrLabel.toLowerCase() === lower) {
+            hrMeansTrue = xmlState === 'True';
+            break;
+          }
+        }
+      }
     }
+
+    if (param.invertedHr) hrMeansTrue = !hrMeansTrue;
+    state = hrMeansTrue ? 'True' : 'False';
   }
 
   return `    <${xmlEl} state="${state}"/>`;

@@ -1,6 +1,6 @@
 import type { ParsedLine } from '../parser';
 import type { IdResolver } from '../id-resolver';
-import { registerHrToXml, registerXmlToHr, stepOpen, stepSelfClose, cdata } from '../step-registry';
+import { registerHrToXml, registerXmlToHr, stepOpen, stepSelfClose, cdata, escXml } from '../step-registry';
 
 // --- # (comment) ---
 registerHrToXml({
@@ -189,34 +189,54 @@ registerXmlToHr({
 });
 
 // --- Set Variable ---
+
+/**
+ * Parse a variable name that may include a repetition suffix.
+ * e.g. "$TASK_NAME[1]" -> { name: "$TASK_NAME", rep: "1" }
+ * e.g. "$myVar" -> { name: "$myVar", rep: null }
+ * e.g. "$arr[Get(ActiveRepetitionNumber)]" -> { name: "$arr", rep: "Get(ActiveRepetitionNumber)" }
+ */
+function parseVarRepetition(raw: string): { name: string; rep: string | null } {
+  const match = raw.match(/^(.+?)\[(.+)\]$/);
+  if (!match) return { name: raw, rep: null };
+  return { name: match[1], rep: match[2] };
+}
+
 registerHrToXml({
   stepNames: ['Set Variable'],
   toXml(line: ParsedLine): string {
-    const name = line.params[0] ?? '$var';
+    const rawName = line.params[0] ?? '$var';
     let value = line.params[1] ?? '';
     let rep = line.params[2];
     // Strip "Value:" label prefix (same pattern as Exit Script's "Result:")
     const valueMatch = value.match(/^Value:\s*([\s\S]*)$/i);
     if (valueMatch) value = valueMatch[1].trim();
-    // Strip "Repetition:" label prefix
+    // Strip "Repetition:" label prefix from explicit 3rd param
     if (rep) {
       const repMatch = rep.match(/^Repetition:\s*([\s\S]*)$/i);
       if (repMatch) rep = repMatch[1].trim();
     }
+    // Parse [N] suffix from variable name (sanitizer artifact or intentional repetition)
+    const parsed = parseVarRepetition(rawName.trim());
+    const varName = parsed.name;
+    // Repetition from [N] suffix, unless an explicit 3rd param overrides
+    const effectiveRep = rep ?? parsed.rep;
+
     const lines = [
       stepOpen('Set Variable', !line.disabled),
       '    <Value>',
       `      <Calculation>${cdata(value)}</Calculation>`,
       '    </Value>',
     ];
-    if (rep) {
+    // Only emit <Repetition> if it's not the default (1)
+    if (effectiveRep && effectiveRep.trim() !== '1') {
       lines.push(
         '    <Repetition>',
-        `      <Calculation>${cdata(rep)}</Calculation>`,
+        `      <Calculation>${cdata(effectiveRep)}</Calculation>`,
         '    </Repetition>',
       );
     }
-    lines.push(`    <Name>${name}</Name>`, '  </Step>');
+    lines.push(`    <Name>${escXml(varName)}</Name>`, '  </Step>');
     return lines.join('\n');
   },
 });
@@ -226,7 +246,10 @@ registerXmlToHr({
   toHR(el: Element): string {
     const name = el.querySelector('Name')?.textContent ?? '$var';
     const value = el.querySelector('Value > Calculation')?.textContent ?? '';
-    return `Set Variable [ ${name} ; ${value} ]`;
+    const rep = el.querySelector('Repetition > Calculation')?.textContent;
+    // Only show repetition suffix for non-default values (> 1 or expressions)
+    const repSuffix = rep && rep.trim() !== '1' ? `[${rep.trim()}]` : '';
+    return `Set Variable [ ${name}${repSuffix} ; ${value} ]`;
   },
 });
 

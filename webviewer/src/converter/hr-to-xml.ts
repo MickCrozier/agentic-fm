@@ -32,6 +32,7 @@ export function loadCatalog(catalog: StepCatalogEntry[]): void {
 export interface ConversionResult {
   xml: string;
   errors: ConversionError[];
+  warnings: ConversionError[];
 }
 
 export interface ConversionError {
@@ -79,9 +80,11 @@ export function hrToXml(hrText: string, context?: FMContext | null): ConversionR
     }
   }
 
-  // Report unresolved references as errors
+  // Report unresolved references as warnings (not errors).
+  // The XML is still valid — FileMaker resolves by name on paste.
+  const warnings: ConversionError[] = [];
   for (const ref of resolver.getUnresolved()) {
-    errors.push({
+    warnings.push({
       line: 0,
       message: `Unresolved ${ref.type}: "${ref.name}" (id will be 0)`,
     });
@@ -94,7 +97,7 @@ export function hrToXml(hrText: string, context?: FMContext | null): ConversionR
     '</fmxmlsnippet>',
   ].join('\n');
 
-  return { xml, errors };
+  return { xml, errors, warnings };
 }
 
 /** Generate a comment step for unrecognized steps */

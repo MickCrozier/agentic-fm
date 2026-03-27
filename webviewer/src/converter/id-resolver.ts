@@ -54,9 +54,12 @@ export function createIdResolver(context: FMContext | null): IdResolver {
         return { table, fieldId: 0, fieldName: field };
       }
 
-      // Search tables by TO name
-      for (const [, tData] of Object.entries(context.tables)) {
-        if (tData.to === table || tData.to?.toLowerCase() === table.toLowerCase()) {
+      // Search tables by TO name (key or .to field)
+      for (const [toKey, tData] of Object.entries(context.tables)) {
+        const toName = tData.to ?? toKey;
+        if (toKey === table || toName === table
+            || toKey.toLowerCase() === table.toLowerCase()
+            || toName.toLowerCase() === table.toLowerCase()) {
           const fData = tData.fields[field];
           if (fData) return { table: tData.to, fieldId: fData.id, fieldName: field };
           // Case-insensitive field search

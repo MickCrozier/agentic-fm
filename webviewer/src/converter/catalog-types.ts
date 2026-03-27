@@ -51,6 +51,10 @@ export interface StepParam {
   xmlAttr?: string;
   /** Valid values for enum parameters */
   enumValues?: string[];
+  /** HR enum labels mapped to XML state values (e.g. { "True": "Off", "False": "On" }) */
+  hrEnumValues?: Record<string, string>;
+  /** When true, the HR label is inverted from the XML attribute value */
+  invertedHr?: boolean;
   /** Parent element name for namedCalc parameters */
   wrapperElement?: string;
   /** Whether this parameter is required */

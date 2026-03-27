@@ -1,0 +1,156 @@
+{
+  "_comment": "FMLint default configuration. Project-level overrides go in agent/config/fmlint.config.json.",
+
+  "rules": {
+
+    "S001": { "enabled": true, "severity": "error" },
+    "S002": { "enabled": true, "severity": "error" },
+    "S003": { "enabled": true, "severity": "error" },
+    "S004": { "enabled": true, "severity": "error" },
+    "S005": { "enabled": true, "severity": "error" },
+    "S006": { "enabled": true, "severity": "error" },
+    "S007": { "enabled": true, "severity": "error" },
+
+    "S008": {
+      "enabled": true,
+      "severity": "warning"
+    },
+
+    "S009": { "enabled": true, "severity": "warning" },
+    "S010": { "enabled": true, "severity": "info" },
+    "S011": { "enabled": true, "severity": "warning" },
+
+
+    "N001": {
+      "enabled": false,
+      "severity": "info"
+    },
+
+    "N002": {
+      "enabled": true,
+      "severity": "warning",
+      "patterns": {
+        "$$~": { "regex": "^\\$\\$~[A-Z][A-Z0-9._]*$", "label": "$$~ALL_CAPS.DOTS" },
+        "$$":  { "regex": "^\\$\\$[A-Z][A-Z0-9._]*$",  "label": "$$ALL_CAPS.DOTS" },
+        "~":   { "regex": "^~[a-z][a-zA-Z0-9]*$",       "label": "~camelCase" },
+        "$":   { "regex": "^\\$[a-z][a-zA-Z0-9]*$",     "label": "$camelCase" }
+      },
+      "allow_repetition_suffix": true
+    },
+
+    "N003": {
+      "enabled": true,
+      "severity": "info",
+      "boolean_prefixes": ["is", "has", "can", "should", "will", "did", "was", "needs", "allows"]
+    },
+
+    "N004": {
+      "enabled": true,
+      "severity": "warning",
+      "indent_char": "tab"
+    },
+
+    "N005": {
+      "enabled": true,
+      "severity": "info"
+    },
+
+    "N006": {
+      "enabled": false,
+      "severity": "hint",
+      "min_spaces": 3
+    },
+
+    "N007": {
+      "enabled": true,
+      "severity": "info",
+      "min_variables": 2
+    },
+
+
+    "D001": {
+      "enabled": true,
+      "severity": "warning",
+      "keyword": "PURPOSE:",
+      "case_sensitive": false
+    },
+
+    "D002": {
+      "enabled": true,
+      "severity": "info",
+      "doc_variable": "$README"
+    },
+
+    "D003": {
+      "enabled": true,
+      "severity": "info",
+      "min_steps": 20
+    },
+
+
+    "R001": { "enabled": true, "severity": "warning" },
+    "R002": { "enabled": true, "severity": "warning" },
+    "R003": { "enabled": true, "severity": "warning" },
+    "R004": { "enabled": true, "severity": "warning" },
+    "R005": { "enabled": true, "severity": "warning" },
+    "R006": { "enabled": true, "severity": "warning" },
+    "R007": { "enabled": true, "severity": "warning" },
+
+    "R008": {
+      "enabled": true,
+      "severity": "warning",
+      "stale_minutes": 60
+    },
+
+    "R009": { "enabled": true, "severity": "info" },
+
+
+    "B001": {
+      "enabled": true,
+      "severity": "warning",
+      "lookahead_steps": 10
+    },
+
+    "B002": {
+      "enabled": true,
+      "severity": "info"
+    },
+
+    "B003": {
+      "enabled": false,
+      "severity": "info"
+    },
+
+    "B004": {
+      "enabled": true,
+      "severity": "info"
+    },
+
+    "B005": {
+      "enabled": true,
+      "severity": "error"
+    },
+
+
+    "C001": { "enabled": true, "severity": "error" },
+    "C002": { "enabled": true, "severity": "error" },
+
+    "C003": {
+      "enabled": true,
+      "severity": "warning",
+      "extra_known_functions": []
+    },
+
+    "C004": {
+      "enabled": true,
+      "severity": "error",
+      "requires_confirmation": true
+    },
+
+    "C005": {
+      "enabled": true,
+      "severity": "warning",
+      "requires_confirmation": true
+    }
+  }
+}

@@ -24,9 +24,10 @@ interface EditorPanelProps {
   onChange: (value: string) => void;
   context: FMContext | null;
   getLiveContent?: { current: (() => string) | null };
+  editorMode?: 'script' | 'calc';
 }
 
-export function EditorPanel({ value, onChange, context, getLiveContent }: EditorPanelProps) {
+export function EditorPanel({ value, onChange, context, getLiveContent, editorMode = 'script' }: EditorPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const settingValueRef = useRef(false);
@@ -35,6 +36,7 @@ export function EditorPanel({ value, onChange, context, getLiveContent }: Editor
   // meaning the change came from an external source (accept diff, load script).
   const lastMonacoValue = useRef(value);
   const completionDisposable = useRef<monaco.IDisposable | null>(null);
+  const diagDisposable = useRef<monaco.IDisposable | null>(null);
   const lastSelectionRef = useRef<monaco.Selection | null>(null);
   const [catalog, setCatalog] = useState<StepCatalogEntry[]>([]);
 
@@ -127,19 +129,31 @@ export function EditorPanel({ value, onChange, context, getLiveContent }: Editor
       }, 150);
     });
 
-    // Attach diagnostics
-    const diagDisposable = attachDiagnostics(editor, catalog);
-
     return () => {
       if (changeTimer) clearTimeout(changeTimer);
       delete (window as any).triggerEditorAction;
       delete (window as any).getEditorSelection;
       delete (window as any).insertAtEditorCursor;
-      diagDisposable.dispose();
+      diagDisposable.current?.dispose();
+      diagDisposable.current = null;
       editor.dispose();
       editorRef.current = null;
     };
   }, [containerRef.current]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Attach/re-attach diagnostics when editor, catalog, or mode changes
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    diagDisposable.current?.dispose();
+    diagDisposable.current = attachDiagnostics(editor, catalog, editorMode);
+
+    return () => {
+      diagDisposable.current?.dispose();
+      diagDisposable.current = null;
+    };
+  }, [editorRef.current, catalog, editorMode]);
 
   // Sync context prop into the store so completion providers can read it via getContext()
   useEffect(() => {
@@ -147,14 +161,21 @@ export function EditorPanel({ value, onChange, context, getLiveContent }: Editor
   }, [context]);
 
   // Update conversion diagnostics whenever editor content or context changes
+  // (only relevant in script mode — calc mode has no HR→XML conversion)
   useEffect(() => {
     const editor = editorRef.current;
     if (!editor) return;
     const model = editor.getModel();
     if (!model) return;
-    const result = hrToXml(editor.getValue(), context);
-    updateConversionDiagnostics(model, result.errors);
-  }, [value, context]);
+
+    if (editorMode === 'script') {
+      const result = hrToXml(editor.getValue(), context);
+      updateConversionDiagnostics(model, result.errors, result.warnings);
+    } else {
+      // Clear conversion markers in calc mode
+      updateConversionDiagnostics(model, []);
+    }
+  }, [value, context, editorMode]);
 
   // Sync value from parent only when it changed from an external source
   // (accept diff, load script) — not when it echoes back from Monaco's own onChange.

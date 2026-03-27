@@ -128,6 +128,8 @@ class CompanionHandler(BaseHTTPRequestHandler):
             self._handle_webviewer_stop()
         elif self.path == "/webviewer/push":
             self._handle_webviewer_push()
+        elif self.path == "/lint":
+            self._handle_lint()
         else:
             self._send_json({"error": "Not found"}, status=404)
 
@@ -552,6 +554,54 @@ class CompanionHandler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _handle_lint(self):
+        """Lint FileMaker code via FMLint engine.
+
+        POST /lint
+        Body: { "content": "...", "format": "xml"|"hr"|null, "tier": 1|2|3|null,
+                "disable": ["N003", ...] }
+        Returns: LintResult as JSON
+        """
+        try:
+            body = json.loads(self._read_body())
+        except (json.JSONDecodeError, ValueError):
+            self._send_json({"error": "Invalid JSON body"}, status=400)
+            return
+
+        content = body.get("content", "")
+        if not content:
+            self._send_json({"error": "Missing 'content' field"}, status=400)
+            return
+
+        fmt = body.get("format")
+        tier = body.get("tier")
+        disabled = body.get("disable", [])
+
+        try:
+            # Resolve project root from this script's location
+            here = os.path.dirname(os.path.abspath(__file__))
+            project_root = os.path.join(here, "..", "..")
+
+            sys.path.insert(0, project_root)
+            from agent.fmlint import lint
+
+            config = {}
+            if disabled:
+                config["disable"] = disabled
+            if tier is not None:
+                config["max_tier"] = tier
+
+            result = lint(
+                content,
+                fmt=fmt,
+                project_root=project_root,
+                config=config,
+            )
+            self._send_json(result.to_dict())
+        except Exception as e:
+            logging.exception("FMLint error")
+            self._send_json({"error": str(e)}, status=500)
 
     def _read_body(self) -> bytes:
         length = int(self.headers.get("Content-Length", 0))
