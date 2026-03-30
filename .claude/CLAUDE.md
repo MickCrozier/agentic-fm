@@ -303,6 +303,16 @@ ls agent/docs/filemaker/functions/get/ | grep -i "caller"
 
 If the docs folder does not exist, be conservative: prefer well-known functions and avoid guessing names for less-common ones. Do not invent function names (e.g. `Get ( CallerScriptName )` does not exist — the correct function is `Get ( ScriptName )`).
 
+# Documentation conventions
+
+When writing or updating documentation, skill files, README content, code comments, or any user-facing references, use **generic placeholder names** instead of real solution names. For example, use `SolutionApp` and `SolutionData` rather than a specific customer's file names. This keeps documentation solution-agnostic and reusable across projects.
+
+- CLI examples: `python3 agent/scripts/analyze.py -s "SolutionApp"` (not a real solution name)
+- Multi-file references: `SolutionApp` (UI file) and `SolutionData` (data file)
+- Data source map examples: `{"Data": "SolutionData"}`
+
+**Exception**: Real solution names are appropriate when the context is explicitly about that solution — e.g., in a CONTEXT.json example scoped to a specific file, in git commit messages describing changes tested against a real solution, or when the developer asks about a specific solution by name.
+
 # Coding Conventions
 
 **MANDATORY: All generated FileMaker code — scripts and calculations — MUST follow the conventions in `agent/docs/CODING_CONVENTIONS.md`.** Read that file before writing any calculation logic or script steps. Key areas: variable naming prefixes (`$`, `$$`, `~`), Let() formatting, operator spacing, boolean values, and control structure style.

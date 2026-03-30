@@ -18,6 +18,7 @@ agent/docs/filemaker/error-codes.md
 
 # Specific files
 PROJECT.md
+*_PRIVATE.md
 Prompt.md
 .cursorignore
 agent/library/
@@ -28,6 +29,7 @@ agent/config/.layout-prefs.json
 agent/config/.custom-instructions.md
 agent/config/webviewer-system-prompt.md
 agent/config/fmlint.config.json
+agent/config/layout-signals.json
 docker-compose.override.yml
 project.env
 
