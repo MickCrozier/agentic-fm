@@ -37,6 +37,25 @@ export function buildSystemPrompt(opts: {
   }
   sections.push(base);
 
+  sections.push(`Your output should be in the human-readable FileMaker script format, NOT in XML. The user's editor will convert your output to XML automatically.
+
+Format rules:
+- Each script step goes on its own line
+- Parameters go inside square brackets: StepName [ param1 ; param2 ]
+- Use # for comments: # This is a comment
+- Control flow uses indentation:
+  If [ condition ]
+      Set Variable [ $x ; 1 ]
+  Else
+      Set Variable [ $x ; 2 ]
+  End If
+- Field references use Table::Field notation: Invoices::Total
+- Variables use $ prefix (local) or $$ prefix (global): $invoiceId, $$USER
+- Let variables use ~ prefix in calculations: ~lineTotal
+- CRITICAL: All indentation inside calculations (Let, Case, List, etc.) MUST use hard tab characters, never spaces. This applies to any expression content inside square brackets.
+
+The context has been injected, do not look for CONTEXT.json.`);
+
   // Custom instructions (developer-provided)
   if (opts.customInstructions) {
     sections.push(`## Developer Instructions\n\n${opts.customInstructions}`);
