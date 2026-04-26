@@ -202,7 +202,7 @@ FileMaker's `# (comment)` step has two states — enabled and disabled — and b
 
 | HR syntax | Step state | XML | Use for |
 |-----------|-----------|-----|---------|
-| `# text` | Enabled (`enable="True"`) | `<Step enable="True" id="89" name="# (comment)"><Text>text</Text></Step>` | Visible annotations, PURPOSE line |
+| `# text` | Enabled (`enable="True"`) | `<Step enable="True" id="89" name="# (comment)"><Text>text</Text></Step>` | Visible annotations, header lines |
 | `#// text` | Disabled (`enable="False"`) | `<Step enable="False" id="89" name="# (comment)"><Text>MARK: SectionName</Text></Step>` | Section markers, structural dividers — use `MARK: SectionName` without any `//` prefix |
 | `#` | Enabled, blank | `<Step enable="True" id="89" name="# (comment)"/>` | Visual blank line between sections |
 
@@ -212,54 +212,95 @@ This distinction matters when HR code is pasted into FileMaker or converted by t
 
 ### Script documentation structure
 
-Every script follows this documentation pattern at the top:
+Every script follows this documentation pattern at the top, written entirely as enabled `# (comment)` steps. Each line of the header is a separate step.
 
-**1. PURPOSE line** — always the very first step, a single `# (comment)` with `PURPOSE: ...`:
+**Header format — JSON parameters/returns:**
+
+```
+# Script description
+# 
+# PARAMETERS {JSONObject}
+#    key1 {JSONString} description
+#    key2 {JSONObject} description
+#    key2.keyA {JSONNumber} description
+#    key2.keyB {JSONBoolean} description
+#    key3 [JSONArray] of {JSONObjects} description
+#    key3.[].keyC {JSONString} description
+#    key3.[].keyD {JSONString} description
+# 
+# Example
+# JSONSetElement ( "{}" ;
+#    [ "key1" ; "value" ; JSONString ] ;
+#    [ "key2.keyA" ; 1 ; JSONNumber ] ;
+#    [ "key2.keyB" ; True ; JSONBoolean ] ;
+#    [ "key3.[+].keyC" ; "C" ; JSONString ] ;
+#    [ "key3.[:].keyD" ; "D" ; JSONString ] ;
+# )
+# 
+# RETURNS {JSONObject}
+#    success {JSONBoolean} true
+#    message {JSONString}
+# OR
+#    success {JSONBoolean} false
+#    errorCode {JSONNumber} FM error code (positive) or custom code (negative)
+#    message {JSONString}
+# 
+#    Error codes: -1 invalid parameter, -2 not found  (example — define per script)
+# 
+```
+
+**Header format — non-JSON (FileMaker field types):**
+
+```
+# Script description
+# 
+# PARAMETERS {Text}
+#    $theVariableName - variable description
+# 
+# RETURNS {Number}
+#    description of the return value
+# 
+```
+
+**Error code convention:**
+
+Scripts that return JSON always include `errorCode` in the failure shape:
+
+| Range | Meaning | Example |
+|-------|---------|---------|
+| Positive integer | Native FileMaker error — the value returned by `Get ( LastError )` | `401` record missing, `301` record locked |
+| Negative integer | Custom scripting error — validation failure or logical condition the script detected | `-1` invalid parameter, `-2` not found |
+
+Use negative numbers starting at `-1` for script-defined failures, counting down as needed. Document the codes used in the script's header under the error code comment line.
+
+**Type notation:**
+- Scalar: `{JSONString}`, `{JSONNumber}`, `{JSONBoolean}`, `{JSONObject}`, `{Text}`, `{Number}`, `{Date}`, `{Timestamp}`
+- Array: `[JSONArray] of {JSONObjects}`
+- Array element key path: `arrayKey.[].childKey {type}`
+- In examples: `[+]` appends a new element; `[:]` replaces all elements
+
+**XML — each `#` line is its own step:**
 ```xml
 <Step enable="True" id="89" name="# (comment)">
-  <Text>PURPOSE: One-line description of what this script does.</Text>
+  <Text>Script description</Text>
 </Step>
-```
-
-**2. Doc block** (when additional detail is needed) — a disabled `Insert Text` step targeting `$README`. The variable is never set (step is disabled) but the name makes it self-documenting. Use `&#xD;` for line breaks:
-```xml
-<Step enable="False" id="61" name="Insert Text">
-  <SelectAll state="False"/>
-  <Text>PARAMETERS: $param — JSON with keys ...&#xD;&#xD;RETURNS: ...</Text>
-  <Field>$README</Field>
-</Step>
-```
-
-**3. Blank lines** — empty self-closing `# (comment)` steps used as visual separators between logical sections:
-```xml
 <Step enable="True" id="89" name="# (comment)"/>
+<Step enable="True" id="89" name="# (comment)">
+  <Text>PARAMETERS {JSONObject}</Text>
+</Step>
+<Step enable="True" id="89" name="# (comment)">
+  <Text>   key1 {JSONString} description</Text>
+</Step>
 ```
 
-### Example pattern
+Blank `#` lines use the self-closing form `<Step enable="True" id="89" name="# (comment)"/>`.
 
-FileMaker is a copy-paste environment. Scripts that are meant to be called from other scripts should include a usage example so the caller can copy and adapt it.
-
-**Placement depends on content:**
-
-- **Bottom of script** (after `Exit Script`) — use a disabled step showing the call pattern. `Exit Script` prevents execution even if examples are somehow enabled:
-  ```xml
-  <Step enable="True" id="103" name="Exit Script"/>
-  <Step enable="True" id="89" name="# (comment)">
-    <Text>Example of how to call this script</Text>
-  </Step>
-  <Step enable="False" id="1" name="Perform Script">
-    <Calculation><![CDATA[JSONSetElement ( "{}" ; ... )]]></Calculation>
-    <Script id="0" name="Script Name"/>
-  </Step>
-  ```
-
-- **Top of script** (inline with documentation) — use a disabled `Set Variable` with an `$example_[description]` name. Being at the top makes it immediately visible; being disabled means it never executes:
-  ```xml
-  <Step enable="False" id="141" name="Set Variable">
-    <Name>$example_basicCall</Name>
-    <Value><Calculation><![CDATA[JSONSetElement ( "{}" ; [ "key" ; $value ; JSONString ] )]]></Calculation></Value>
-  </Step>
-  ```
+**Section markers** (`MARK:`) use the *disabled* form so they appear greyed out in Script Workspace:
+```xml
+<Step enable="False" id="89" name="# (comment)">
+  <Text>MARK: SectionName</Text>
+</Step>
+```
 
 ---
 
