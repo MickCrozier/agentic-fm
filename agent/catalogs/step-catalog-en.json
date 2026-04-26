@@ -2773,7 +2773,8 @@
         "xmlElement": "Layout",
         "type": "layout",
         "hrLabel": null,
-        "required": false
+        "required": false,
+        "notes": "Sibling of LayoutDestination — NOT nested inside it. Must use explicit open/close tags: <Layout id=\"N\" name=\"Name\"></Layout>. Self-closing form is silently dropped by FileMaker on paste."
       },
       {
         "xmlElement": "Animation",
@@ -2787,6 +2788,9 @@
     "monacoSnippet": "Go to Layout [ \"${1:LayoutName}\" ]",
     "blockPair": null,
     "status": "complete",
+    "notes": {
+      "gotchas": "Layout is a sibling of LayoutDestination, both direct children of Step — do NOT nest Layout inside LayoutDestination. Layout must use explicit open/close tags; self-closing form is silently dropped on paste into FileMaker."
+    },
     "helpUrl": "https://help.claris.com/en/pro-help/content/go-to-layout.html"
   },
   {
