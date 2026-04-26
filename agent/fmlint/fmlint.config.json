@@ -70,15 +70,12 @@
 
     "D001": {
       "enabled": true,
-      "severity": "warning",
-      "keyword": "PURPOSE:",
-      "case_sensitive": false
+      "severity": "warning"
     },
 
     "D002": {
       "enabled": true,
-      "severity": "info",
-      "doc_variable": "$README"
+      "severity": "info"
     },
 
     "D003": {
