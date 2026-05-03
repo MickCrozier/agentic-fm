@@ -153,3 +153,6 @@ $RECYCLE.BIN/
 # Git
 *.orig
 *.rej
+
+# Claude Code local settings
+.claude/settings.local.json
