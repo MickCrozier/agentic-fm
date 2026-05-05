@@ -37,8 +37,39 @@ from socketserver import ThreadingMixIn
 # ---------------------------------------------------------------------------
 
 DEFAULT_PORT = 8765
-BIND_HOST = os.environ.get("COMPANION_BIND_HOST", "127.0.0.1")
+BIND_HOST = os.environ.get("COMPANION_BIND_HOST", "0.0.0.0")
 REMOTE_VERSION_URL = "https://raw.githubusercontent.com/petrowsky/agentic-fm/main/version.txt"
+
+# IP allowlist for Docker and localhost access
+# Default: localhost + common Docker networks
+ALLOWED_IPS = os.environ.get(
+    "COMPANION_ALLOWED_IPS",
+    "127.0.0.1,172.17.0.0/16,172.18.0.0/16,172.19.0.0/16,172.20.0.0/16,192.168.0.0/16"
+).split(",")
+
+def _ip_in_range(ip: str, cidr: str) -> bool:
+    """Check if an IP is within a CIDR range."""
+    try:
+        import ipaddress
+        ip_obj = ipaddress.ip_address(ip)
+        network = ipaddress.ip_network(cidr, strict=False)
+        return ip_obj in network
+    except (ValueError, AttributeError):
+        return False
+
+def _is_allowed_ip(ip: str) -> bool:
+    """Check if the source IP is in the allowlist."""
+    for allowed in ALLOWED_IPS:
+        allowed = allowed.strip()
+        if "/" in allowed:
+            # CIDR range
+            if _ip_in_range(ip, allowed):
+                return True
+        else:
+            # Single IP
+            if ip == allowed:
+                return True
+    return False
 
 # Read version from version.txt at the repo root
 def _read_local_version() -> str:
@@ -173,11 +204,23 @@ class CompanionHandler(BaseHTTPRequestHandler):
         """Route access log through the standard logger."""
         log.info("%s - %s", self.address_string(), fmt % args)
 
+    def _check_ip_allowed(self) -> bool:
+        """Check if the request source IP is allowed. Return False and send 403 if not."""
+        client_ip = self.client_address[0]
+        if not _is_allowed_ip(client_ip):
+            log.warning("Rejected request from unauthorized IP: %s", client_ip)
+            self._send_json({"error": "Forbidden"}, status=403)
+            return False
+        return True
+
     # ------------------------------------------------------------------
     # Routing
     # ------------------------------------------------------------------
 
     def do_GET(self):
+        if not self._check_ip_allowed():
+            return
+
         if self.path == "/health":
             self._handle_health()
         elif self.path == "/pending":
@@ -201,6 +244,9 @@ class CompanionHandler(BaseHTTPRequestHandler):
             self._send_json({"error": "Not found"}, status=404)
 
     def do_POST(self):
+        if not self._check_ip_allowed():
+            return
+
         if self.path == "/explode":
             self._handle_explode()
         elif self.path == "/context":
