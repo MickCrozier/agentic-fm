@@ -245,10 +245,7 @@ function parseObject(
           if (panelObjList) {
             for (const childEl of childElements(panelObjList, 'LayoutObject')) {
               const child = parseObject(childEl, 0, 0, uniqueId, popoverPanels);
-              if (child) {
-                const relChild = { ...child, x: child.x - pbounds.left, y: child.y - pbounds.top };
-                panelChildren.push(relChild);
-              }
+              if (child) panelChildren.push(child);
             }
           }
           popoverPanels.push({

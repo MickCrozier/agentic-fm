@@ -139,7 +139,7 @@ export function Canvas({ state, onStateChange, onSelect, showGrid = false, openP
         {state.popoverPanels.map(panel => {
           if (openPopover !== panel.popoverPanelFor) return null;
           const btn = state.objects.find(o => o.id === panel.popoverPanelFor);
-          const panelLeft = btn ? btn.x : panel.bounds.left;
+const panelLeft = btn ? btn.x : panel.bounds.left;
           const panelTop  = btn ? btn.y + btn.height : panel.bounds.top;
           return (
             <div
@@ -153,6 +153,7 @@ export function Canvas({ state, onStateChange, onSelect, showGrid = false, openP
                 height: panel.height + 'px',
               }}
             >
+              <div class="self" style={{ position: 'absolute', inset: '0', borderRadius: 'inherit' }} />
               <div class="fm-popover-title">{panel.popoverPanelTitle ?? 'Popover'}</div>
               {(panel.children ?? []).map(child => {
                 const livePos = dragPositions.get(child.id);
