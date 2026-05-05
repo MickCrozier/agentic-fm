@@ -281,11 +281,17 @@ When you detect you are in a limited sandbox:
 > - Validate output with FMLint
 > - Write files to `agent/sandbox/` for you to paste into FileMaker
 >
-> **To paste my output into FileMaker**, run this on your Mac:
+> **To paste my output into FileMaker**, the agent will POST the XML directly
+> to the companion server running on your Mac:
 > ```bash
-> python3 agent/scripts/clipboard.py write agent/sandbox/<filename>.xml
+> curl -s -X POST http://host.docker.internal:8765/clipboard \
+>   -H "Content-Type: application/json" \
+>   -d "{\"xml\": $(python3 -c "import json; print(json.dumps(open('agent/sandbox/<filename>.xml').read()))")}"
 > ```
 > Then switch to FileMaker's Script Workspace and press **Cmd+V**.
+>
+> Note: `clipboard.py` requires `osascript` and cannot run inside the container.
+> Always use the companion server endpoint instead.
 
 ---
 
@@ -356,19 +362,23 @@ If you are an agent tasked with setting up this project and you have full access
 10. Generate code → validate with FMLint → write to agent/sandbox/
 ```
 
-For Tier 1 deployment (all platforms), present paste instructions:
+For Tier 1 deployment (all platforms), load the clipboard via the companion server
+and present paste instructions:
 
-> The script is ready at `agent/sandbox/<filename>.xml`. To install it:
+```bash
+curl -s -X POST http://host.docker.internal:8765/clipboard \
+  -H "Content-Type: application/json" \
+  -d "{\"xml\": $(python3 -c "import json; print(json.dumps(open('agent/sandbox/<filename>.xml').read()))")}"
+```
+
+> The script is on your clipboard. To install it:
 >
-> On the host Mac, run:
-> ```bash
-> python3 agent/scripts/clipboard.py write agent/sandbox/<filename>.xml
-> ```
->
-> Then in FileMaker:
 > 1. Open the target script in Script Workspace
 > 2. **Cmd+A** — select all existing steps
 > 3. **Cmd+V** — paste
+
+Note: Do not instruct the developer to run `clipboard.py` on their Mac —
+the agent can load the clipboard directly via `host.docker.internal:8765`.
 
 ---
 

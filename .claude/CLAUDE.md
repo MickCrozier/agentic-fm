@@ -252,6 +252,10 @@ grep -A 60 '"name": "Step Name"' "agent/catalogs/step-catalog-en.json"
 
 FileMaker objects are transferred via the macOS clipboard using proprietary binary descriptor classes — **not** plain text. Never use `pbpaste` or `pbcopy`; they corrupt multi-byte UTF-8 characters.
 
+## Native macOS
+
+On native macOS, use `clipboard.py`:
+
 ```bash
 # Read FM objects from clipboard → save as XML
 python3 agent/scripts/clipboard.py read agent/sandbox/output.xml
@@ -261,6 +265,31 @@ python3 agent/scripts/clipboard.py write agent/sandbox/myscript.xml
 ```
 
 The write command auto-detects the correct clipboard class from the XML content. For full technical details, see `agent/docs/CLIPBOARD.md`.
+
+## Dev Container or Non-macOS Environment
+
+**`clipboard.py` does not work in containers** — it requires NSPasteboard or osascript, neither of which exist in a sandboxed environment.
+
+**The companion server must be running on the macOS host machine.** The container accesses clipboard operations via HTTP requests to the companion server's `/clipboard` endpoints using `host.docker.internal` (Docker) or the actual host IP.
+
+### Companion server clipboard endpoints
+
+The companion server exposes two clipboard endpoints:
+
+**Read from clipboard:**
+```bash
+curl -X GET http://host.docker.internal:8765/clipboard
+# Returns: {"success": true, "xml": "<fmxmlsnippet...>"}
+```
+
+**Write to clipboard:**
+```bash
+curl -X POST http://host.docker.internal:8765/clipboard \
+  -H "Content-Type: application/json" \
+  -d '{"xml": "<fmxmlsnippet...>"}'
+# Returns: {"success": true}
+```
+
 
 # Custom functions
 
