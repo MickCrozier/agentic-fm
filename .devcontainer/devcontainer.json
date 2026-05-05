@@ -19,6 +19,17 @@
 
   "postCreateCommand": "sudo chown -R vscode:vscode /home/vscode/.claude /home/vscode/.config/gh 2>/dev/null || true && npm install -g @anthropic-ai/claude-code",
 
+<<<<<<< HEAD
+=======
+  "forwardPorts": [8765],
+  "portsAttributes": {
+    "8765": {
+      "label": "agentic-fm companion server",
+      "onAutoForward": "silent"
+    }
+  },
+
+>>>>>>> dev-container
   "customizations": {
     "vscode": {
       "extensions": [
