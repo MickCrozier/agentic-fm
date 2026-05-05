@@ -80,20 +80,21 @@
   display: block;
   width: 100%;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  padding: 0.25em 0.5em;
   line-height: 1.3;
 }
+.fm-field .fm-obj-label,
+.fm-label .fm-obj-label { padding: 0.25em 0.5em; }
 
-/* Type-specific fallback styles on .self (used when no theme class matches) */
-.fm-field .self {
+/* Type-specific fallback styles — wrapped in :where() so theme CSS (specificity 0,2,0) always wins */
+:where(.fm-field) .self {
   background: #f0f4ff;
   border: 1px solid #c0ccee;
   border-radius: 3px;
   color: #2a5298;
   font-style: italic;
 }
-.fm-label .self  { background: transparent; color: #1a1a2e; }
-.fm-button .self {
+:where(.fm-label) .self  { background: transparent; color: #1a1a2e; }
+:where(.fm-button) .self {
   background-color: #e8e8ed;
   border-color: #c0c0c8;
   border-style: solid;
@@ -103,9 +104,9 @@
   justify-content: center;
   align-items: center;
 }
-.fm-rect .self   { background: transparent; }
-.fm-line .self   { background: transparent; }
-.fm-portal .self {
+:where(.fm-rect) .self   { background: transparent; }
+:where(.fm-line) .self   { background: transparent; }
+:where(.fm-portal) .self {
   background: #fafafa;
   border: 1px solid #ddd;
   border-radius: 3px;
@@ -141,9 +142,9 @@
 .fm-slide-dot { width: 6px; height: 6px; border-radius: 50%; background: #ccc; }
 .fm-slide-dot.active { background: #0a84ff; }
 
-.fm-group .self { background: rgba(0,100,255,0.04); border: 1px dashed #99b; }
+:where(.fm-group) .self { background: rgba(0,100,255,0.04); border: 1px dashed #99b; }
 .fm-group-label { font-size: 10px; color: #99b; padding: 2px 4px; }
-.fm-popover-btn .self {
+:where(.fm-popover-btn) .self {
   background-color: #e8e8ed;
   border-color: #c0c0c8;
   border-style: solid;
@@ -153,8 +154,8 @@
   align-items: center;
   font-size: 11px; color: #444;
 }
-.fm-web-viewer .self { background: #e8f4ff; border: 1px solid #99c; border-radius: 3px; }
-.fm-unknown .self { background: #fff0f0; border: 1px dashed #f99; }
+:where(.fm-web-viewer) .self { background: #e8f4ff; border: 1px solid #99c; border-radius: 3px; }
+:where(.fm-unknown) .self { background: #fff0f0; border: 1px dashed #f99; }
 .fm-popover-panel .self {
   background: #fff;
   border: 1px solid #bbb;

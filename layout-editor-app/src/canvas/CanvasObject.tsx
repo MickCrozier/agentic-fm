@@ -66,10 +66,12 @@ export function CanvasObject({ obj, selected, onMouseDown, onDblClick }: CanvasO
     display: 'flex',
     overflow: 'hidden',
     boxSizing: 'border-box',
-    alignItems: s.verticalAlign === 'center' ? 'center'
-      : s.verticalAlign === 'bottom' ? 'flex-end'
-      : 'flex-start',
   };
+  if (s.verticalAlign) {
+    selfStyle.alignItems = s.verticalAlign === 'center' ? 'center'
+      : s.verticalAlign === 'bottom' ? 'flex-end'
+      : 'flex-start';
+  }
 
   if (s.backgroundColor) selfStyle.backgroundColor = s.backgroundColor;
   if (s.color)           selfStyle.color = s.color;

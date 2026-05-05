@@ -106,6 +106,12 @@ export function convertThemeCSS(raw: string): string {
     if (skip) continue;
     if (/^\s*-fm-/.test(line)) continue;
     if (/line-height\s*:.*\bline\b/.test(line)) continue;
+    // Convert -fm-font-family(Display,PostScript) → font-family: "Display"
+    if (/font-family\s*:.*-fm-font-family/.test(line)) {
+      const m = line.match(/-fm-font-family\(([^,)]+)/);
+      if (m) out.push(line.replace(/-fm-font-family\([^)]+\)/, `"${m[1].trim()}"`));
+      continue;
+    }
     if (/background-image\s*:\s*none/.test(line)) continue;
     if (/border-image/.test(line)) continue;
 
