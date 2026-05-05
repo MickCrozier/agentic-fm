@@ -1,0 +1,183 @@
+import { useState, useEffect, useCallback } from 'preact/hooks';
+import { fetchCustomInstructions } from '@/api/client';
+import { ChatPanel } from '@/ai/chat/ChatPanel';
+import { AISettings } from '@/ai/settings/AISettings';
+import { Canvas } from '@/canvas/Canvas';
+import { Toolbar } from '@/toolbar/Toolbar';
+import { Inspector } from '@/inspector/Inspector';
+import { Palette } from '@/palette/Palette';
+import { loadLayoutXML } from '@/xml/import';
+import { exportToXML } from '@/xml/export';
+import { useHistory } from '@/hooks/useHistory';
+import { useThemeCSS } from '@/hooks/useThemeCSS';
+import type { LayoutState, LayoutObject } from '@/xml/import';
+
+const EMPTY: LayoutState = { width: 760, parts: [], objects: [], popoverPanels: [] };
+
+export function App() {
+  useThemeCSS();
+  const { current: state, push, undo, redo, canUndo, canRedo } = useHistory<LayoutState>(EMPTY);
+  const [loadError, setLoadError] = useState('');
+  const [customInstructions, setCustomInstructions] = useState('');
+  const [showSettings, setShowSettings] = useState(false);
+  const [chatKey, setChatKey] = useState(0);
+  const [layoutName, setLayoutName] = useState('');
+  const [selected, setSelected] = useState<LayoutObject | null>(null);
+  const [copyMsg, setCopyMsg] = useState('');
+  const [showGrid, setShowGrid] = useState(false);
+  const [openPopover, setOpenPopover] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchCustomInstructions().then(setCustomInstructions).catch(() => {});
+
+    fetch('/api/context')
+      .then(r => r.ok ? r.json() : null)
+      .then((ctx: { current_layout?: { name: string; id: number } } | null) => {
+        if (ctx?.current_layout) setLayoutName(ctx.current_layout.name);
+      })
+      .catch(() => {});
+
+    fetch('/api/layout-xml')
+      .then(async r => {
+        if (!r.ok) {
+          const body = await r.json().catch(() => ({}));
+          throw new Error(body.error ?? `HTTP ${r.status}`);
+        }
+        return r.text();
+      })
+      .then(xml => {
+        const s = loadLayoutXML(xml);
+        if (s) push(s);
+        else throw new Error('Failed to parse layout XML');
+      })
+      .catch(e => setLoadError(String(e)));
+  }, []);
+
+  const handleStateChange = useCallback((next: LayoutState) => {
+    push(next);
+    setSelected(prev => {
+      if (!prev) return null;
+      return next.objects.find(o => o.id === prev.id)
+        ?? next.popoverPanels.flatMap(p => p.children ?? []).find(o => o.id === prev.id)
+        ?? null;
+    });
+  }, [push]);
+
+  const handleAddObject = useCallback((spec: Partial<LayoutObject>, x: number, y: number) => {
+    const newObj: LayoutObject = {
+      id: 'new-' + Math.random().toString(36).slice(2, 8),
+      fmId: '0',
+      fmName: spec.fmName ?? '',
+      type: spec.type ?? 'text',
+      bounds: { top: y, left: x, bottom: y + (spec.height ?? 22), right: x + (spec.width ?? 140) },
+      x, y,
+      width: spec.width ?? 140,
+      height: spec.height ?? 22,
+      displayText: spec.displayText,
+      fieldRef: spec.fieldRef,
+    };
+    push({ ...state, objects: [...state.objects, newObj] });
+    setSelected(newObj);
+  }, [state, push]);
+
+  const handleCopyXML = useCallback(() => {
+    const xml = exportToXML(state);
+    navigator.clipboard.writeText(xml).then(() => {
+      setCopyMsg('Copied!');
+      setTimeout(() => setCopyMsg(''), 2000);
+    });
+  }, [state]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.metaKey && e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+      if (e.metaKey && e.key === 'z' &&  e.shiftKey) { e.preventDefault(); redo(); }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [undo, redo]);
+
+  const loaded = state.objects.length > 0 || state.parts.length > 0;
+
+  return (
+    <div class="flex flex-col h-screen bg-neutral-900 text-neutral-100 overflow-hidden">
+      <Toolbar
+        layoutName={layoutName}
+        objectCount={state.objects.length}
+        partCount={state.parts.length}
+        canvasWidth={state.width}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        showGrid={showGrid}
+        copyMsg={copyMsg}
+        onUndo={undo}
+        onRedo={redo}
+        onToggleGrid={() => setShowGrid(g => !g)}
+        onCopyXML={handleCopyXML}
+        onOpenSettings={() => setShowSettings(true)}
+      />
+
+      <div class="flex flex-1 min-h-0">
+        {/* Palette */}
+        <div class="w-52 flex-shrink-0">
+          <Palette state={state} onStateChange={handleStateChange} />
+        </div>
+
+        {/* Canvas */}
+        <div class="flex-1 overflow-auto bg-neutral-400 flex justify-center py-6">
+          {loaded ? (
+            <Canvas
+              state={state}
+              onStateChange={handleStateChange}
+              onSelect={setSelected}
+              showGrid={showGrid}
+              openPopover={openPopover}
+              onOpenPopover={setOpenPopover}
+              onAddObject={handleAddObject}
+            />
+          ) : loadError ? (
+            <div class="flex flex-col items-center justify-center gap-2 text-sm">
+              <span class="text-red-400 font-medium">Could not load layout</span>
+              <span class="text-neutral-500 text-xs max-w-sm text-center">{loadError}</span>
+            </div>
+          ) : (
+            <div class="flex items-center justify-center text-neutral-500 text-sm">
+              Loading layout...
+            </div>
+          )}
+        </div>
+
+        {/* Right panel: Inspector + Chat */}
+        <div class="w-72 flex-shrink-0 flex flex-col border-l border-neutral-700">
+          {/* Inspector */}
+          <div class="border-b border-neutral-700 bg-neutral-800">
+            <div class="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
+              Inspector
+            </div>
+            <Inspector
+              selected={selected}
+              state={state}
+              onStateChange={handleStateChange}
+            />
+          </div>
+
+          {/* Chat */}
+          <div class="flex-1 min-h-0">
+            <ChatPanel
+              key={chatKey}
+              layoutName={layoutName}
+              state={state}
+              customInstructions={customInstructions}
+              onClearChat={() => setChatKey(k => k + 1)}
+            />
+          </div>
+        </div>
+      </div>
+
+      {showSettings && (
+        <AISettings onClose={() => setShowSettings(false)} />
+      )}
+    </div>
+  );
+}
