@@ -377,7 +377,7 @@ curl -s -X POST http://host.docker.internal:8765/clipboard \
 > 2. **Cmd+A** — select all existing steps
 > 3. **Cmd+V** — paste
 
-Note: Do not instruct the developer to run `clipboard.py` on their Mac —
+Note: Do not instruct the developer to run `clipboard.py` on their Mac unless the companion server is unavailable —
 the agent can load the clipboard directly via `host.docker.internal:8765`.
 
 ---
