@@ -4,7 +4,7 @@ import type { FMStyles } from './parseFMCSS';
 export type FMObjectType =
   | 'field' | 'text' | 'button' | 'line' | 'rectangle' | 'portal'
   | 'web-viewer' | 'group' | 'tab-control' | 'slide-control'
-  | 'popover-btn' | 'popover-panel' | 'unknown';
+  | 'button-bar' | 'popover-btn' | 'popover-panel' | 'unknown';
 
 export interface Bounds {
   top: number;
@@ -67,7 +67,7 @@ const FM_TYPE_MAP: Record<string, FMObjectType> = {
   'Text':              'text',
   'Button':            'button',
   'Grouped Button':    'group',
-  'Button Bar':        'button',
+  'Button Bar':        'button-bar',
   'Line':              'line',
   'Rectangle':         'rectangle',
   'Rounded Rectangle': 'rectangle',
@@ -309,6 +309,20 @@ function parseObject(
       }
     }
     return { ...base, tooltip, fmStyles, themeClass, slideCount, children };
+  }
+
+  // ── Button Bar ────────────────────────────────────────────────────────────
+  if (effectiveType === 'button-bar') {
+    const bbEl = objEl.querySelector('ButtonBar');
+    const segments: LayoutObject[] = [];
+    const segList = bbEl?.querySelector('ObjectList');
+    if (segList) {
+      for (const segEl of childElements(segList, 'LayoutObject')) {
+        const seg = parseObject(segEl, 0, 0, uniqueId, popoverPanels);
+        if (seg) segments.push(seg);
+      }
+    }
+    return { ...base, tooltip, fmStyles, themeClass, children: segments };
   }
 
   // ── Regular object ────────────────────────────────────────────────────────

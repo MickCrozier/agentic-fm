@@ -7,17 +7,22 @@ interface ToolbarProps {
   canRedo: boolean;
   showGrid: boolean;
   copyMsg: string;
+  canGroup?: boolean;
+  canUngroup?: boolean;
   onUndo: () => void;
   onRedo: () => void;
   onToggleGrid: () => void;
   onCopyXML: () => void;
+  onGroup: () => void;
+  onUngroup: () => void;
   onOpenSettings: () => void;
 }
 
 export function Toolbar({
   layoutName, objectCount, partCount, canvasWidth,
   canUndo, canRedo, showGrid, copyMsg,
-  onUndo, onRedo, onToggleGrid, onCopyXML, onOpenSettings,
+  canGroup, canUngroup,
+  onUndo, onRedo, onToggleGrid, onCopyXML, onGroup, onUngroup, onOpenSettings,
 }: ToolbarProps) {
   return (
     <div class="flex items-center gap-2 px-3 py-1.5 bg-neutral-800 border-b border-neutral-700 text-xs select-none flex-shrink-0">
@@ -62,6 +67,33 @@ export function Toolbar({
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
           <rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>
+        </svg>
+      </button>
+
+      <span class="text-neutral-600">|</span>
+
+      {/* Group / Ungroup */}
+      <button
+        onClick={onGroup}
+        disabled={!canGroup}
+        title="Group (⌘G)"
+        class="w-6 h-6 flex items-center justify-center rounded hover:bg-neutral-700 text-neutral-400 disabled:opacity-30"
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <rect x="2" y="2" width="8" height="8" rx="1"/><rect x="14" y="2" width="8" height="8" rx="1"/>
+          <rect x="2" y="14" width="8" height="8" rx="1"/><rect x="14" y="14" width="8" height="8" rx="1"/>
+          <rect x="5" y="5" width="14" height="14" rx="2" stroke-dasharray="3 2"/>
+        </svg>
+      </button>
+      <button
+        onClick={onUngroup}
+        disabled={!canUngroup}
+        title="Ungroup (⌘⇧G)"
+        class="w-6 h-6 flex items-center justify-center rounded hover:bg-neutral-700 text-neutral-400 disabled:opacity-30"
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <rect x="2" y="2" width="8" height="8" rx="1"/><rect x="14" y="2" width="8" height="8" rx="1"/>
+          <rect x="2" y="14" width="8" height="8" rx="1"/><rect x="14" y="14" width="8" height="8" rx="1"/>
         </svg>
       </button>
 

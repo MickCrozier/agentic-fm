@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'preact/hooks';
+import { useCallback, useEffect, useState } from 'preact/hooks';
 import type { LayoutState, LayoutObject } from '@/xml/import';
 import { CanvasObject } from './CanvasObject';
 import { useSelection } from '@/hooks/useSelection';
@@ -20,14 +20,19 @@ interface CanvasProps {
   state: LayoutState;
   onStateChange: (next: LayoutState) => void;
   onSelect?: (obj: LayoutObject | null) => void;
+  onSelectionChange?: (ids: Set<string>) => void;
   showGrid?: boolean;
   openPopover: string | null;
   onOpenPopover: (id: string | null) => void;
   onAddObject?: (spec: Partial<LayoutObject>, x: number, y: number) => void;
 }
 
-export function Canvas({ state, onStateChange, onSelect, showGrid = false, openPopover, onOpenPopover, onAddObject }: CanvasProps) {
+export function Canvas({ state, onStateChange, onSelect, onSelectionChange, showGrid = false, openPopover, onOpenPopover, onAddObject }: CanvasProps) {
   const { selected, select, clearSelection } = useSelection();
+
+  useEffect(() => {
+    onSelectionChange?.(selected);
+  }, [selected]);
   const [dragPositions, setDragPositions] = useState<Map<string, { x: number; y: number }>>(new Map());
 
   const handleCommit = useCallback((id: string, x: number, y: number) => {
@@ -77,6 +82,70 @@ export function Canvas({ state, onStateChange, onSelect, showGrid = false, openP
     }
   }, [clearSelection, onSelect]);
 
+  // Part boundary drag — same pattern as width drag: snapshot originals at mousedown,
+  // compute total delta from mousedown clientY each frame.
+  const handlePartBoundaryMouseDown = useCallback((e: MouseEvent, idx: number) => {
+    e.preventDefault();
+
+    const mouseDownY = e.clientY;
+    const origParts   = state.parts.map(p => ({ ...p }));
+    const origObjects = state.objects.map(o => ({ ...o, bounds: { ...o.bounds } }));
+
+    const partTop = idx === 0 ? 0 : origParts[idx - 1].bottom;
+
+    // Upward constraint: don't let the boundary go above fully-contained objects
+    const objsInPart = origObjects.filter(
+      o => o.y >= partTop && (o.y + o.height) <= origParts[idx].bottom,
+    );
+    const minBottom = objsInPart.length > 0
+      ? Math.max(partTop + 16, Math.max(...objsInPart.map(o => o.y + o.height)))
+      : partTop + 16;
+
+    const origBottom = origParts[idx].bottom;
+
+    const onMove = (me: MouseEvent) => {
+      const totalDelta = me.clientY - mouseDownY;
+      const newBottom = Math.max(minBottom, Math.round(origBottom + totalDelta));
+      const dy = newBottom - origBottom;
+
+      const newParts = origParts.map((p, i) =>
+        i >= idx ? { ...p, bottom: p.bottom + dy } : p,
+      );
+      const newObjects = origObjects.map(o =>
+        o.y >= origBottom
+          ? { ...o, y: o.y + dy, bounds: { ...o.bounds, top: o.bounds.top + dy, bottom: o.bounds.bottom + dy } }
+          : o,
+      );
+      onStateChange({ ...state, parts: newParts, objects: newObjects });
+    };
+
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }, [state, onStateChange]);
+
+  // Right-edge (width) drag — mirrors HTML reference: snapshot startX/startW at mousedown,
+  // compute total delta each frame, register on document so moves outside the element work.
+  const handleWidthHandleMouseDown = useCallback((e: MouseEvent) => {
+    if ((e as MouseEvent & { button: number }).button !== 0) return;
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = state.width;
+    const onMove = (me: MouseEvent) => {
+      const newWidth = Math.max(200, Math.round(startW + (me.clientX - startX)));
+      onStateChange({ ...state, width: newWidth });
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }, [state, onStateChange]);
+
   const canvasHeight = state.parts.length > 0
     ? Math.max(...state.parts.map(p => p.bottom))
     : 900;
@@ -84,10 +153,10 @@ export function Canvas({ state, onStateChange, onSelect, showGrid = false, openP
   let partTop = 0;
 
   return (
-    <div class="canvas-wrap">
+    <div class="canvas-wrap mx-auto">
       <div
         class="canvas-root"
-        style={{ width: state.width + 'px', minHeight: canvasHeight + 'px' }}
+        style={{ position: 'relative', width: state.width + 'px', minHeight: canvasHeight + 'px' }}
         onClick={handleCanvasClick}
         onDragOver={e => e.preventDefault()}
         onDrop={e => {
@@ -119,6 +188,23 @@ export function Canvas({ state, onStateChange, onSelect, showGrid = false, openP
             </div>
           );
         })}
+
+        {/* Part boundary dividers — siblings of part bands so pointer-events aren't blocked */}
+        {state.parts.map((part, i) => (
+          <div
+            key={'div-' + i}
+            class="part-divider"
+            style={{ top: part.bottom + 'px' }}
+            onMouseDown={e => handlePartBoundaryMouseDown(e, i)}
+          />
+        ))}
+
+        {/* Right-edge width handle — inside canvas-root so it's relatively positioned */}
+        <div
+          class="canvas-width-handle"
+          onMouseDown={handleWidthHandleMouseDown}
+          title="Drag to resize layout width"
+        />
 
         {/* Layout objects */}
         {state.objects.map(obj => {

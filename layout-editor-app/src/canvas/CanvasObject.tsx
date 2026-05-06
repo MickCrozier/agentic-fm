@@ -11,6 +11,7 @@ const TYPE_CLASS: Record<string, string> = {
   group:          'fm-group',
   'tab-control':  'fm-tab-control',
   'slide-control':'fm-slide-control',
+  'button-bar':   'fm-button-bar',
   'popover-btn':  'fm-popover-btn',
   'popover-panel':'fm-popover-panel',
   unknown:        'fm-unknown',
@@ -21,6 +22,7 @@ const TYPE_THEME_BASE: Record<string, string> = {
   field:         'edit_box',
   text:          'text_box',
   button:        'button',
+  'button-bar':  'button_bar',
   'popover-btn': 'button',
   line:          'line',
   rectangle:     'rectangle',
@@ -36,19 +38,50 @@ interface CanvasObjectProps {
   onDblClick: (obj: LayoutObject) => void;
 }
 
+function buildThemeClasses(type: string, themeClass: string | undefined): string {
+  const baseTheme = TYPE_THEME_BASE[type];
+  const classes = [
+    baseTheme ? `fm-theme-${baseTheme}` : '',
+    themeClass && themeClass !== baseTheme ? `fm-theme-${themeClass}` : '',
+  ].filter(Boolean).join(' ');
+  return classes ? ` ${classes}` : '';
+}
+
+function buildSelfStyle(s: ReturnType<typeof import('@/xml/parseFMCSS').parseFMCSS>): Record<string, string> {
+  const style: Record<string, string> = {
+    position: 'absolute',
+    inset: '0',
+    display: 'flex',
+    overflow: 'hidden',
+    boxSizing: 'border-box',
+  };
+  if (s.verticalAlign) {
+    style.alignItems = s.verticalAlign === 'center' ? 'center'
+      : s.verticalAlign === 'bottom' ? 'flex-end'
+      : 'flex-start';
+  }
+  if (s.backgroundColor) style.backgroundColor = s.backgroundColor;
+  if (s.color)           style.color = s.color;
+  if (s.fontFamily)      style.fontFamily = s.fontFamily;
+  if (s.fontSize)        style.fontSize = s.fontSize;
+  if (s.fontWeight)      style.fontWeight = s.fontWeight;
+  if (s.textAlign)       style.textAlign = s.textAlign;
+  if (s.boxShadow)       style.boxShadow = s.boxShadow;
+  for (const side of ['Top', 'Right', 'Bottom', 'Left'] as const) {
+    const color = (s as Record<string, string>)[`border${side}Color`];
+    const width = (s as Record<string, string>)[`border${side}Width`];
+    const bstyle = (s as Record<string, string>)[`border${side}Style`];
+    if (color)  style[`border${side}Color`] = color;
+    if (width)  style[`border${side}Width`] = width;
+    if (bstyle) style[`border${side}Style`] = bstyle;
+  }
+  return style;
+}
+
 export function CanvasObject({ obj, selected, onMouseDown, onDblClick }: CanvasObjectProps) {
   const typeClass = TYPE_CLASS[obj.type] ?? 'fm-unknown';
   const s = obj.fmStyles ?? {};
-
-  // Always apply the FM type base theme class for type-level defaults (text-align, align-items, etc.)
-  // Then apply the object's specific themeClass on top (UUID or named style) — it wins via source order
-  const baseTheme = TYPE_THEME_BASE[obj.type];
-  const objTheme  = obj.themeClass;
-  const themeClasses = [
-    baseTheme ? `fm-theme-${baseTheme}` : '',
-    objTheme && objTheme !== baseTheme ? `fm-theme-${objTheme}` : '',
-  ].filter(Boolean).join(' ');
-  const themeClass = themeClasses ? ` ${themeClasses}` : '';
+  const themeClass = buildThemeClasses(obj.type, obj.themeClass);
 
   // Outer div: geometry + interaction only
   const outerStyle: Record<string, string> = {
@@ -59,36 +92,7 @@ export function CanvasObject({ obj, selected, onMouseDown, onDblClick }: CanvasO
     height: obj.height + 'px',
   };
 
-  // .self: receives theme CSS base styles + LocalCSS inline overrides
-  const selfStyle: Record<string, string> = {
-    position: 'absolute',
-    inset: '0',
-    display: 'flex',
-    overflow: 'hidden',
-    boxSizing: 'border-box',
-  };
-  if (s.verticalAlign) {
-    selfStyle.alignItems = s.verticalAlign === 'center' ? 'center'
-      : s.verticalAlign === 'bottom' ? 'flex-end'
-      : 'flex-start';
-  }
-
-  if (s.backgroundColor) selfStyle.backgroundColor = s.backgroundColor;
-  if (s.color)           selfStyle.color = s.color;
-  if (s.fontFamily)      selfStyle.fontFamily = s.fontFamily;
-  if (s.fontSize)        selfStyle.fontSize = s.fontSize;
-  if (s.fontWeight)      selfStyle.fontWeight = s.fontWeight;
-  if (s.textAlign)       selfStyle.textAlign = s.textAlign;
-  if (s.boxShadow)       selfStyle.boxShadow = s.boxShadow;
-
-  for (const side of ['Top', 'Right', 'Bottom', 'Left'] as const) {
-    const color = (s as Record<string, string>)[`border${side}Color`];
-    const width = (s as Record<string, string>)[`border${side}Width`];
-    const style = (s as Record<string, string>)[`border${side}Style`];
-    if (color) selfStyle[`border${side}Color`] = color;
-    if (width) selfStyle[`border${side}Width`] = width;
-    if (style) selfStyle[`border${side}Style`] = style;
-  }
+  const selfStyle = buildSelfStyle(s);
 
   return (
     <div
@@ -121,6 +125,8 @@ function renderContent(obj: LayoutObject) {
       return <TabContent obj={obj} />;
     case 'slide-control':
       return <SlideContent obj={obj} />;
+    case 'button-bar':
+      return <ButtonBarContent obj={obj} />;
     case 'group':
       return <GroupContent obj={obj} />;
     case 'popover-panel':
@@ -182,6 +188,38 @@ function TabContent({ obj }: { obj: LayoutObject }) {
       {labels.map((l, i) => (
         <div key={i} class={`fm-tab-btn${i === 0 ? ' active' : ''}`}>{l || `Tab ${i + 1}`}</div>
       ))}
+    </div>
+  );
+}
+
+function ButtonBarContent({ obj }: { obj: LayoutObject }) {
+  const segments = obj.children ?? [];
+  const barWidth = obj.width;
+  // The parent bar's UUID is the key: theme CSS uses button_bar_segment.FM-UUID
+  // so segments must carry the bar's themeClass, not their own (which is just 'button')
+  const barUUID = obj.themeClass;
+  return (
+    <div class="fm-btn-bar-segments">
+      {segments.map((seg, i) => {
+        const pct = barWidth > 0 ? (seg.width / barWidth) * 100 : (100 / segments.length);
+        const segThemeClasses = [
+          'fm-theme-button_bar_segment',
+          barUUID ? `fm-theme-${barUUID}` : '',
+        ].filter(Boolean).join(' ');
+        const segStyle = buildSelfStyle(seg.fmStyles ?? {});
+        const posClass = (i === 0 ? ' first' : '') + (i === segments.length - 1 ? ' last' : '');
+        return (
+          <div
+            key={seg.id}
+            class={`fm-btn-bar-seg${posClass} ${segThemeClasses}`}
+            style={{ width: pct + '%', height: '100%', position: 'relative', overflow: 'hidden', boxSizing: 'border-box' }}
+          >
+            <div class="self" style={segStyle}>
+              <span class="fm-obj-label">{seg.displayText ?? ''}</span>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

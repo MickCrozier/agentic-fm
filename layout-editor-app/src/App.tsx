@@ -23,6 +23,7 @@ export function App() {
   const [chatKey, setChatKey] = useState(0);
   const [layoutName, setLayoutName] = useState('');
   const [selected, setSelected] = useState<LayoutObject | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [copyMsg, setCopyMsg] = useState('');
   const [showGrid, setShowGrid] = useState(false);
   const [openPopover, setOpenPopover] = useState<string | null>(null);
@@ -88,15 +89,53 @@ export function App() {
     });
   }, [state]);
 
+  const handleGroup = useCallback(() => {
+    if (selectedIds.size < 2) return;
+    const toGroup = state.objects.filter(o => selectedIds.has(o.id));
+    if (toGroup.length < 2) return;
+    const minX = Math.min(...toGroup.map(o => o.x));
+    const minY = Math.min(...toGroup.map(o => o.y));
+    const maxX = Math.max(...toGroup.map(o => o.x + o.width));
+    const maxY = Math.max(...toGroup.map(o => o.y + o.height));
+    const group: LayoutObject = {
+      id: 'group-' + Math.random().toString(36).slice(2, 8),
+      fmId: '0', fmName: '',
+      type: 'group',
+      bounds: { top: minY, left: minX, bottom: maxY, right: maxX },
+      x: minX, y: minY,
+      width: maxX - minX, height: maxY - minY,
+      children: toGroup.map(o => ({ ...o, x: o.x - minX, y: o.y - minY })),
+    };
+    push({ ...state, objects: [...state.objects.filter(o => !selectedIds.has(o.id)), group] });
+    setSelectedIds(new Set([group.id]));
+  }, [state, selectedIds, push]);
+
+  const handleUngroup = useCallback(() => {
+    if (selectedIds.size !== 1) return;
+    const [id] = selectedIds;
+    const group = state.objects.find(o => o.id === id && o.type === 'group');
+    if (!group) return;
+    const ungrouped = (group.children ?? []).map(c => ({
+      ...c,
+      id: 'obj-' + Math.random().toString(36).slice(2, 8),
+      x: group.x + c.x, y: group.y + c.y,
+      bounds: { top: group.y + c.y, left: group.x + c.x, bottom: group.y + c.y + c.height, right: group.x + c.x + c.width },
+    }));
+    push({ ...state, objects: [...state.objects.filter(o => o.id !== id), ...ungrouped] });
+    setSelectedIds(new Set(ungrouped.map(o => o.id)));
+  }, [state, selectedIds, push]);
+
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.metaKey && e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
       if (e.metaKey && e.key === 'z' &&  e.shiftKey) { e.preventDefault(); redo(); }
+      if (e.metaKey && e.key === 'g' && !e.shiftKey) { e.preventDefault(); handleGroup(); }
+      if (e.metaKey && e.key === 'g' &&  e.shiftKey) { e.preventDefault(); handleUngroup(); }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [undo, redo]);
+  }, [undo, redo, handleGroup, handleUngroup]);
 
   const loaded = state.objects.length > 0 || state.parts.length > 0;
 
@@ -111,10 +150,14 @@ export function App() {
         canRedo={canRedo}
         showGrid={showGrid}
         copyMsg={copyMsg}
+        canGroup={selectedIds.size >= 2}
+        canUngroup={selectedIds.size === 1 && state.objects.find(o => o.id === [...selectedIds][0])?.type === 'group'}
         onUndo={undo}
         onRedo={redo}
         onToggleGrid={() => setShowGrid(g => !g)}
         onCopyXML={handleCopyXML}
+        onGroup={handleGroup}
+        onUngroup={handleUngroup}
         onOpenSettings={() => setShowSettings(true)}
       />
 
@@ -125,12 +168,13 @@ export function App() {
         </div>
 
         {/* Canvas */}
-        <div class="flex-1 overflow-auto bg-neutral-400 flex justify-center py-6">
+        <div class="flex-1 overflow-auto bg-neutral-400 py-6 flex items-start">
           {loaded ? (
             <Canvas
               state={state}
               onStateChange={handleStateChange}
               onSelect={setSelected}
+              onSelectionChange={setSelectedIds}
               showGrid={showGrid}
               openPopover={openPopover}
               onOpenPopover={setOpenPopover}

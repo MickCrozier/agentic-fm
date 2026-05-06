@@ -1,29 +1,33 @@
 import { useState, useCallback } from 'preact/hooks';
 
 export function useHistory<T>(initial: T) {
-  const [stack, setStack] = useState<T[]>([initial]);
-  const [cursor, setCursor] = useState(0);
+  const [hist, setHist] = useState<{ stack: T[]; cursor: number }>({
+    stack: [initial],
+    cursor: 0,
+  });
 
-  const current = stack[cursor];
-
+  // Stable forever — no deps. Uses functional update so it always sees the latest cursor.
   const push = useCallback((next: T) => {
-    setStack(prev => [...prev.slice(0, cursor + 1), next]);
-    setCursor(c => c + 1);
-  }, [cursor]);
-
-  const undo = useCallback(() => {
-    setCursor(c => Math.max(0, c - 1));
-  }, []);
-
-  const redo = useCallback(() => {
-    setStack(prev => {
-      setCursor(c => Math.min(prev.length - 1, c + 1));
-      return prev;
+    setHist(prev => {
+      const stack = [...prev.stack.slice(0, prev.cursor + 1), next];
+      return { stack, cursor: prev.cursor + 1 };
     });
   }, []);
 
-  const canUndo = cursor > 0;
-  const canRedo = cursor < stack.length - 1;
+  const undo = useCallback(() => {
+    setHist(prev => ({ ...prev, cursor: Math.max(0, prev.cursor - 1) }));
+  }, []);
 
-  return { current, push, undo, redo, canUndo, canRedo };
+  const redo = useCallback(() => {
+    setHist(prev => ({ ...prev, cursor: Math.min(prev.stack.length - 1, prev.cursor + 1) }));
+  }, []);
+
+  return {
+    current: hist.stack[hist.cursor],
+    push,
+    undo,
+    redo,
+    canUndo: hist.cursor > 0,
+    canRedo: hist.cursor < hist.stack.length - 1,
+  };
 }

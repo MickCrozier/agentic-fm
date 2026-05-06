@@ -107,6 +107,30 @@ export function apiMiddleware(): Plugin {
         res.end(JSON.stringify(ctx));
       });
 
+      server.middlewares.use('/api/custom-instructions', (req, res) => {
+        const filePath = path.join(agentDir(), 'context', 'custom-instructions.txt');
+        if (req.method === 'POST') {
+          let body = '';
+          req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+          req.on('end', () => {
+            try {
+              const { content } = JSON.parse(body);
+              fs.mkdirSync(path.dirname(filePath), { recursive: true });
+              fs.writeFileSync(filePath, content ?? '', 'utf-8');
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ ok: true }));
+            } catch (e) {
+              res.writeHead(400, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: String(e) }));
+            }
+          });
+          return;
+        }
+        const content = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8') : '';
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ content }));
+      });
+
       server.middlewares.use('/api/theme.css', (_req, res) => {
         const ctx = readContext();
         const solution = ctx?.solution as string | undefined;

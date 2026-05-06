@@ -20,7 +20,9 @@ export function useDrag(
   ) => {
     if (e.button !== 0) return;
     e.preventDefault();
-    e.stopPropagation();
+    // No stopPropagation — Preact delegates events through document, so
+    // stopping propagation here would also kill the document mousemove/mouseup
+    // listeners we register below.
 
     drag.current = {
       id: obj.id,
@@ -44,12 +46,12 @@ export function useDrag(
       const y = drag.current.origY + ev.clientY - drag.current.startY;
       onCommit(drag.current.id, Math.round(x), Math.round(y));
       drag.current = null;
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
     };
 
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
   }, [onCommit]);
 
   const isDragging = (id: string) => drag.current?.id === id;
