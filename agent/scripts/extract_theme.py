@@ -95,6 +95,20 @@ def pick_theme(solution_dir):
     return parsed[0]
 
 
+def pick_theme_by_name(solution_dir, theme_name):
+    """Pick a theme file by display name (case-insensitive)."""
+    theme_files = sorted(f for f in solution_dir.iterdir() if f.suffix == ".xml")
+    for tf in theme_files:
+        try:
+            tree = ET.parse(tf)
+            root = tree.getroot()
+            if root.get("Display", "").lower() == theme_name.lower():
+                return tf, root
+        except ET.ParseError:
+            continue
+    return None
+
+
 def extract_css(theme_root):
     """Extract the CSS CDATA content from the theme XML."""
     css_elem = theme_root.find("CSS")
@@ -638,6 +652,11 @@ def main():
         action="store_true",
         help="List available solutions and their themes"
     )
+    parser.add_argument(
+        "--theme",
+        default=None,
+        help="Theme display name to extract (e.g. 'Classic'). Defaults to the solution's default theme."
+    )
     args = parser.parse_args()
 
     agent_root = get_agent_root()
@@ -681,7 +700,14 @@ def main():
         sys.exit(1)
 
     # Pick theme
-    result = pick_theme(solution_themes_dir)
+    if args.theme:
+        result = pick_theme_by_name(solution_themes_dir, args.theme)
+        if result is None:
+            print(f"Error: No theme named '{args.theme}' found for '{solution}'")
+            print(f"Run --list to see available themes.")
+            sys.exit(1)
+    else:
+        result = pick_theme(solution_themes_dir)
     if result is None:
         print(f"Error: No valid theme XML files found for '{solution}'")
         sys.exit(1)
