@@ -142,7 +142,7 @@
   justify-content: center;
   align-items: center;
 }
-:where(.fm-rect) .self   { background: transparent; }
+:where(.fm-rect) .self   { background: #fff; }
 :where(.fm-line) .self   { background: transparent; }
 :where(.fm-portal) .self {
   background: #fafafa;

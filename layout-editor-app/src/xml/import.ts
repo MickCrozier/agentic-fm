@@ -34,10 +34,16 @@ export interface LayoutObject {
   /** Popover panel objects keyed to their button id */
   popoverPanelFor?: string;
   popoverPanelTitle?: string;
-  /** Tab control: tab labels */
+  /** Tab control: tab labels (derived from tabPanels for backward compat) */
   tabLabels?: string[];
+  /** Tab control: per-panel label + children */
+  tabPanels?: { label: string; children: LayoutObject[] }[];
+  /** Tab control: strip height in px */
+  tabStripHeight?: number;
   /** Slide control: panel count */
   slideCount?: number;
+  /** Rounded rectangle corner radius in px */
+  cornerRadius?: number;
 }
 
 export interface LayoutPart {
@@ -268,24 +274,27 @@ function parseObject(
   // ── Tab Control ───────────────────────────────────────────────────────────
   if (effectiveType === 'tab-control') {
     const tabCtrlEl = objEl.querySelector('TabControl');
-    const tabLabels: string[] = [];
-    const children: LayoutObject[] = [];
+    const tabStripHeight = tabCtrlEl ? intAttr(tabCtrlEl, 'height', 24) : 24;
+    const tabPanels: { label: string; children: LayoutObject[] }[] = [];
     const tabObjList = tabCtrlEl?.querySelector('ObjectList');
     if (tabObjList) {
       for (const panelEl of childElements(tabObjList, 'LayoutObject').filter(
         c => c.getAttribute('type') === 'Panel',
       )) {
-        tabLabels.push(calcText(panelEl.querySelector('TabPanel > Calculation > Text')));
+        const label = calcText(panelEl.querySelector('TabPanel > Calculation > Text'));
+        const panelChildren: LayoutObject[] = [];
         const tabPanelObjList = panelEl.querySelector('TabPanel > ObjectList');
         if (tabPanelObjList) {
           for (const childEl of childElements(tabPanelObjList, 'LayoutObject')) {
             const child = parseObject(childEl, 0, 0, uniqueId, popoverPanels);
-            if (child) children.push(child);
+            if (child) panelChildren.push(child);
           }
         }
+        tabPanels.push({ label, children: panelChildren });
       }
     }
-    return { ...base, tooltip, fmStyles, themeClass, tabLabels, children };
+    const tabLabels = tabPanels.map(p => p.label);
+    return { ...base, tooltip, fmStyles, themeClass, tabLabels, tabPanels, tabStripHeight };
   }
 
   // ── Slide Control ─────────────────────────────────────────────────────────
@@ -344,7 +353,8 @@ function parseObject(
     displayText = calcText(objEl.querySelector('Button > Label > Calculation > Text'));
   }
 
-  return { ...base, displayText, fieldRef, tooltip, fmStyles, themeClass };
+  const cornerRadius = objEl.querySelector('RoundedRectangle') ? 12 : undefined;
+  return { ...base, displayText, fieldRef, tooltip, fmStyles, themeClass, cornerRadius };
 }
 
 // ── Main entry ───────────────────────────────────────────────────────────────

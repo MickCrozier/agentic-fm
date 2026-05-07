@@ -20,12 +20,8 @@ export default defineConfig({
     port: 8081,
     strictPort: true,
     proxy: {
-      // Proxy AI/settings endpoints to the webviewer server.
-      // /api/layout-xml and /api/context are handled locally by apiMiddleware.
-      '/api/chat':               'http://localhost:8080',
-      '/api/settings':           'http://localhost:8080',
-      '/api/custom-instructions':'http://localhost:8080',
-      '/api/clipboard':          'http://localhost:8080',
+      // /api/chat, /api/settings, /api/custom-instructions handled locally by apiMiddleware.
+      '/api/clipboard': 'http://host.docker.internal:8765',
     },
   },
   build: {

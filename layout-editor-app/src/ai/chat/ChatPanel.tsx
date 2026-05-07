@@ -3,6 +3,7 @@ import { streamChat } from '@/api/client';
 import type { ChatStreamEvent } from '@/api/client';
 import { buildSystemPrompt } from '../prompt/system-prompt';
 import { MessageList } from './MessageList';
+import { extractPatches, applyPatch } from '../patch/patchLayout';
 import type { LayoutState } from '@/xml/import';
 
 interface ChatPanelProps {
@@ -10,6 +11,7 @@ interface ChatPanelProps {
   state?: LayoutState | null;
   customInstructions?: string;
   onClearChat?: () => void;
+  onStateChange?: (next: LayoutState) => void;
 }
 
 interface ChatMessage {
@@ -18,7 +20,7 @@ interface ChatMessage {
   streaming?: boolean;
 }
 
-export function ChatPanel({ layoutName, state, customInstructions, onClearChat }: ChatPanelProps) {
+export function ChatPanel({ layoutName, state, customInstructions, onClearChat, onStateChange }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
@@ -79,7 +81,15 @@ export function ChatPanel({ layoutName, state, customInstructions, onClearChat }
           } else if (event.type === 'done') {
             setMessages(prev => {
               const updated = [...prev];
-              updated[assistantIdx] = { ...updated[assistantIdx], streaming: false };
+              const finalMsg = updated[assistantIdx];
+              updated[assistantIdx] = { ...finalMsg, streaming: false };
+              // Apply any layout patch embedded in the response
+              if (onStateChange && state && finalMsg) {
+                const ops = extractPatches(finalMsg.content);
+                if (ops && ops.length > 0) {
+                  onStateChange(applyPatch(state, ops));
+                }
+              }
               return updated;
             });
           }

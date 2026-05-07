@@ -1,3 +1,4 @@
+import { useState } from 'preact/hooks';
 import type { LayoutObject } from '@/xml/import';
 
 const TYPE_CLASS: Record<string, string> = {
@@ -73,7 +74,8 @@ function buildSelfStyle(s: ReturnType<typeof import('@/xml/parseFMCSS').parseFMC
     const bstyle = (s as Record<string, string>)[`border${side}Style`];
     if (color)  style[`border${side}Color`] = color;
     if (width)  style[`border${side}Width`] = width;
-    if (bstyle) style[`border${side}Style`] = bstyle;
+    // Default to solid when color or width is present but style is absent
+    style[`border${side}Style`] = bstyle || ((color || width) ? 'solid' : 'none');
   }
   return style;
 }
@@ -91,8 +93,10 @@ export function CanvasObject({ obj, selected, onMouseDown, onDblClick }: CanvasO
     width:  obj.width + 'px',
     height: obj.height + 'px',
   };
+  if (obj.cornerRadius) outerStyle.borderRadius = obj.cornerRadius + 'px';
 
   const selfStyle = buildSelfStyle(s);
+  if (obj.cornerRadius) selfStyle.borderRadius = obj.cornerRadius + 'px';
 
   return (
     <div
@@ -140,26 +144,32 @@ function GroupContent({ obj }: { obj: LayoutObject }) {
   const children = obj.children ?? [];
   return (
     <>
-      {children.map(child => (
-        <div
-          key={child.id}
-          class={`fm-object ${TYPE_CLASS[child.type] ?? 'fm-unknown'}`}
-          style={{
-            position: 'absolute',
-            left:   child.x + 'px',
-            top:    child.y + 'px',
-            width:  child.width + 'px',
-            height: child.height + 'px',
-          }}
-          title={child.fmName || child.type}
-        >
-          <span class="fm-obj-label">
-            {child.type === 'field'
-              ? (child.fieldRef?.split('::')[1] ?? child.fmName ?? '')
-              : (child.displayText ?? '')}
-          </span>
-        </div>
-      ))}
+      {children.map(child => {
+        const childSelfStyle = buildSelfStyle(child.fmStyles ?? {});
+        if (child.cornerRadius) {
+          childSelfStyle.borderRadius = child.cornerRadius + 'px';
+        }
+        const outerStyle: Record<string, string> = {
+          position: 'absolute',
+          left:   child.x + 'px',
+          top:    child.y + 'px',
+          width:  child.width + 'px',
+          height: child.height + 'px',
+        };
+        if (child.cornerRadius) outerStyle.borderRadius = child.cornerRadius + 'px';
+        return (
+          <div
+            key={child.id}
+            class={`fm-object ${TYPE_CLASS[child.type] ?? 'fm-unknown'}`}
+            style={outerStyle}
+            title={child.fmName || child.type}
+          >
+            <div class="self" style={childSelfStyle}>
+              {renderContent(child)}
+            </div>
+          </div>
+        );
+      })}
     </>
   );
 }
@@ -182,13 +192,43 @@ function PortalContent({ obj }: { obj: LayoutObject }) {
 }
 
 function TabContent({ obj }: { obj: LayoutObject }) {
-  const labels = obj.tabLabels ?? [];
+  const [activeTab, setActiveTab] = useState(0);
+  const panels = obj.tabPanels ?? (obj.tabLabels ?? []).map(label => ({ label, children: [] }));
+  const stripHeight = obj.tabStripHeight ?? 24;
+  const activePanel = panels[activeTab];
+
   return (
-    <div class="fm-tab-strip">
-      {labels.map((l, i) => (
-        <div key={i} class={`fm-tab-btn${i === 0 ? ' active' : ''}`}>{l || `Tab ${i + 1}`}</div>
-      ))}
-    </div>
+    <>
+      <div class="fm-tab-strip" style={{ height: stripHeight + 'px', position: 'absolute', top: 0, left: 0, right: 0 }}>
+        {panels.map((panel, i) => (
+          <div
+            key={i}
+            class={`fm-tab-btn${i === activeTab ? ' active' : ''}`}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => { e.stopPropagation(); setActiveTab(i); }}
+          >
+            {panel.label || `Tab ${i + 1}`}
+          </div>
+        ))}
+      </div>
+      {activePanel?.children.map(child => {
+        const childSelfStyle = buildSelfStyle(child.fmStyles ?? {});
+        if (child.cornerRadius) childSelfStyle.borderRadius = child.cornerRadius + 'px';
+        const outerStyle: Record<string, string> = {
+          position: 'absolute',
+          left:   child.x + 'px',
+          top:    child.y + 'px',
+          width:  child.width + 'px',
+          height: child.height + 'px',
+        };
+        if (child.cornerRadius) outerStyle.borderRadius = child.cornerRadius + 'px';
+        return (
+          <div key={child.id} class={`fm-object ${TYPE_CLASS[child.type] ?? 'fm-unknown'}`} style={outerStyle} title={child.fmName || child.type}>
+            <div class="self" style={childSelfStyle}>{renderContent(child)}</div>
+          </div>
+        );
+      })}
+    </>
   );
 }
 

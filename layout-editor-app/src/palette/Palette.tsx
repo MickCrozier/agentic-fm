@@ -27,6 +27,7 @@ export function Palette({ state, onStateChange }: PaletteProps) {
   const [fields, setFields] = useState<FMField[]>([]);
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState<'fields' | 'shapes'>('fields');
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     fetch('/api/context')
@@ -56,6 +57,7 @@ export function Palette({ state, onStateChange }: PaletteProps) {
           }
         }
         setFields(list);
+        setCollapsed(new Set(tableOrder));
       })
       .catch(() => {});
   }, []);
@@ -79,6 +81,10 @@ export function Palette({ state, onStateChange }: PaletteProps) {
   const filtered = fields.filter(f =>
     !search || f.name.toLowerCase().includes(search.toLowerCase()),
   );
+
+  const effectiveCollapsed = search
+    ? new Set([...collapsed].filter(t => !filtered.some(f => f.table === t)))
+    : collapsed;
 
   return (
     <div class="flex flex-col h-full bg-neutral-850 border-r border-neutral-700 text-xs">
@@ -116,10 +122,19 @@ export function Palette({ state, onStateChange }: PaletteProps) {
             )}
             {groupByTable(filtered).map(({ table, fields: group }) => (
               <div key={table}>
-                <div class="px-2 py-1 text-[9px] font-semibold uppercase tracking-wide text-neutral-600 bg-neutral-800 sticky top-0">
+                <button
+                  onClick={() => setCollapsed(prev => {
+                    const next = new Set(prev);
+                    next.has(table) ? next.delete(table) : next.add(table);
+                    return next;
+                  })}
+                  class="w-full flex items-center gap-1 px-2 py-1 text-[9px] font-semibold uppercase tracking-wide text-neutral-600 bg-neutral-800 sticky top-0 hover:text-neutral-400"
+                >
+                  <span class="text-[8px]">{effectiveCollapsed.has(table) ? '▶' : '▼'}</span>
                   {table}
-                </div>
-                {group.map(f => (
+                  <span class="ml-auto font-normal normal-case tracking-normal text-neutral-700">{group.length}</span>
+                </button>
+                {!effectiveCollapsed.has(table) && group.map(f => (
                   <button
                     key={`${f.table}::${f.name}`}
                     draggable
@@ -141,6 +156,7 @@ export function Palette({ state, onStateChange }: PaletteProps) {
                 ))}
               </div>
             ))}
+
           </div>
         </>
       )}

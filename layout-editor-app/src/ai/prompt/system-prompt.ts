@@ -7,18 +7,37 @@ export function buildSystemPrompt(opts: {
 }): string {
   const { layoutName, state, customInstructions } = opts;
 
-  let prompt = `You are a FileMaker layout design assistant embedded in a visual layout editor.
+  let prompt = `You are a FileMaker layout design assistant embedded in a web-based visual layout editor. You can both advise on layout design AND directly apply changes to the layout.
+
+IMPORTANT: This is a web app — not FileMaker itself. Do not suggest FileMaker menu commands, keyboard shortcuts, or anything that requires interacting with the FileMaker application. All changes must be made through this editor's tools or via the layout-patch mechanism below.
 
 FileMaker layouts are composed of objects (fields, text labels, buttons, portals, lines, rectangles, tab controls, slide panels, web viewers, popovers) placed on parts (Header, Body, Footer, Sub-summary, etc.).
 
-You can help with:
-- Analysing the current layout structure and suggesting improvements
-- Recommending object placement, sizing, and alignment
-- Layout patterns for list views, detail views, card windows, portals
-- Calculations for conditional formatting, tooltips, hide conditions
-- Explaining how FM layout objects and their properties work
+## Applying layout changes
 
-When you suggest a layout change, be specific: name the object, describe what to change and the new value. The developer applies changes in the canvas editor.`;
+When the user asks you to make a change, respond conversationally then include a fenced \`\`\`layout-patch block with a JSON array of operations. The editor will detect and apply it automatically.
+
+Supported operations:
+
+\`\`\`layout-patch
+[
+  { "op": "move",   "id": "<objectId>", "x": 10, "y": 20 },
+  { "op": "resize", "id": "<objectId>", "width": 200, "height": 30 },
+  { "op": "update", "id": "<objectId>", "displayText": "New Label" },
+  { "op": "style",  "id": "<objectId>", "themeClass": "button-default-bd", "fmStyles": { "backgroundColor": "#ff0000", "color": "#ffffff", "fontSize": "14px", "fontWeight": "bold", "textAlign": "center", "borderTopWidth": "1px", "borderTopColor": "#cccccc", "borderTopStyle": "solid" } },
+  { "op": "delete", "id": "<objectId>" },
+  { "op": "add", "object": { "type": "text", "x": 10, "y": 10, "width": 120, "height": 22, "displayText": "Hello" } }
+]
+\`\`\`
+
+Object types for "add": field, text, button, rectangle, line.
+Coordinates are in pixels from the layout top-left. Use the object IDs from the layout inventory below.
+
+The "style" op accepts:
+- \`themeClass\`: the FileMaker theme style class name (e.g. "button-default-bd", "field-control-bd")
+- \`fmStyles\`: partial style overrides — valid keys: backgroundColor, color, fontSize, fontWeight, textAlign, verticalAlign (top/center/bottom), fontFamily, borderTopWidth/RightWidth/BottomWidth/LeftWidth, borderTopColor/RightColor/BottomColor/LeftColor, borderTopStyle/RightStyle/BottomStyle/LeftStyle, boxShadow. Use standard CSS values (e.g. "#rrggbb", "14px", "bold"). Only include keys you want to change.
+
+Only emit a layout-patch block when you are actually making a change. For questions or analysis, respond with text only.`;
 
   if (state && (state.objects.length > 0 || state.parts.length > 0)) {
     prompt += `\n\n## Current layout${layoutName ? `: ${layoutName}` : ''}`;
@@ -59,46 +78,47 @@ function summariseObjects(objects: LayoutObject[]): string {
 
   const lines: string[] = [];
 
-  // Fields — list individually with field ref and position
+  // Fields — list individually with field ref, position, and ID
   if (byType['field']) {
     lines.push(`Fields (${byType['field'].length}):`);
     for (const o of byType['field']) {
       const ref = o.fieldRef ?? o.fmName ?? '(unnamed)';
-      lines.push(`  - ${ref} at (${o.x}, ${o.y}) ${o.width}×${o.height}`);
+      lines.push(`  - [${o.id}] ${ref} at (${o.x}, ${o.y}) ${o.width}×${o.height}`);
     }
   }
 
-  // Buttons — list with label
+  // Buttons — list with label and ID
   if (byType['button']) {
     lines.push(`Buttons (${byType['button'].length}):`);
     for (const o of byType['button']) {
       const label = o.displayText ?? o.fmName ?? '(unlabelled)';
-      lines.push(`  - "${label}" at (${o.x}, ${o.y}) ${o.width}×${o.height}`);
+      lines.push(`  - [${o.id}] "${label}" at (${o.x}, ${o.y}) ${o.width}×${o.height}`);
     }
   }
 
-  // Text labels — list with text content
+  // Text labels — list with text content and ID
   if (byType['text']) {
     lines.push(`Text labels (${byType['text'].length}):`);
     for (const o of byType['text']) {
       const txt = (o.displayText ?? o.fmName ?? '').slice(0, 40);
-      lines.push(`  - "${txt}" at (${o.x}, ${o.y})`);
+      lines.push(`  - [${o.id}] "${txt}" at (${o.x}, ${o.y}) ${o.width}×${o.height}`);
     }
   }
 
-  // Portals — name and child count
+  // Portals — name, child count, and ID
   if (byType['portal']) {
     lines.push(`Portals (${byType['portal'].length}):`);
     for (const o of byType['portal']) {
       const cols = o.children?.length ?? 0;
-      lines.push(`  - ${o.fmName || '(unnamed)'} at (${o.x}, ${o.y}) ${o.width}×${o.height}, ${cols} columns`);
+      lines.push(`  - [${o.id}] ${o.fmName || '(unnamed)'} at (${o.x}, ${o.y}) ${o.width}×${o.height}, ${cols} columns`);
     }
   }
 
-  // Containers — just counts for brevity
+  // Other types with ID
   for (const type of ['tab-control', 'slide-control', 'popover-btn', 'group', 'rectangle', 'line', 'web-viewer']) {
     if (byType[type]?.length) {
-      lines.push(`${type}: ${byType[type].length}`);
+      const ids = byType[type].map(o => `[${o.id}] (${o.x},${o.y}) ${o.width}×${o.height}`).join(', ');
+      lines.push(`${type}: ${ids}`);
     }
   }
 

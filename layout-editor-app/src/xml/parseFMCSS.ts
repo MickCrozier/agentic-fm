@@ -40,7 +40,7 @@ function convertColor(value: string): string {
   return value;
 }
 
-/** Convert pt to px (1pt = 4/3px) */
+/** Convert pt to px — FM renders at 72dpi so 1pt = 1px on screen */
 function ptToPx(value: string): string {
   return value.replace(/([\d.]+)pt/g, (_, n) => `${Math.round(parseFloat(n))}px`);
 }

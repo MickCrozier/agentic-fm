@@ -111,18 +111,49 @@ export function App() {
   }, [state, selectedIds, push]);
 
   const handleUngroup = useCallback(() => {
-    if (selectedIds.size !== 1) return;
-    const [id] = selectedIds;
-    const group = state.objects.find(o => o.id === id && o.type === 'group');
-    if (!group) return;
-    const ungrouped = (group.children ?? []).map(c => ({
-      ...c,
-      id: 'obj-' + Math.random().toString(36).slice(2, 8),
-      x: group.x + c.x, y: group.y + c.y,
-      bounds: { top: group.y + c.y, left: group.x + c.x, bottom: group.y + c.y + c.height, right: group.x + c.x + c.width },
-    }));
-    push({ ...state, objects: [...state.objects.filter(o => o.id !== id), ...ungrouped] });
-    setSelectedIds(new Set(ungrouped.map(o => o.id)));
+    const isUngroupable = (o: LayoutObject) =>
+      selectedIds.has(o.id) && (o.type === 'group' || (o.children && o.children.length > 0));
+    const expandGroup = (group: LayoutObject) =>
+      (group.children ?? []).map(c => ({
+        ...c,
+        id: 'obj-' + Math.random().toString(36).slice(2, 8),
+        x: group.x + c.x, y: group.y + c.y,
+        bounds: { top: group.y + c.y, left: group.x + c.x, bottom: group.y + c.y + c.height, right: group.x + c.x + c.width },
+      }));
+
+    // Top-level objects
+    const topGroups = state.objects.filter(isUngroupable);
+
+    // Popover panel children
+    const panelGroups: { panelId: string; group: LayoutObject }[] = [];
+    for (const panel of state.popoverPanels) {
+      for (const child of panel.children ?? []) {
+        if (isUngroupable(child)) panelGroups.push({ panelId: panel.id, group: child });
+      }
+    }
+
+    if (topGroups.length === 0 && panelGroups.length === 0) return;
+
+    const topGroupIds = new Set(topGroups.map(g => g.id));
+    const topUngrouped = topGroups.flatMap(expandGroup);
+
+    const panelGroupIds = new Set(panelGroups.map(pg => pg.group.id));
+    const newPopoverPanels = state.popoverPanels.map(panel => {
+      const toExpand = panelGroups.filter(pg => pg.panelId === panel.id);
+      if (toExpand.length === 0) return panel;
+      const expandIds = new Set(toExpand.map(pg => pg.group.id));
+      const kept = (panel.children ?? []).filter(c => !expandIds.has(c.id));
+      const added = toExpand.flatMap(pg => expandGroup(pg.group));
+      return { ...panel, children: [...kept, ...added] };
+    });
+
+    const allUngrouped = [...topUngrouped, ...panelGroups.flatMap(pg => expandGroup(pg.group))];
+    push({
+      ...state,
+      objects: [...state.objects.filter(o => !topGroupIds.has(o.id)), ...topUngrouped],
+      popoverPanels: newPopoverPanels,
+    });
+    setSelectedIds(new Set(allUngrouped.map(o => o.id)));
   }, [state, selectedIds, push]);
 
   // Keyboard shortcuts
@@ -151,7 +182,11 @@ export function App() {
         showGrid={showGrid}
         copyMsg={copyMsg}
         canGroup={selectedIds.size >= 2}
-        canUngroup={selectedIds.size === 1 && state.objects.find(o => o.id === [...selectedIds][0])?.type === 'group'}
+        canUngroup={selectedIds.size >= 1 && [...selectedIds].every(id => {
+          const o = state.objects.find(x => x.id === id)
+            ?? state.popoverPanels.flatMap(p => p.children ?? []).find(x => x.id === id);
+          return o?.type === 'group' || (o?.children && o.children.length > 0);
+        })}
         onUndo={undo}
         onRedo={redo}
         onToggleGrid={() => setShowGrid(g => !g)}
@@ -214,6 +249,7 @@ export function App() {
               state={state}
               customInstructions={customInstructions}
               onClearChat={() => setChatKey(k => k + 1)}
+              onStateChange={handleStateChange}
             />
           </div>
         </div>
