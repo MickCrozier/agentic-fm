@@ -20,13 +20,10 @@
 
   "postCreateCommand": "bash .devcontainer/postCreate.sh",
 
-<<<<<<< HEAD
-=======
-  "forwardPorts": [8765],
   "portsAttributes": {
     "8765": {
       "label": "agentic-fm companion server",
-      "onAutoForward": "silent"
+      "onAutoForward": "ignore"
     }
   },
 

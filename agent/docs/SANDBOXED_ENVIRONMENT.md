@@ -176,7 +176,9 @@ python3 agent/scripts/companion_server.py &
 
 **Port:** 8765 (default). Override with `--port N`.
 
-**Binding:** By default binds to `127.0.0.1`. For a Docker dev container, the companion runs on the host and binds to `127.0.0.1` on the host — Docker's `host.docker.internal` routes correctly without any rebinding needed. Only bind to `0.0.0.0` if FileMaker Server itself is in a container and needs to reach the companion — but **only after verifying the host is on a private network and getting explicit user confirmation**.
+**Binding:** By default binds to `0.0.0.0` (all interfaces). For a Docker dev container this is required — Docker routes `host.docker.internal` through the Docker Desktop VM network (`192.168.65.x`), which cannot reach a `127.0.0.1`-only listener on the host.
+
+> **⚠ VS Code port forwarding conflict:** If `devcontainer.json` includes `"forwardPorts": [8765]` or `"onAutoForward": "silent"` for port 8765, VS Code will intercept connections from the container and route them back into the container — creating a loop that causes requests to hang with no response. The fix is to remove 8765 from `forwardPorts` and set `"onAutoForward": "ignore"` in `portsAttributes`. A container rebuild is required after this change.
 
 > **⚠ Security warning — binding to 0.0.0.0**
 >
@@ -307,17 +309,13 @@ When you detect you are in a limited sandbox:
 > - Validate output with FMLint
 > - Write files to `agent/sandbox/` for you to paste into FileMaker
 >
-> **To paste my output into FileMaker**, the agent will POST the XML directly
-> to the companion server running on your Mac:
+> **To paste my output into FileMaker**, the agent uses `deploy.py` which automatically routes through the companion server on your Mac:
 > ```bash
-> curl -s -X POST http://host.docker.internal:8765/clipboard \
->   -H "Content-Type: application/json" \
->   -d "{\"xml\": $(python3 -c "import json; print(json.dumps(open('agent/sandbox/<filename>.xml').read()))")}"
+> python3 agent/scripts/deploy.py agent/sandbox/<filename>.xml
 > ```
 > Then switch to FileMaker's Script Workspace and press **Cmd+V**.
 >
-> Note: `clipboard.py` requires `osascript` and cannot run inside the container.
-> Always use the companion server endpoint instead.
+> Note: `clipboard.py` requires `osascript` and cannot run inside the container. Use `deploy.py` instead — it detects the container environment and POSTs to the companion automatically.
 
 ---
 
