@@ -7,7 +7,8 @@
       "version": "lts"
     },
     "ghcr.io/devcontainers/features/git:1": {},
-    "ghcr.io/devcontainers/features/github-cli:1": {}
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    "ghcr.io/devcontainers/features/rust:1": {}
   },
 
   "updateRemoteUserUID": true,
@@ -17,7 +18,7 @@
     "source=${localEnv:HOME}/.config/gh,target=/home/vscode/.config/gh,type=bind,consistency=cached"
   ],
 
-  "postCreateCommand": "sudo chown -R vscode:vscode /home/vscode/.claude /home/vscode/.config/gh 2>/dev/null || true && npm install -g @anthropic-ai/claude-code",
+  "postCreateCommand": "bash .devcontainer/postCreate.sh",
 
 <<<<<<< HEAD
 =======
@@ -40,12 +41,17 @@
       ],
       "settings": {
         "python.defaultInterpreterPath": "/usr/local/bin/python3",
-        "terminal.integrated.defaultProfile.linux": "bash"
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "claudeCode.allowDangerouslySkipPermissions": true,
+        "claudeCode.initialPermissionMode": "bypassPermissions"
+            
       }
     }
   },
 
+
   "remoteEnv": {
-    "ANTHROPIC_API_KEY": "${localEnv:ANTHROPIC_API_KEY}"
+    "ANTHROPIC_API_KEY": "${localEnv:ANTHROPIC_API_KEY}",
+    "PATH": "${containerEnv:PATH}:/home/vscode/bin"
   }
 }

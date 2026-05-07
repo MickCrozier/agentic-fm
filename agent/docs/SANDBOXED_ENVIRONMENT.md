@@ -32,9 +32,13 @@ cat /proc/1/cgroup 2>/dev/null | grep -qi "docker\|containerd\|sandbox" && echo 
 # Can I execute AppleScript? (macOS-only capability)
 command -v osascript &>/dev/null && echo "OSASCRIPT_AVAILABLE" || echo "NO_OSASCRIPT"
 
-# Can I reach the host?
+# Can I reach the companion server?
+# In a Docker dev container, localhost:8765 refers to the container, NOT the macOS host.
+# The companion server must run on the macOS host — use host.docker.internal to reach it.
 curl -s -o /dev/null -w "%{http_code}" http://localhost:8765/health 2>/dev/null || echo "NO_COMPANION_LOCAL"
 curl -s -o /dev/null -w "%{http_code}" http://host.docker.internal:8765/health 2>/dev/null || echo "NO_COMPANION_DOCKER"
+# If you are in Docker and NO_COMPANION_DOCKER: the companion server is not running on the host.
+# Ask the developer to start it: python3 agent/scripts/companion_server.py
 
 # Is Rust/Cargo available? (needed to compile fm-xml-export-exploder on Linux)
 command -v cargo &>/dev/null && echo "CARGO_AVAILABLE" || echo "NO_CARGO"
@@ -148,7 +152,23 @@ apk add python3 libxml2-utils
 
 ### 2c. Start the companion server
 
-The companion server is a lightweight Python HTTP server (stdlib only, no dependencies) that bridges between FileMaker and the agent toolchain. Start it and keep it running in the background:
+The companion server is a lightweight Python HTTP server (stdlib only, no dependencies) that bridges between FileMaker and the agent toolchain.
+
+> **Docker dev container**: The companion server **must run on the macOS host machine**, not inside the container. The agent inside the container reaches it via `host.docker.internal:8765`. If the health check at `host.docker.internal:8765/health` fails, ask the developer to open a **Terminal on their Mac** and run:
+>
+> ```bash
+> cd /path/to/agentic-fm && python3 agent/scripts/companion_server.py
+> ```
+>
+> Replace `/path/to/agentic-fm` with the actual path to the cloned repo on the Mac (e.g. `~/Developer/agentic-fm`). Keep that Terminal window open — the server runs in the foreground. Verify it is up by checking the health endpoint from inside the container:
+>
+> ```bash
+> curl -s http://host.docker.internal:8765/health
+> ```
+>
+> Do not attempt to start the companion inside the container — it cannot run AppleScript or access the macOS clipboard from there.
+
+For native macOS or full-host-access sandboxes, start it in the background:
 
 ```bash
 python3 agent/scripts/companion_server.py &
@@ -156,7 +176,7 @@ python3 agent/scripts/companion_server.py &
 
 **Port:** 8765 (default). Override with `--port N`.
 
-**Binding:** By default binds to `127.0.0.1`. If the sandbox needs to be reachable from a different network namespace (e.g. Docker), you can bind to all interfaces — but **only after verifying the host is on a private network and getting explicit user confirmation**.
+**Binding:** By default binds to `127.0.0.1`. For a Docker dev container, the companion runs on the host and binds to `127.0.0.1` on the host — Docker's `host.docker.internal` routes correctly without any rebinding needed. Only bind to `0.0.0.0` if FileMaker Server itself is in a container and needs to reach the companion — but **only after verifying the host is on a private network and getting explicit user confirmation**.
 
 > **⚠ Security warning — binding to 0.0.0.0**
 >
@@ -209,7 +229,9 @@ The following steps require the developer to interact with FileMaker Pro directl
 
 ```bash
 # Companion server responding
-curl -s http://localhost:8765/health
+# In a Docker dev container, use host.docker.internal instead of localhost:
+curl -s http://localhost:8765/health        # native macOS / full-access sandbox
+curl -s http://host.docker.internal:8765/health  # Docker dev container
 
 # XML data populated
 ls agent/xml_parsed/scripts_sanitized/ | head -5
@@ -271,7 +293,11 @@ When you detect you are in a limited sandbox:
 >
 > **Before I can help:**
 > 1. Follow the setup in `QUICKSTART.md` on your Mac (install fm-xml-export-exploder, companion scripts, custom function)
-> 2. Start the companion server: `python3 agent/scripts/companion_server.py`
+> 2. Start the companion server — open a Terminal on your Mac and run:
+>    ```bash
+>    cd /path/to/agentic-fm && python3 agent/scripts/companion_server.py
+>    ```
+>    Replace `/path/to/agentic-fm` with the actual repo path (e.g. `~/Developer/agentic-fm`). Keep the Terminal window open.
 > 3. Run **Explode XML** in FileMaker to populate `agent/xml_parsed/`
 > 4. Run **Push Context** on the layout you're working on
 >
@@ -350,7 +376,9 @@ If you are an agent tasked with setting up this project and you have full access
 2. Check Python 3 exists → install if missing
 3. Check xmllint exists → install if missing
 4. Check fm-xml-export-exploder exists → install if missing (compile from source on Linux)
-5. Start companion server in background
+5. Start companion server — **on the macOS host**, not inside any container
+   - In a Docker dev container: check `host.docker.internal:8765/health`; if down, ask developer to run `python3 agent/scripts/companion_server.py` on their Mac
+   - On native macOS or full-host-access sandbox: start it directly with `python3 agent/scripts/companion_server.py &`
 6. Check if agent/xml_parsed/ is populated
    → If yes: ready to generate code
    → If no: tell developer to run Explode XML in FileMaker
