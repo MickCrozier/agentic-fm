@@ -102,7 +102,17 @@ export function parseFMCSS(cssText: string): FMStyles {
   if (props['font-weight']) styles.fontWeight  = props['font-weight'];
   if (props['text-align'])  styles.textAlign   = props['text-align'];
   if (props['box-shadow'])    styles.boxShadow    = props['box-shadow'];
-  if (props['border-radius']) styles.borderRadius = ptToPx(props['border-radius']);
+
+  // border-radius: prefer shorthand, fall back to per-corner (FM stores "Xpt Ypt" — use first value)
+  if (props['border-radius']) {
+    styles.borderRadius = ptToPx(props['border-radius'].split(/\s+/)[0]);
+  } else {
+    const corners = ['border-top-left-radius', 'border-top-right-radius', 'border-bottom-right-radius', 'border-bottom-left-radius']
+      .map(k => props[k] ? ptToPx(props[k].split(/\s+/)[0]) : null);
+    if (corners.some(Boolean)) {
+      styles.borderRadius = corners.map(v => v ?? '0px').join(' ');
+    }
+  }
 
   const va = props['-fm-text-vertical-align'];
   if (va === 'top' || va === 'center' || va === 'bottom') styles.verticalAlign = va;

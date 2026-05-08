@@ -160,7 +160,7 @@ function GroupContent({ obj }: { obj: LayoutObject }) {
         return (
           <div
             key={child.id}
-            class={`fm-object ${TYPE_CLASS[child.type] ?? 'fm-unknown'}`}
+            class={`fm-object ${TYPE_CLASS[child.type] ?? 'fm-unknown'}${buildThemeClasses(child.type, child.themeClass)}`}
             style={outerStyle}
             title={child.fmName || child.type}
           >
@@ -225,7 +225,7 @@ function TabContent({ obj }: { obj: LayoutObject }) {
           childSelfStyle.borderRadius = child.localStyles.borderRadius;
         }
         return (
-          <div key={child.id} class={`fm-object ${TYPE_CLASS[child.type] ?? 'fm-unknown'}`} style={outerStyle} title={child.fmName || child.type}>
+          <div key={child.id} class={`fm-object ${TYPE_CLASS[child.type] ?? 'fm-unknown'}${buildThemeClasses(child.type, child.themeClass)}`} style={outerStyle} title={child.fmName || child.type}>
             <div class="self" style={childSelfStyle}>{renderContent(child)}</div>
           </div>
         );
