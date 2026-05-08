@@ -268,11 +268,35 @@ function ButtonBarContent({ obj }: { obj: LayoutObject }) {
 
 function SlideContent({ obj }: { obj: LayoutObject }) {
   const count = obj.slideCount ?? 0;
+  const children = obj.children ?? [];
   return (
-    <div class="fm-slide-dots">
-      {Array.from({ length: count }, (_, i) => (
-        <div key={i} class={`fm-slide-dot${i === 0 ? ' active' : ''}`} />
-      ))}
-    </div>
+    <>
+      {children.map(child => {
+        const childSelfStyle = buildSelfStyle(child.localStyles ?? {});
+        const outerStyle: Record<string, string> = {
+          position: 'absolute',
+          left:   child.x + 'px',
+          top:    child.y + 'px',
+          width:  child.width + 'px',
+          height: child.height + 'px',
+        };
+        if (child.localStyles?.borderRadius) {
+          outerStyle.borderRadius = child.localStyles.borderRadius;
+          childSelfStyle.borderRadius = child.localStyles.borderRadius;
+        }
+        return (
+          <div key={child.id} class={`fm-object ${TYPE_CLASS[child.type] ?? 'fm-unknown'}${buildThemeClasses(child.type, child.themeClass)}`} style={outerStyle} title={child.fmName || child.type}>
+            <div class="self" style={childSelfStyle}>{renderContent(child)}</div>
+          </div>
+        );
+      })}
+      {count > 1 && (
+        <div class="fm-slide-dots">
+          {Array.from({ length: count }, (_, i) => (
+            <div key={i} class={`fm-slide-dot${i === 0 ? ' active' : ''}`} />
+          ))}
+        </div>
+      )}
+    </>
   );
 }

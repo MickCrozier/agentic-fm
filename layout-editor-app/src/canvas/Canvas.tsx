@@ -4,16 +4,20 @@ import { CanvasObject } from './CanvasObject';
 import { useSelection } from '@/hooks/useSelection';
 import { useDrag } from '@/hooks/useDrag';
 
-const PART_COLORS: Record<string, string> = {
-  Header:       '#f0f4ff',
-  Body:         '#ffffff',
-  Footer:       '#f5f5f7',
-  'Sub-summary':'#fffbf0',
-  'Title Header':'#f0f4ff',
-  'Title Footer':'#f5f5f7',
-  'Grand Summary':'#f0fff4',
-  'Leading Grand Summary':'#f0fff4',
-  'Trailing Grand Summary':'#f0fff4',
+const PART_THEME_CLASS: Record<string, string> = {
+  'Header':                   'header',
+  'Body':                     'body',
+  'Footer':                   'footer',
+  'Title Header':             'title_header',
+  'Title Footer':             'title_footer',
+  'Top Navigation':           'top_nav_part',
+  'Bottom Navigation':        'bottom_nav_part',
+  'Sub-summary':              'leading_sub_summary',
+  'Leading Sub-summary':      'leading_sub_summary',
+  'Trailing Sub-summary':     'trailing_sub_summary',
+  'Grand Summary':            'body',
+  'Leading Grand Summary':    'leading_sub_summary',
+  'Trailing Grand Summary':   'trailing_sub_summary',
 };
 
 interface CanvasProps {
@@ -177,12 +181,14 @@ export function Canvas({ state, onStateChange, onSelect, onSelectionChange, show
           const top = partTop;
           const height = part.bottom - top;
           partTop = part.bottom;
+          const partTheme = PART_THEME_CLASS[part.type];
           return (
             <div
               key={i}
-              class="layout-part"
-              style={{ top: top + 'px', height: height + 'px', background: PART_COLORS[part.type] ?? '#fff' }}
+              class={`layout-part${partTheme ? ` fm-theme-${partTheme}` : ''}`}
+              style={{ top: top + 'px', height: height + 'px' }}
             >
+              <div class="self" style={{ position: 'absolute', inset: '0' }} />
               <span class="layout-part-label">{part.type}</span>
               <span class="layout-part-size">{height}px</span>
             </div>
