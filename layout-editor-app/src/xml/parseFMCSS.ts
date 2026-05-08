@@ -24,6 +24,7 @@ export interface FMStyles {
   textAlign?: string;
   verticalAlign?: 'top' | 'center' | 'bottom';
   boxShadow?: string;
+  borderRadius?: string;
 }
 
 /** Convert FM percentage rgba to standard rgb/rgba string */
@@ -61,8 +62,9 @@ function convertBorderStyle(value: string): string {
 export function parseFMCSS(cssText: string): FMStyles {
   if (!cssText) return {};
 
-  // Extract the .self { ... } block (skip .inner_border and other blocks)
-  const selfMatch = cssText.match(/self:normal\s+\.self\s*\{([^}]*)\}/);
+  // Shapes use a plain .main { } block; styled objects use self:normal .self { }
+  const selfMatch = cssText.match(/self:normal\s+\.self\s*\{([^}]*)\}/)
+    ?? cssText.match(/\.main\s*\{([^}]*)\}/);
   if (!selfMatch) return {};
 
   const block = selfMatch[1];
@@ -99,7 +101,8 @@ export function parseFMCSS(cssText: string): FMStyles {
   if (props['font-size'])   styles.fontSize   = ptToPx(props['font-size']);
   if (props['font-weight']) styles.fontWeight  = props['font-weight'];
   if (props['text-align'])  styles.textAlign   = props['text-align'];
-  if (props['box-shadow'])  styles.boxShadow   = props['box-shadow'];
+  if (props['box-shadow'])    styles.boxShadow    = props['box-shadow'];
+  if (props['border-radius']) styles.borderRadius = ptToPx(props['border-radius']);
 
   const va = props['-fm-text-vertical-align'];
   if (va === 'top' || va === 'center' || va === 'bottom') styles.verticalAlign = va;

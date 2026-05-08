@@ -93,10 +93,10 @@ export function CanvasObject({ obj, selected, onMouseDown, onDblClick }: CanvasO
     width:  obj.width + 'px',
     height: obj.height + 'px',
   };
-  if (obj.cornerRadius) outerStyle.borderRadius = obj.cornerRadius + 'px';
+  if (s.borderRadius) outerStyle.borderRadius = s.borderRadius;
 
   const selfStyle = buildSelfStyle(s);
-  if (obj.cornerRadius) selfStyle.borderRadius = obj.cornerRadius + 'px';
+  if (s.borderRadius) selfStyle.borderRadius = s.borderRadius;
 
   return (
     <div
@@ -146,9 +146,6 @@ function GroupContent({ obj }: { obj: LayoutObject }) {
     <>
       {children.map(child => {
         const childSelfStyle = buildSelfStyle(child.fmStyles ?? {});
-        if (child.cornerRadius) {
-          childSelfStyle.borderRadius = child.cornerRadius + 'px';
-        }
         const outerStyle: Record<string, string> = {
           position: 'absolute',
           left:   child.x + 'px',
@@ -156,7 +153,10 @@ function GroupContent({ obj }: { obj: LayoutObject }) {
           width:  child.width + 'px',
           height: child.height + 'px',
         };
-        if (child.cornerRadius) outerStyle.borderRadius = child.cornerRadius + 'px';
+        if (child.fmStyles?.borderRadius) {
+          outerStyle.borderRadius = child.fmStyles.borderRadius;
+          childSelfStyle.borderRadius = child.fmStyles.borderRadius;
+        }
         return (
           <div
             key={child.id}
@@ -213,7 +213,6 @@ function TabContent({ obj }: { obj: LayoutObject }) {
       </div>
       {activePanel?.children.map(child => {
         const childSelfStyle = buildSelfStyle(child.fmStyles ?? {});
-        if (child.cornerRadius) childSelfStyle.borderRadius = child.cornerRadius + 'px';
         const outerStyle: Record<string, string> = {
           position: 'absolute',
           left:   child.x + 'px',
@@ -221,7 +220,10 @@ function TabContent({ obj }: { obj: LayoutObject }) {
           width:  child.width + 'px',
           height: child.height + 'px',
         };
-        if (child.cornerRadius) outerStyle.borderRadius = child.cornerRadius + 'px';
+        if (child.fmStyles?.borderRadius) {
+          outerStyle.borderRadius = child.fmStyles.borderRadius;
+          childSelfStyle.borderRadius = child.fmStyles.borderRadius;
+        }
         return (
           <div key={child.id} class={`fm-object ${TYPE_CLASS[child.type] ?? 'fm-unknown'}`} style={outerStyle} title={child.fmName || child.type}>
             <div class="self" style={childSelfStyle}>{renderContent(child)}</div>

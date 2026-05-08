@@ -43,7 +43,6 @@ export interface LayoutObject {
   /** Slide control: panel count */
   slideCount?: number;
   /** Rounded rectangle corner radius in px */
-  cornerRadius?: number;
 }
 
 export interface LayoutPart {
@@ -209,10 +208,12 @@ function parseObject(
 
   const tooltip      = calcText(objEl.querySelector('Tooltip > Calculation > Text')) || undefined;
   const localCSS     = objEl.querySelector('LocalCSS');
+  const fullCSS      = objEl.querySelector('FullCSS');
   const localCSSName = localCSS?.getAttribute('name')?.trim() ?? '';
   // Prefer LocalCSS name (UUID or named style) over FM type base class
   const themeClass   = localCSSName || fmTypeToThemeClass(fmType);
-  const fmStyles     = parseFMCSS(localCSS?.textContent ?? '');
+  // Shapes store styles in FullCSS (.main block); other objects use LocalCSS (.self block)
+  const fmStyles     = parseFMCSS(localCSS?.textContent ?? fullCSS?.textContent ?? '');
 
   // ── Group ─────────────────────────────────────────────────────────────────
   if (effectiveType === 'group') {
@@ -353,8 +354,7 @@ function parseObject(
     displayText = calcText(objEl.querySelector('Button > Label > Calculation > Text'));
   }
 
-  const cornerRadius = objEl.querySelector('RoundedRectangle') ? 12 : undefined;
-  return { ...base, displayText, fieldRef, tooltip, fmStyles, themeClass, cornerRadius };
+  return { ...base, displayText, fieldRef, tooltip, fmStyles, themeClass };
 }
 
 // ── Main entry ───────────────────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'preact/hooks';
+import { useState, useEffect, useCallback, useRef } from 'preact/hooks';
 import { fetchCustomInstructions } from '@/api/client';
 import { ChatPanel } from '@/ai/chat/ChatPanel';
 import { AISettings } from '@/ai/settings/AISettings';
@@ -27,6 +27,27 @@ export function App() {
   const [copyMsg, setCopyMsg] = useState('');
   const [showGrid, setShowGrid] = useState(false);
   const [openPopover, setOpenPopover] = useState<string | null>(null);
+  const [rightPanelWidth, setRightPanelWidth] = useState(288); // 72 * 4 = 288px
+  const isResizing = useRef(false);
+
+  const handleResizeStart = useCallback((e: MouseEvent) => {
+    e.preventDefault();
+    isResizing.current = true;
+    const startX = e.clientX;
+    const startWidth = rightPanelWidth;
+    const onMove = (e: MouseEvent) => {
+      if (!isResizing.current) return;
+      const delta = startX - e.clientX;
+      setRightPanelWidth(Math.max(220, Math.min(600, startWidth + delta)));
+    };
+    const onUp = () => {
+      isResizing.current = false;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [rightPanelWidth]);
 
   useEffect(() => {
     fetchCustomInstructions().then(setCustomInstructions).catch(() => {});
@@ -228,7 +249,15 @@ export function App() {
         </div>
 
         {/* Right panel: Inspector + Chat */}
-        <div class="w-72 flex-shrink-0 flex flex-col border-l border-neutral-700">
+        <div
+          class="flex-shrink-0 flex flex-col border-l border-neutral-700 relative"
+          style={{ width: `${rightPanelWidth}px` }}
+        >
+          {/* Resize handle */}
+          <div
+            class="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500 transition-colors z-10"
+            onMouseDown={handleResizeStart}
+          />
           {/* Inspector */}
           <div class="border-b border-neutral-700 bg-neutral-800">
             <div class="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
