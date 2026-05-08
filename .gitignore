@@ -153,3 +153,5 @@ $RECYCLE.BIN/
 *.orig
 *.rej
 
+agent/themes/MidTown.css
+agent/themes/defaults/Universal Touch.css

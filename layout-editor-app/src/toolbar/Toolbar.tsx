@@ -14,6 +14,9 @@ interface ToolbarProps {
   canUngroup?: boolean;
   unit: MeasureUnit;
   onUnitChange: (u: MeasureUnit) => void;
+  themes: { name: string; source: 'default' | 'custom' | 'override' }[];
+  activeTheme: string | null;
+  onThemeChange: (t: string | null) => void;
   onUndo: () => void;
   onRedo: () => void;
   onToggleGrid: () => void;
@@ -28,6 +31,7 @@ export function Toolbar({
   canUndo, canRedo, showGrid, copyMsg,
   canGroup, canUngroup,
   unit, onUnitChange,
+  themes, activeTheme, onThemeChange,
   onUndo, onRedo, onToggleGrid, onCopyXML, onGroup, onUngroup, onOpenSettings,
 }: ToolbarProps) {
   return (
@@ -94,6 +98,28 @@ export function Toolbar({
           </button>
         ))}
       </div>
+
+      {themes.length > 0 && (
+        <>
+          <span class="text-neutral-600">|</span>
+          <select
+            value={activeTheme ?? ''}
+            onChange={e => {
+              const v = (e.target as HTMLSelectElement).value;
+              onThemeChange(v || null);
+            }}
+            class="bg-neutral-700 text-neutral-200 text-[10px] rounded px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-blue-500 max-w-[160px]"
+            title="Active theme"
+          >
+            <option value="">No theme</option>
+            {themes.map(t => (
+              <option key={t.name} value={t.name}>
+                {t.source === 'override' ? `${t.name} ●` : t.name}
+              </option>
+            ))}
+          </select>
+        </>
+      )}
 
       <span class="text-neutral-600">|</span>
 

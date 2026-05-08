@@ -9,6 +9,8 @@ const TYPE_CLASS: Record<string, string> = {
   rectangle:      'fm-rect',
   portal:         'fm-portal',
   'web-viewer':   'fm-web-viewer',
+  container:      'fm-container',
+  image:          'fm-image',
   group:          'fm-group',
   'tab-control':  'fm-tab-control',
   'slide-control':'fm-slide-control',
@@ -29,6 +31,7 @@ const TYPE_THEME_BASE: Record<string, string> = {
   rectangle:     'rectangle',
   portal:        'portal',
   'web-viewer':  'web_viewer',
+  container:     'container',
   'tab-control': 'tab_panel',
 };
 
@@ -67,7 +70,12 @@ function buildSelfStyle(s: ReturnType<typeof import('@/xml/parseFMCSS').parseFMC
   if (s.fontFamily)      style.fontFamily = s.fontFamily;
   if (s.fontSize)        style.fontSize = s.fontSize;
   if (s.fontWeight)      style.fontWeight = s.fontWeight;
-  if (s.textAlign)       style.textAlign = s.textAlign;
+  if (s.textAlign) {
+    style.textAlign = s.textAlign;
+    style.justifyContent = s.textAlign === 'center' ? 'center'
+      : s.textAlign === 'right' ? 'flex-end'
+      : 'flex-start';
+  }
   if (s.boxShadow)       style.boxShadow = s.boxShadow;
   for (const side of ['Top', 'Right', 'Bottom', 'Left'] as const) {
     const color = (s as Record<string, string>)[`border${side}Color`];
@@ -110,8 +118,76 @@ export function CanvasObject({ obj, selected, previewState, onMouseDown, onDblCl
       title={obj.fmName || obj.type}
     >
       <div class="self" style={selfStyle}>
-        {renderContent(obj)}
+        {obj.type === 'button' || obj.type === 'popover-btn'
+          ? <div class="inner_border" style={{ position: 'absolute', inset: '0', boxSizing: 'border-box', display: 'flex', overflow: 'hidden' }}>{renderContent(obj)}</div>
+          : renderContent(obj)
+        }
       </div>
+    </div>
+  );
+}
+
+function flexAlign(h: 'left'|'center'|'right', v: 'top'|'middle'|'bottom') {
+  const jc = h === 'left' ? 'flex-start' : h === 'right' ? 'flex-end' : 'center';
+  const ai = v === 'top'  ? 'flex-start' : v === 'bottom' ? 'flex-end'  : 'center';
+  return { justifyContent: jc, alignItems: ai };
+}
+
+function renderButtonContent(obj: LayoutObject) {
+  const { iconSVG, iconSize, iconPosition, iconAlignH = 'center', iconAlignV = 'middle', displayText } = obj;
+
+  if (!iconSVG) {
+    return <span class="fm-obj-label" style={labelStyle(obj)}>{displayText ?? ''}</span>;
+  }
+
+  const sizePx = (iconSize ?? 16) + 'px';
+  const iconEl = (
+    <span
+      class="fm-btn-icon"
+      style={{ width: sizePx, height: sizePx, flexShrink: '0' }}
+      dangerouslySetInnerHTML={{ __html: iconSVG }}
+    />
+  );
+
+  // Icon only (type 1) — position icon within button using h/v alignment
+  if (!displayText || !iconPosition) {
+    const { justifyContent, alignItems } = flexAlign(iconAlignH, iconAlignV);
+    return (
+      <div style={{ display: 'flex', width: '100%', height: '100%', justifyContent, alignItems }}>
+        {iconEl}
+      </div>
+    );
+  }
+
+  const textEl = <span class="fm-obj-label" style={{ width: 'auto', textAlign: iconAlignH }}>{displayText}</span>;
+
+  if (iconPosition === 'above' || iconPosition === 'below') {
+    // Column: h→align-items, v→justify-content
+    const jc = iconAlignV === 'top' ? 'flex-start' : iconAlignV === 'bottom' ? 'flex-end' : 'center';
+    const ai = iconAlignH === 'left' ? 'flex-start' : iconAlignH === 'right' ? 'flex-end' : 'center';
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', justifyContent: jc, alignItems: ai, gap: '2px' }}>
+        {iconPosition === 'above' ? <>{iconEl}{textEl}</> : <>{textEl}{iconEl}</>}
+      </div>
+    );
+  }
+
+  // Row (left/right)
+  const ai = iconAlignV === 'top' ? 'flex-start' : iconAlignV === 'bottom' ? 'flex-end' : 'center';
+  if (iconAlignH === 'center') {
+    // Center: group icon+text together and center as a unit
+    const centeredTextEl = <span class="fm-obj-label" style={{ width: 'auto' }}>{displayText}</span>;
+    return (
+      <div style={{ display: 'flex', width: '100%', height: '100%', justifyContent: 'center', alignItems: ai, gap: '4px' }}>
+        {iconPosition === 'right' ? <>{centeredTextEl}{iconEl}</> : <>{iconEl}{centeredTextEl}</>}
+      </div>
+    );
+  }
+  // Left or right: icon pinned to its end, text fills remaining space
+  const rowTextEl = <span class="fm-obj-label" style={{ flex: '1', textAlign: iconAlignH }}>{displayText}</span>;
+  return (
+    <div style={{ display: 'flex', width: '100%', height: '100%', alignItems: ai, gap: '4px' }}>
+      {iconPosition === 'right' ? <>{rowTextEl}{iconEl}</> : <>{iconEl}{rowTextEl}</>}
     </div>
   );
 }
@@ -124,6 +200,29 @@ function labelStyle(obj: LayoutObject): Record<string, string> {
 
 function renderContent(obj: LayoutObject) {
   switch (obj.type) {
+    case 'image': {
+      if (!obj.imageData) return <span class="fm-obj-label" style={{ opacity: 0.4, fontSize: '9px' }}>Image</span>;
+      const fmt = obj.imageFormat;
+      const hPos = fmt?.hAlign ?? 'left';
+      const vPos = fmt?.vAlign ?? 'top';
+      let objectFit: string = 'none'; // crop
+      if (fmt) {
+        if (fmt.reduce && fmt.enlarge) objectFit = fmt.maintainProportions ? 'contain' : 'fill';
+        else if (fmt.reduce)  objectFit = fmt.maintainProportions ? 'scale-down' : 'fill';
+        else if (fmt.enlarge) objectFit = fmt.maintainProportions ? 'contain'    : 'fill';
+      }
+      return <img src={obj.imageData} style={{ width: '100%', height: '100%', display: 'block', objectFit: objectFit as any, objectPosition: `${hPos} ${vPos}` }} />;
+    }
+    case 'container':
+      return (
+        <div class="fm-container-placeholder">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style={{ opacity: 0.4 }}>
+            <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/>
+            <polyline points="21 15 16 10 5 21"/>
+          </svg>
+          <span class="fm-obj-label" style={{ fontSize: '9px', opacity: 0.5 }}>{obj.fieldRef?.split('::')[1] ?? obj.fmName ?? 'Container'}</span>
+        </div>
+      );
     case 'field':
       return <span class="fm-obj-label" style={labelStyle(obj)}>{obj.fieldRef?.split('::')[1] ?? obj.fmName ?? ''}</span>;
     case 'portal':
@@ -139,7 +238,7 @@ function renderContent(obj: LayoutObject) {
     case 'popover-panel':
       return null;
     default:
-      return <span class="fm-obj-label" style={labelStyle(obj)}>{obj.displayText ?? ''}</span>;
+      return renderButtonContent(obj);
   }
 }
 
@@ -265,7 +364,7 @@ function ButtonBarContent({ obj }: { obj: LayoutObject }) {
             style={{ width: pct + '%', height: '100%', position: 'relative', overflow: 'hidden', boxSizing: 'border-box' }}
           >
             <div class="self" style={segStyle}>
-              <span class="fm-obj-label">{seg.displayText ?? ''}</span>
+              {renderButtonContent(seg)}
             </div>
           </div>
         );

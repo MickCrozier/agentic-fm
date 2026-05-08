@@ -394,19 +394,93 @@ export function apiMiddleware(): Plugin {
         }
       });
 
+      // Auto-save the current extracted theme into agent/themes/ when requested
       server.middlewares.use('/api/theme.css', (_req, res) => {
         const ctx = readContext();
         const solution = ctx?.solution as string | undefined;
         if (solution) {
           const cssPath = path.join(agentDir(), 'context', solution, 'theme-web.css');
           if (fs.existsSync(cssPath)) {
+            const css = fs.readFileSync(cssPath, 'utf-8');
+            try {
+              const manifestPath = path.join(agentDir(), 'context', solution, 'theme-manifest.json');
+              const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+              const themeName: string = manifest?.theme?.name ?? 'Theme';
+              const themesDir = path.join(agentDir(), 'themes');
+              fs.mkdirSync(themesDir, { recursive: true });
+              fs.writeFileSync(path.join(themesDir, `${themeName}.css`), css, 'utf-8');
+            } catch { /* manifest missing — skip auto-save */ }
             res.writeHead(200, { 'Content-Type': 'text/css' });
-            res.end(fs.readFileSync(cssPath, 'utf-8'));
+            res.end(css);
             return;
           }
         }
         res.writeHead(404);
         res.end('');
+      });
+
+      // List / serve themes from agent/themes/ (custom) and agent/themes/defaults/ (default)
+      // source: 'custom'   = solution-specific only
+      //         'default'  = default only
+      //         'override' = solution-specific overrides a default of the same name
+      server.middlewares.use('/api/themes', (req, res) => {
+        const themesDir    = path.join(agentDir(), 'themes');
+        const defaultsDir  = path.join(themesDir, 'defaults');
+
+        if (req.url && req.url !== '/' && req.url !== '') {
+          const name = decodeURIComponent(req.url.replace(/^\//, ''));
+          if (!name || name.includes('..')) { res.writeHead(400); res.end(''); return; }
+          const cssName = name.endsWith('.css') ? name : `${name}.css`;
+          // Prefer solution-specific over default
+          const customPath  = path.join(themesDir, cssName);
+          const defaultPath = path.join(defaultsDir, cssName);
+          const filePath = fs.existsSync(customPath) ? customPath
+                         : fs.existsSync(defaultPath) ? defaultPath
+                         : null;
+          if (!filePath) { res.writeHead(404); res.end(''); return; }
+          res.writeHead(200, { 'Content-Type': 'text/css' });
+          res.end(fs.readFileSync(filePath, 'utf-8'));
+          return;
+        }
+
+        const customNames  = new Set<string>();
+        const defaultNames = new Set<string>();
+        if (fs.existsSync(themesDir)) {
+          for (const f of fs.readdirSync(themesDir)) {
+            if (f.endsWith('.css')) customNames.add(f.replace(/\.css$/, ''));
+          }
+        }
+        if (fs.existsSync(defaultsDir)) {
+          for (const f of fs.readdirSync(defaultsDir)) {
+            if (f.endsWith('.css')) defaultNames.add(f.replace(/\.css$/, ''));
+          }
+        }
+        const allNames = new Set([...customNames, ...defaultNames]);
+        const themes = [...allNames].sort().map(name => ({
+          name,
+          source: customNames.has(name) && defaultNames.has(name) ? 'override'
+                : customNames.has(name) ? 'custom'
+                : 'default',
+        }));
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(themes));
+      });
+
+      // Persist the active theme selection in agent/themes/active.txt
+      server.middlewares.use('/api/active-theme', async (req, res) => {
+        const activeFile = path.join(agentDir(), 'themes', 'active.txt');
+        if (req.method === 'POST') {
+          const body = await readBody(req);
+          const { name } = JSON.parse(body);
+          fs.mkdirSync(path.dirname(activeFile), { recursive: true });
+          fs.writeFileSync(activeFile, name ?? '', 'utf-8');
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true }));
+          return;
+        }
+        const name = fs.existsSync(activeFile) ? fs.readFileSync(activeFile, 'utf-8').trim() : '';
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ name }));
       });
     },
   };

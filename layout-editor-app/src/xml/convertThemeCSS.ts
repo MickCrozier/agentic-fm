@@ -82,12 +82,15 @@ export function convertThemeCSS(raw: string): string {
   for (const line of lines) {
     const trimmed = line.trim();
 
-    const fmSelector = trimmed.match(/^([\w-]+(?:\.FM-[\w-]+)?):([\w]+)\s+(\.[\w-]+)\s*$/);
+    // Matches: baseType.NamedClass:state .sub  OR  baseType.FM-UUID:state .sub  OR  baseType:state .sub
+    const fmSelector = trimmed.match(/^[\w-]+(?:\.([\w-]+))?:([\w]+)\s+(\.[\w-]+)\s*$/);
     if (fmSelector) {
-      const [, rawClass, state, subClass] = fmSelector;
-      const themeKey = rawClass.includes('.FM-')
-        ? 'FM-' + rawClass.split('.FM-')[1]
-        : rawClass;
+      const [, namedClass, state, subClass] = fmSelector;
+      // Use the named subclass as the theme key if present, otherwise the full base type
+      const baseType = trimmed.split(':')[0].split('.')[0];
+      const themeKey = namedClass
+        ? (namedClass.startsWith('FM-') ? namedClass : namedClass)
+        : baseType;
       if (state === 'normal') {
         if (subClass === '.self') {
           out.push(`.fm-theme-${themeKey} .self, .fm-theme-${themeKey}.self`);
@@ -130,6 +133,14 @@ export function convertThemeCSS(raw: string): string {
     if (skip) continue;
     if (/^\s*-fm-/.test(line)) continue;
     if (/line-height\s*:.*\bline\b/.test(line)) continue;
+    // Mirror text-align as justify-content so flex icon+text groups align correctly
+    const taMatch = line.match(/^(\s*)text-align\s*:\s*(left|center|right)\s*;/);
+    if (taMatch) {
+      const jc = taMatch[2] === 'center' ? 'center' : taMatch[2] === 'right' ? 'flex-end' : 'flex-start';
+      const injectedJC = `${taMatch[1]}justify-content: ${jc};`;
+      blockLines.push(injectedJC);
+      out.push(injectedJC);
+    }
     if (/font-family\s*:.*-fm-font-family/.test(line)) {
       const m = line.match(/-fm-font-family\(([^,)]+)/);
       if (m) {

@@ -16,7 +16,9 @@ import type { LayoutState, LayoutObject } from '@/xml/import';
 const EMPTY: LayoutState = { width: 760, parts: [], objects: [], popoverPanels: [] };
 
 export function App() {
-  useThemeCSS();
+  const [themes, setThemes] = useState<{ name: string; source: 'default' | 'custom' | 'override' }[]>([]);
+  const [activeTheme, setActiveTheme] = useState<string | null>(null);
+  useThemeCSS(activeTheme);
   const { unit, setUnit } = useUnit();
   const { current: state, push, undo, redo, canUndo, canRedo } = useHistory<LayoutState>(EMPTY);
   const [loadError, setLoadError] = useState('');
@@ -61,6 +63,19 @@ export function App() {
         if (ctx?.current_layout) setLayoutName(ctx.current_layout.name);
       })
       .catch(() => {});
+
+    // Trigger auto-save of current extracted theme, then load theme list + saved selection
+    fetch('/api/theme.css').catch(() => {}).finally(() => {
+      Promise.all([
+        fetch('/api/themes').then(r => r.ok ? r.json() : []),
+        fetch('/api/active-theme').then(r => r.ok ? r.json() : { name: '' }),
+      ]).then(([list, active]: [{ name: string; source: 'default' | 'custom' | 'override' }[], { name: string }]) => {
+        setThemes(list);
+        if (list.length === 0) return;
+        const saved = active.name;
+        setActiveTheme(saved && list.some(t => t.name === saved) ? saved : list[0].name);
+      }).catch(() => {});
+    });
 
     fetch('/api/layout-xml')
       .then(async r => {
@@ -229,6 +244,12 @@ export function App() {
             ?? state.popoverPanels.flatMap(p => p.children ?? []).find(x => x.id === id);
           return o?.type === 'group';
         })}
+        themes={themes}
+        activeTheme={activeTheme}
+        onThemeChange={t => {
+          setActiveTheme(t);
+          fetch('/api/active-theme', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: t ?? '' }) }).catch(() => {});
+        }}
         unit={unit}
         onUnitChange={setUnit}
         onUndo={undo}

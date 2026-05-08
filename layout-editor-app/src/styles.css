@@ -120,6 +120,14 @@
   overflow: hidden; white-space: pre-wrap;
   line-height: 1.3;
 }
+.fm-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.fm-btn-icon svg { width: 100%; height: 100%; }
+.fm-btn-icon + .fm-obj-label { margin-left: 4px; }
 .fm-field .fm-obj-label,
 .fm-label .fm-obj-label { padding: 0.25em 0.5em; }
 
@@ -141,6 +149,7 @@
   font-weight: 500; color: #1a1a2e;
   justify-content: center;
   align-items: center;
+  text-align: center;
 }
 :where(.fm-rect) .self   { background: #fff; }
 :where(.fm-line) .self   { background: transparent; border-style: solid; border-width: 1px; border-color: #888; }
@@ -227,6 +236,25 @@
   font-size: 11px; color: #444;
 }
 :where(.fm-web-viewer) .self { background: #e8f4ff; border: 1px solid #99c; border-radius: 3px; }
+:where(.fm-image) .self { background: transparent; overflow: hidden; }
+:where(.fm-container) .self {
+  background: #f8f8f8;
+  border: 1px dashed #bbb;
+  border-radius: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.fm-container-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 100%;
+  height: 100%;
+  color: #888;
+}
 :where(.fm-unknown) .self { background: #fff0f0; border: 1px dashed #f99; }
 .fm-popover-panel > .self {
   background: #fff;

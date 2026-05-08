@@ -4,7 +4,7 @@ import type { FMStyles } from './parseFMCSS';
 export type FMObjectType =
   | 'field' | 'text' | 'button' | 'line' | 'rectangle' | 'portal'
   | 'web-viewer' | 'group' | 'tab-control' | 'slide-control'
-  | 'button-bar' | 'popover-btn' | 'popover-panel' | 'unknown';
+  | 'button-bar' | 'popover-btn' | 'popover-panel' | 'container' | 'image' | 'unknown';
 
 export interface Bounds {
   top: number;
@@ -46,6 +46,26 @@ export interface LayoutObject {
   slideCount?: number;
   /** Line objects: actual second endpoint in canvas coords (x=bounds.right, y=bounds.bottom) */
   lineEnd?: { x: number; y: number };
+  /** Static image objects: base64 data URL (e.g. data:image/jpeg;base64,...) */
+  imageData?: string;
+  /** Button/field icon: inline SVG string (fm_fill class uses currentColor) */
+  iconSVG?: string;
+  /** Icon display size in pt */
+  iconSize?: number;
+  /** Icon layout relative to text (undefined = icon-only) */
+  iconPosition?: 'left' | 'right' | 'above' | 'below';
+  /** Content horizontal alignment from background-position */
+  iconAlignH?: 'left' | 'center' | 'right';
+  /** Content vertical alignment from background-position */
+  iconAlignV?: 'top' | 'middle' | 'bottom';
+  /** Static image formatting options */
+  imageFormat?: {
+    reduce: boolean;
+    enlarge: boolean;
+    maintainProportions: boolean;
+    hAlign: 'left' | 'center' | 'right';
+    vAlign: 'top' | 'center' | 'bottom';
+  };
 }
 
 export interface LayoutPart {
@@ -71,7 +91,7 @@ const FM_TYPE_MAP: Record<string, FMObjectType> = {
   'Pop-up Menu':       'field',
   'Checkbox Set':      'field',
   'Radio Button Set':  'field',
-  'Container':         'field',
+  'Container':         'container',
   'Text':              'text',
   'Button':            'button',
   'Grouped Button':    'group',
@@ -79,7 +99,7 @@ const FM_TYPE_MAP: Record<string, FMObjectType> = {
   'Line':              'line',
   'Rectangle':         'rectangle',
   'Rounded Rectangle': 'rectangle',
-  'Graphic':           'rectangle',
+  'Graphic':           'image',
   'Portal':            'portal',
   'Web Viewer':        'web-viewer',
   'Group':             'group',
@@ -344,6 +364,38 @@ function parseObject(
     return { ...base, tooltip, localStyles, themeClass, children: segments };
   }
 
+  // ── Static image (Graphic) ────────────────────────────────────────────────
+  if (effectiveType === 'image') {
+    const streams = objEl.querySelectorAll('BinaryData > StreamList > Stream');
+    let imageData: string | undefined;
+    let mainFormat = 'JPEG';
+    for (const s of streams) {
+      if (s.getAttribute('name') === 'MAIN' && s.getAttribute('type') === 'id') {
+        mainFormat = s.textContent?.trim() ?? 'JPEG';
+      }
+    }
+    for (const s of streams) {
+      if (s.getAttribute('name') === mainFormat && s.getAttribute('type') === 'Base64') {
+        const mimeMap: Record<string, string> = { JPEG: 'image/jpeg', PNG_: 'image/png', GIFf: 'image/gif', TIFF: 'image/tiff' };
+        const mime = mimeMap[mainFormat] ?? 'image/jpeg';
+        imageData = `data:${mime};base64,${(s.textContent ?? '').trim()}`;
+        break;
+      }
+    }
+    const fmtEl = objEl.querySelector('Graphic > Formatting > Options');
+    const fmtOpts = fmtEl ? parseInt(fmtEl.textContent ?? '0', 10) : 0;
+    const hAlignMap: ('left' | 'center' | 'right')[] = ['left', 'center', 'right'];
+    const vAlignMap: ('top' | 'center' | 'bottom')[] = ['top', 'center', 'bottom'];
+    const imageFormat = {
+      reduce:             !!(fmtOpts & 1),
+      enlarge:            !!(fmtOpts & 2),
+      maintainProportions:!!(fmtOpts & 4),
+      hAlign: hAlignMap[Math.min((fmtOpts >> 3) & 3, 2)],
+      vAlign: vAlignMap[Math.min((fmtOpts >> 5) & 3, 2)],
+    };
+    return { ...base, tooltip, localStyles, themeClass, imageData, imageFormat };
+  }
+
   // ── Regular object ────────────────────────────────────────────────────────
   let fieldRef: string | undefined;
   const fieldEl = objEl.querySelector('Field > FieldReference');
@@ -356,6 +408,11 @@ function parseObject(
 
   let displayText = fieldRef;
   if (!displayText) {
+    // Button label text (most specific path first)
+    const btnLabelEl = objEl.querySelector('Button > Label > Text > StyledText > Data');
+    if (btnLabelEl) displayText = btnLabelEl.textContent?.trim();
+  }
+  if (!displayText) {
     const dataEl = objEl.querySelector('Text > StyledText > Data');
     if (dataEl) displayText = dataEl.textContent?.trim();
   }
@@ -363,7 +420,45 @@ function parseObject(
     displayText = calcText(objEl.querySelector('Button > Label > Calculation > Text'));
   }
 
-  return { ...base, displayText, fieldRef, tooltip, localStyles, themeClass };
+  // Parse SVG icon if present
+  let iconSVG: string | undefined;
+  let iconSize: number | undefined;
+  let iconPosition: LayoutObject['iconPosition'];
+  let iconAlignH: LayoutObject['iconAlignH'] = 'center';
+  let iconAlignV: LayoutObject['iconAlignV'] = 'middle';
+  const iconDataEl = objEl.querySelector(':scope > Button > IconData, :scope > IconData');
+  const iconType = iconDataEl?.getAttribute('type');
+  if (iconDataEl && iconType !== '0' && iconType !== null) {
+    iconSize = parseInt(iconDataEl.getAttribute('size') ?? '16', 10);
+    const svgStream = iconDataEl.querySelector('Stream[name="SVG "]');
+    if (svgStream?.textContent) {
+      try {
+        const raw = atob(svgStream.textContent.trim());
+        iconSVG = raw.replace('<svg ', '<svg style="display:block;width:100%;height:100%" ')
+          .replace('</svg>', '<style>.fm_fill{fill:currentColor}.fm_stroke{stroke:currentColor}</style></svg>');
+      } catch {}
+    }
+
+    // icon type → layout
+    // 1 = icon only, 2 = icon above/text below, 3 = icon below/text above, 4 = icon left, 5 = icon right
+    if      (iconType === '2') iconPosition = 'above';
+    else if (iconType === '3') iconPosition = 'below';
+    else if (iconType === '4') iconPosition = 'left';
+    else if (iconType === '5') iconPosition = 'right';
+    // type 1 = icon only → iconPosition stays undefined
+
+    // background-position [h] [v] encodes content alignment within button
+    const lcssText = objEl.querySelector('LocalCSS')?.textContent ?? '';
+    const bgPosMatch = lcssText.match(/background-position\s*:\s*(left|center|right)\s+(top|center|bottom)/);
+    if (bgPosMatch) {
+      const [, h, v] = bgPosMatch;
+      iconAlignH = h as 'left' | 'center' | 'right';
+      iconAlignV = v === 'top' ? 'top' : v === 'bottom' ? 'bottom' : 'middle';
+    }
+  }
+
+  return { ...base, displayText, fieldRef, tooltip, localStyles, themeClass,
+    ...(iconSVG ? { iconSVG, iconSize, iconPosition, iconAlignH, iconAlignV } : {}) };
 }
 
 // ── Main entry ───────────────────────────────────────────────────────────────

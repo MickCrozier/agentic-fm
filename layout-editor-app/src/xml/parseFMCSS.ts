@@ -62,8 +62,9 @@ function convertBorderStyle(value: string): string {
 export function parseFMCSS(cssText: string): FMStyles {
   if (!cssText) return {};
 
-  // Shapes use a plain .main { } block; styled objects use self:normal .self { }
-  const selfMatch = cssText.match(/self:normal\s+\.self\s*\{([^}]*)\}/)
+  // Styled objects: self.ClassName:normal .self { } or self:normal .self { }
+  // Shapes: .main { }
+  const selfMatch = cssText.match(/self[\w.-]*:normal\s+\.self\s*\{([^}]*)\}/)
     ?? cssText.match(/\.main\s*\{([^}]*)\}/);
   if (!selfMatch) return {};
 

@@ -86,7 +86,7 @@ export function Inspector({ selected, state, previewState = 'normal', onPreviewS
   }
 
   const showDisplayText  = selected.type === 'button' || selected.type === 'text';
-  const showFieldRef     = selected.type === 'field';
+  const showFieldRef     = selected.type === 'field' || selected.type === 'container';
 
   return (
     <div class="px-3 py-2 text-xs space-y-2.5 overflow-y-auto max-h-full">
@@ -172,6 +172,27 @@ export function Inspector({ selected, state, previewState = 'normal', onPreviewS
             </div>
           </div>
         </>
+      )}
+
+      {/* Image format */}
+      {selected.type === 'image' && selected.imageFormat && (
+        <div>
+          <div class="text-[10px] text-neutral-500 uppercase tracking-wide mb-1">Image</div>
+          <div class="space-y-0.5 text-[10px]">
+            <div class="text-neutral-300">
+              {selected.imageFormat.reduce && selected.imageFormat.enlarge ? 'Reduce or Enlarge to Fit'
+                : selected.imageFormat.reduce ? 'Reduce to Fit'
+                : selected.imageFormat.enlarge ? 'Enlarge to Fit'
+                : 'Crop to Frame'}
+            </div>
+            <div class="text-neutral-500">
+              {selected.imageFormat.maintainProportions ? 'Maintain Proportions' : 'Stretch to Fill'}
+            </div>
+            <div class="text-neutral-500">
+              H: {selected.imageFormat.hAlign} · V: {selected.imageFormat.vAlign}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Style */}
