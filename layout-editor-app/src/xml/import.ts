@@ -28,8 +28,10 @@ export interface LayoutObject {
   fieldRef?: string;
   tooltip?: string;
   hideCondition?: string;
-  fmStyles?: FMStyles;
+  /** Named theme style class applied to this object (from LocalCSS name attribute) */
   themeClass?: string;
+  /** Local property overrides on top of the theme style (from LocalCSS/FullCSS content) */
+  localStyles?: FMStyles;
   children?: LayoutObject[];
   /** Popover panel objects keyed to their button id */
   popoverPanelFor?: string;
@@ -42,7 +44,6 @@ export interface LayoutObject {
   tabStripHeight?: number;
   /** Slide control: panel count */
   slideCount?: number;
-  /** Rounded rectangle corner radius in px */
 }
 
 export interface LayoutPart {
@@ -213,7 +214,7 @@ function parseObject(
   // Prefer LocalCSS name (UUID or named style) over FM type base class
   const themeClass   = localCSSName || fmTypeToThemeClass(fmType);
   // Shapes store styles in FullCSS (.main block); other objects use LocalCSS (.self block)
-  const fmStyles     = parseFMCSS(localCSS?.textContent ?? fullCSS?.textContent ?? '');
+  const localStyles     = parseFMCSS(localCSS?.textContent ?? fullCSS?.textContent ?? '');
 
   // ── Group ─────────────────────────────────────────────────────────────────
   if (effectiveType === 'group') {
@@ -225,7 +226,7 @@ function parseObject(
         if (child) children.push(child);
       }
     }
-    return { ...base, tooltip, fmStyles, themeClass, children };
+    return { ...base, tooltip, localStyles, themeClass, children };
   }
 
   // ── Popover Button ────────────────────────────────────────────────────────
@@ -269,7 +270,7 @@ function parseObject(
         }
       }
     }
-    return { ...base, tooltip, fmStyles, themeClass, displayText: label };
+    return { ...base, tooltip, localStyles, themeClass, displayText: label };
   }
 
   // ── Tab Control ───────────────────────────────────────────────────────────
@@ -295,7 +296,7 @@ function parseObject(
       }
     }
     const tabLabels = tabPanels.map(p => p.label);
-    return { ...base, tooltip, fmStyles, themeClass, tabLabels, tabPanels, tabStripHeight };
+    return { ...base, tooltip, localStyles, themeClass, tabLabels, tabPanels, tabStripHeight };
   }
 
   // ── Slide Control ─────────────────────────────────────────────────────────
@@ -318,7 +319,7 @@ function parseObject(
         }
       }
     }
-    return { ...base, tooltip, fmStyles, themeClass, slideCount, children };
+    return { ...base, tooltip, localStyles, themeClass, slideCount, children };
   }
 
   // ── Button Bar ────────────────────────────────────────────────────────────
@@ -332,7 +333,7 @@ function parseObject(
         if (seg) segments.push(seg);
       }
     }
-    return { ...base, tooltip, fmStyles, themeClass, children: segments };
+    return { ...base, tooltip, localStyles, themeClass, children: segments };
   }
 
   // ── Regular object ────────────────────────────────────────────────────────
@@ -354,7 +355,7 @@ function parseObject(
     displayText = calcText(objEl.querySelector('Button > Label > Calculation > Text'));
   }
 
-  return { ...base, displayText, fieldRef, tooltip, fmStyles, themeClass };
+  return { ...base, displayText, fieldRef, tooltip, localStyles, themeClass };
 }
 
 // ── Main entry ───────────────────────────────────────────────────────────────

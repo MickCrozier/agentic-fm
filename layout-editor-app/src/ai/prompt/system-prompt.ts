@@ -24,7 +24,7 @@ Supported operations:
   { "op": "move",   "id": "<objectId>", "x": 10, "y": 20 },
   { "op": "resize", "id": "<objectId>", "width": 200, "height": 30 },
   { "op": "update", "id": "<objectId>", "displayText": "New Label" },
-  { "op": "style",  "id": "<objectId>", "themeClass": "button-default-bd", "fmStyles": { "backgroundColor": "#ff0000", "color": "#ffffff", "fontSize": "14px", "fontWeight": "bold", "textAlign": "center", "borderTopWidth": "1px", "borderTopColor": "#cccccc", "borderTopStyle": "solid" } },
+  { "op": "style",  "id": "<objectId>", "themeClass": "button-default-bd", "localStyles": { "backgroundColor": "#ff0000", "color": "#ffffff", "fontSize": "14px", "fontWeight": "bold", "textAlign": "center", "borderTopWidth": "1px", "borderTopColor": "#cccccc", "borderTopStyle": "solid" } },
   { "op": "delete", "id": "<objectId>" },
   { "op": "add", "object": { "type": "text", "x": 10, "y": 10, "width": 120, "height": 22, "displayText": "Hello" } }
 ]
@@ -35,7 +35,7 @@ Coordinates are in pixels from the layout top-left. Use the object IDs from the 
 
 The "style" op accepts:
 - \`themeClass\`: the FileMaker theme style class name (e.g. "button-default-bd", "field-control-bd")
-- \`fmStyles\`: partial style overrides — valid keys: backgroundColor, color, fontSize, fontWeight, textAlign, verticalAlign (top/center/bottom), fontFamily, borderTopWidth/RightWidth/BottomWidth/LeftWidth, borderTopColor/RightColor/BottomColor/LeftColor, borderTopStyle/RightStyle/BottomStyle/LeftStyle, boxShadow. Use standard CSS values (e.g. "#rrggbb", "14px", "bold"). Only include keys you want to change.
+- \`localStyles\`: partial style overrides — valid keys: backgroundColor, color, fontSize, fontWeight, textAlign, verticalAlign (top/center/bottom), fontFamily, borderTopWidth/RightWidth/BottomWidth/LeftWidth, borderTopColor/RightColor/BottomColor/LeftColor, borderTopStyle/RightStyle/BottomStyle/LeftStyle, boxShadow. Use standard CSS values (e.g. "#rrggbb", "14px", "bold"). Only include keys you want to change.
 
 Only emit a layout-patch block when you are actually making a change. For questions or analysis, respond with text only.`;
 

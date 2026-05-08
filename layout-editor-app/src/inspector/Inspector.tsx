@@ -1,5 +1,6 @@
 import { useCallback } from 'preact/hooks';
 import type { LayoutObject, LayoutState } from '@/xml/import';
+import type { FMStyles } from '@/xml/parseFMCSS';
 
 interface InspectorProps {
   selected: LayoutObject | null;
@@ -68,8 +69,8 @@ export function Inspector({ selected, state, onStateChange }: InspectorProps) {
     );
   }
 
-  const showDisplayText = selected.type === 'button' || selected.type === 'text';
-  const showFieldRef    = selected.type === 'field';
+  const showDisplayText  = selected.type === 'button' || selected.type === 'text';
+  const showFieldRef     = selected.type === 'field';
 
   return (
     <div class="px-3 py-2 text-xs space-y-2.5 overflow-y-auto max-h-full">
@@ -119,6 +120,59 @@ export function Inspector({ selected, state, onStateChange }: InspectorProps) {
           {numInput('W', selected.width,  v => update({ width: v }))}
           {numInput('H', selected.height, v => update({ height: v }))}
         </div>
+      </div>
+
+      {/* Style */}
+      <StyleSection selected={selected} />
+    </div>
+  );
+}
+
+const LOCAL_STYLE_LABELS: Partial<Record<keyof FMStyles, string>> = {
+  backgroundColor: 'Fill',
+  color:           'Text color',
+  fontSize:        'Font size',
+  fontWeight:      'Weight',
+  fontFamily:      'Font',
+  textAlign:       'Align',
+  verticalAlign:   'V-align',
+  borderRadius:    'Corner radius',
+  boxShadow:       'Shadow',
+  borderTopWidth:      'Border top',
+  borderRightWidth:    'Border right',
+  borderBottomWidth:   'Border bottom',
+  borderLeftWidth:     'Border left',
+};
+
+function StyleSection({ selected }: { selected: LayoutObject }) {
+  const hasTheme  = !!selected.themeClass;
+  const local     = selected.localStyles ?? {};
+  const localKeys = Object.keys(local) as (keyof FMStyles)[];
+  const hasLocal  = localKeys.length > 0;
+
+  if (!hasTheme && !hasLocal) return null;
+
+  return (
+    <div>
+      <div class="text-[10px] text-neutral-500 uppercase tracking-wide mb-1">Style</div>
+      <div class="space-y-1">
+        {hasTheme && (
+          <div class="flex items-center gap-1.5">
+            <span class="text-[9px] px-1 py-0.5 rounded bg-blue-900 text-blue-300 font-medium">theme</span>
+            <span class="text-neutral-400 text-[10px] font-mono truncate">{selected.themeClass}</span>
+          </div>
+        )}
+        {hasLocal && (
+          <div class="space-y-0.5">
+            {localKeys.map(key => (
+              <div key={key} class="flex items-center gap-1.5">
+                <span class="text-[9px] px-1 py-0.5 rounded bg-amber-900 text-amber-300 font-medium">local</span>
+                <span class="text-neutral-500 text-[10px] w-24 flex-shrink-0">{LOCAL_STYLE_LABELS[key] ?? key}</span>
+                <span class="text-neutral-300 text-[10px] font-mono break-all">{String(local[key])}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

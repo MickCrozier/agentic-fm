@@ -82,7 +82,7 @@ function buildSelfStyle(s: ReturnType<typeof import('@/xml/parseFMCSS').parseFMC
 
 export function CanvasObject({ obj, selected, onMouseDown, onDblClick }: CanvasObjectProps) {
   const typeClass = TYPE_CLASS[obj.type] ?? 'fm-unknown';
-  const s = obj.fmStyles ?? {};
+  const s = obj.localStyles ?? {};
   const themeClass = buildThemeClasses(obj.type, obj.themeClass);
 
   // Outer div: geometry + interaction only
@@ -115,7 +115,7 @@ export function CanvasObject({ obj, selected, onMouseDown, onDblClick }: CanvasO
 
 function labelStyle(obj: LayoutObject): Record<string, string> {
   const style: Record<string, string> = {};
-  if (obj.fmStyles?.textAlign) style.textAlign = obj.fmStyles.textAlign;
+  if (obj.localStyles?.textAlign) style.textAlign = obj.localStyles.textAlign;
   return style;
 }
 
@@ -145,7 +145,7 @@ function GroupContent({ obj }: { obj: LayoutObject }) {
   return (
     <>
       {children.map(child => {
-        const childSelfStyle = buildSelfStyle(child.fmStyles ?? {});
+        const childSelfStyle = buildSelfStyle(child.localStyles ?? {});
         const outerStyle: Record<string, string> = {
           position: 'absolute',
           left:   child.x + 'px',
@@ -153,9 +153,9 @@ function GroupContent({ obj }: { obj: LayoutObject }) {
           width:  child.width + 'px',
           height: child.height + 'px',
         };
-        if (child.fmStyles?.borderRadius) {
-          outerStyle.borderRadius = child.fmStyles.borderRadius;
-          childSelfStyle.borderRadius = child.fmStyles.borderRadius;
+        if (child.localStyles?.borderRadius) {
+          outerStyle.borderRadius = child.localStyles.borderRadius;
+          childSelfStyle.borderRadius = child.localStyles.borderRadius;
         }
         return (
           <div
@@ -212,7 +212,7 @@ function TabContent({ obj }: { obj: LayoutObject }) {
         ))}
       </div>
       {activePanel?.children.map(child => {
-        const childSelfStyle = buildSelfStyle(child.fmStyles ?? {});
+        const childSelfStyle = buildSelfStyle(child.localStyles ?? {});
         const outerStyle: Record<string, string> = {
           position: 'absolute',
           left:   child.x + 'px',
@@ -220,9 +220,9 @@ function TabContent({ obj }: { obj: LayoutObject }) {
           width:  child.width + 'px',
           height: child.height + 'px',
         };
-        if (child.fmStyles?.borderRadius) {
-          outerStyle.borderRadius = child.fmStyles.borderRadius;
-          childSelfStyle.borderRadius = child.fmStyles.borderRadius;
+        if (child.localStyles?.borderRadius) {
+          outerStyle.borderRadius = child.localStyles.borderRadius;
+          childSelfStyle.borderRadius = child.localStyles.borderRadius;
         }
         return (
           <div key={child.id} class={`fm-object ${TYPE_CLASS[child.type] ?? 'fm-unknown'}`} style={outerStyle} title={child.fmName || child.type}>
@@ -248,7 +248,7 @@ function ButtonBarContent({ obj }: { obj: LayoutObject }) {
           'fm-theme-button_bar_segment',
           barUUID ? `fm-theme-${barUUID}` : '',
         ].filter(Boolean).join(' ');
-        const segStyle = buildSelfStyle(seg.fmStyles ?? {});
+        const segStyle = buildSelfStyle(seg.localStyles ?? {});
         const posClass = (i === 0 ? ' first' : '') + (i === segments.length - 1 ? ' last' : '');
         return (
           <div

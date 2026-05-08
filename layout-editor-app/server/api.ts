@@ -264,9 +264,10 @@ function findLayoutXML(layoutName: string, layoutId: number, solution?: string):
     if (!fs.existsSync(dir)) return null;
     const entries = fs.readdirSync(dir, { withFileTypes: true });
 
-    // Match by ID first
+    // Match by ID — use word boundary so ID 7 doesn't match ID 77
+    const idPattern = new RegExp(`\\bID ${layoutId}\\b`);
     const byId = entries.find(
-      e => e.isFile() && e.name.endsWith('.xml') && e.name.includes(`ID ${layoutId}`)
+      e => e.isFile() && e.name.endsWith('.xml') && idPattern.test(e.name)
     );
     if (byId) return path.join(dir, byId.name);
 

@@ -177,6 +177,21 @@ export function App() {
     setSelectedIds(new Set(allUngrouped.map(o => o.id)));
   }, [state, selectedIds, push]);
 
+  const handleDelete = useCallback(() => {
+    if (selectedIds.size === 0) return;
+    const next: LayoutState = {
+      ...state,
+      objects: state.objects.filter(o => !selectedIds.has(o.id)),
+      popoverPanels: state.popoverPanels.map(panel => ({
+        ...panel,
+        children: (panel.children ?? []).filter(c => !selectedIds.has(c.id)),
+      })),
+    };
+    push(next);
+    setSelected(null);
+    setSelectedIds(new Set());
+  }, [state, selectedIds, push]);
+
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -184,10 +199,13 @@ export function App() {
       if (e.metaKey && e.key === 'z' &&  e.shiftKey) { e.preventDefault(); redo(); }
       if (e.metaKey && e.key === 'g' && !e.shiftKey) { e.preventDefault(); handleGroup(); }
       if (e.metaKey && e.key === 'g' &&  e.shiftKey) { e.preventDefault(); handleUngroup(); }
+      if ((e.key === 'Delete' || e.key === 'Backspace') && !(e.target instanceof HTMLInputElement) && !(e.target instanceof HTMLTextAreaElement)) {
+        e.preventDefault(); handleDelete();
+      }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [undo, redo, handleGroup, handleUngroup]);
+  }, [undo, redo, handleGroup, handleUngroup, handleDelete]);
 
   const loaded = state.objects.length > 0 || state.parts.length > 0;
 

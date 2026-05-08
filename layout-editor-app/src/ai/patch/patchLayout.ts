@@ -5,7 +5,7 @@ export type LayoutOp =
   | { op: 'move';       id: string; x: number; y: number }
   | { op: 'resize';     id: string; width: number; height: number }
   | { op: 'update';     id: string; displayText?: string; fieldRef?: string; fmName?: string }
-  | { op: 'style';      id: string; themeClass?: string; fmStyles?: Partial<FMStyles> }
+  | { op: 'style';      id: string; themeClass?: string; localStyles?: Partial<FMStyles> }
   | { op: 'delete';     id: string }
   | { op: 'add';        object: Partial<LayoutObject> & { type: string; x: number; y: number; width: number; height: number } };
 
@@ -28,7 +28,7 @@ function patchObject(obj: LayoutObject, op: LayoutOp): LayoutObject {
     return {
       ...obj,
       ...(op.themeClass !== undefined ? { themeClass: op.themeClass } : {}),
-      ...(op.fmStyles   !== undefined ? { fmStyles: { ...obj.fmStyles, ...op.fmStyles } } : {}),
+      ...(op.localStyles   !== undefined ? { localStyles: { ...obj.localStyles, ...op.localStyles } } : {}),
     };
   }
   return obj;
