@@ -10,12 +10,14 @@ import { loadLayoutXML } from '@/xml/import';
 import { exportToXML } from '@/xml/export';
 import { useHistory } from '@/hooks/useHistory';
 import { useThemeCSS } from '@/hooks/useThemeCSS';
+import { useUnit } from '@/hooks/useUnit';
 import type { LayoutState, LayoutObject } from '@/xml/import';
 
 const EMPTY: LayoutState = { width: 760, parts: [], objects: [], popoverPanels: [] };
 
 export function App() {
   useThemeCSS();
+  const { unit, setUnit } = useUnit();
   const { current: state, push, undo, redo, canUndo, canRedo } = useHistory<LayoutState>(EMPTY);
   const [loadError, setLoadError] = useState('');
   const [customInstructions, setCustomInstructions] = useState('');
@@ -134,7 +136,7 @@ export function App() {
 
   const handleUngroup = useCallback(() => {
     const isUngroupable = (o: LayoutObject) =>
-      selectedIds.has(o.id) && (o.type === 'group' || (o.children && o.children.length > 0));
+      selectedIds.has(o.id) && o.type === 'group';
     const expandGroup = (group: LayoutObject) =>
       (group.children ?? []).map(c => ({
         ...c,
@@ -225,8 +227,10 @@ export function App() {
         canUngroup={selectedIds.size >= 1 && [...selectedIds].every(id => {
           const o = state.objects.find(x => x.id === id)
             ?? state.popoverPanels.flatMap(p => p.children ?? []).find(x => x.id === id);
-          return o?.type === 'group' || (o?.children && o.children.length > 0);
+          return o?.type === 'group';
         })}
+        unit={unit}
+        onUnitChange={setUnit}
         onUndo={undo}
         onRedo={redo}
         onToggleGrid={() => setShowGrid(g => !g)}
@@ -255,6 +259,7 @@ export function App() {
               onOpenPopover={setOpenPopover}
               previewState={previewState}
               onAddObject={handleAddObject}
+              unit={unit}
             />
           ) : loadError ? (
             <div class="flex flex-col items-center justify-center gap-2 text-sm">
@@ -289,6 +294,7 @@ export function App() {
               previewState={previewState}
               onPreviewStateChange={setPreviewState}
               onStateChange={handleStateChange}
+              unit={unit}
             />
           </div>
 

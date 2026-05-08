@@ -44,6 +44,8 @@ export interface LayoutObject {
   tabStripHeight?: number;
   /** Slide control: panel count */
   slideCount?: number;
+  /** Line objects: actual second endpoint in canvas coords (x=bounds.right, y=bounds.bottom) */
+  lineEnd?: { x: number; y: number };
 }
 
 export interface LayoutPart {
@@ -191,9 +193,14 @@ function parseObject(
   const bounds = parseBounds(boundsEl);
   const absLeft = bounds.left + offsetX;
   const absTop  = bounds.top  + offsetY;
-  const width   = bounds.right  - bounds.left;
-  const height  = bounds.bottom - bounds.top;
-  if (width <= 0 || height <= 0) return null;
+  const rawWidth  = bounds.right  - bounds.left;
+  const rawHeight = bounds.bottom - bounds.top;
+  const isLine = type === 'line';
+  if (!isLine && (rawWidth <= 0 || rawHeight <= 0)) return null;
+  if (isLine && rawWidth <= 0 && rawHeight <= 0) return null;
+  // Lines can have a zero dimension (horizontal or vertical) — clamp to 1 for DOM rendering
+  const width  = rawWidth  > 0 ? rawWidth  : 1;
+  const height = rawHeight > 0 ? rawHeight : 1;
 
   // A "Grouped Button" containing a PopoverButton element is a popover button
   const effectiveType: FMObjectType = (type === 'group' && objEl.querySelector('GroupedButton > PopoverButton'))
@@ -205,6 +212,7 @@ function parseObject(
   const base: LayoutObject = {
     id, fmId, fmName, type: effectiveType, bounds,
     x: absLeft, y: absTop, width, height,
+    ...(isLine ? { lineEnd: { x: absLeft + rawWidth, y: absTop + rawHeight } } : {}),
   };
 
   const tooltip      = calcText(objEl.querySelector('Tooltip > Calculation > Text')) || undefined;

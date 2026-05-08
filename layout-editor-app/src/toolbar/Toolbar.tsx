@@ -1,3 +1,6 @@
+import { UNIT_LABELS, formatMeasure } from '@/utils/units';
+import type { MeasureUnit } from '@/utils/units';
+
 interface ToolbarProps {
   layoutName: string;
   objectCount: number;
@@ -9,6 +12,8 @@ interface ToolbarProps {
   copyMsg: string;
   canGroup?: boolean;
   canUngroup?: boolean;
+  unit: MeasureUnit;
+  onUnitChange: (u: MeasureUnit) => void;
   onUndo: () => void;
   onRedo: () => void;
   onToggleGrid: () => void;
@@ -22,6 +27,7 @@ export function Toolbar({
   layoutName, objectCount, partCount, canvasWidth,
   canUndo, canRedo, showGrid, copyMsg,
   canGroup, canUngroup,
+  unit, onUnitChange,
   onUndo, onRedo, onToggleGrid, onCopyXML, onGroup, onUngroup, onOpenSettings,
 }: ToolbarProps) {
   return (
@@ -30,7 +36,7 @@ export function Toolbar({
         {layoutName || 'FM Layout Editor'}
       </span>
       <span class="text-neutral-600">|</span>
-      <span class="text-neutral-500 whitespace-nowrap">{objectCount} obj · {partCount} parts · {canvasWidth}px</span>
+      <span class="text-neutral-500 whitespace-nowrap">{objectCount} obj · {partCount} parts · {formatMeasure(canvasWidth, unit)}</span>
 
       <span class="flex-1" />
 
@@ -69,6 +75,25 @@ export function Toolbar({
           <rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>
         </svg>
       </button>
+
+      <span class="text-neutral-600">|</span>
+
+      {/* Unit selector */}
+      <div class="flex rounded overflow-hidden border border-neutral-600">
+        {UNIT_LABELS.map(({ value, label }) => (
+          <button
+            key={value}
+            onClick={() => onUnitChange(value)}
+            class={`px-1.5 py-0.5 text-[10px] leading-none ${
+              unit === value
+                ? 'bg-blue-700 text-white'
+                : 'bg-neutral-800 text-neutral-400 hover:text-neutral-200'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
 
       <span class="text-neutral-600">|</span>
 

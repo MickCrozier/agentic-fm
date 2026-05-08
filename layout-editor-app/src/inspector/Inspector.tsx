@@ -1,6 +1,8 @@
 import { useCallback } from 'preact/hooks';
 import type { LayoutObject, LayoutState } from '@/xml/import';
 import type { FMStyles } from '@/xml/parseFMCSS';
+import { formatMeasure } from '@/utils/units';
+import type { MeasureUnit } from '@/utils/units';
 
 const FM_STATES: { label: string; value: string }[] = [
   { label: 'Normal',   value: 'normal' },
@@ -16,9 +18,10 @@ interface InspectorProps {
   previewState?: string;
   onPreviewStateChange?: (s: string) => void;
   onStateChange: (next: LayoutState) => void;
+  unit?: MeasureUnit;
 }
 
-export function Inspector({ selected, state, previewState = 'normal', onPreviewStateChange, onStateChange }: InspectorProps) {
+export function Inspector({ selected, state, previewState = 'normal', onPreviewStateChange, onStateChange, unit = 'pt' }: InspectorProps) {
   const update = useCallback((patch: Partial<LayoutObject>) => {
     if (!selected) return;
     // Check top-level objects
@@ -35,7 +38,7 @@ export function Inspector({ selected, state, previewState = 'normal', onPreviewS
     onStateChange({ ...state, popoverPanels });
   }, [selected, state, onStateChange]);
 
-  const numInput = (label: string, value: number, onChange: (v: number) => void) => (
+  const numInput = (label: string, value: number, onChange: (v: number) => void, u: MeasureUnit = 'pt') => (
     <label class="flex items-center gap-1">
       <span class="text-neutral-500 w-4 text-right text-[10px]">{label}</span>
       <input
@@ -44,6 +47,9 @@ export function Inspector({ selected, state, previewState = 'normal', onPreviewS
         onInput={e => onChange(parseInt((e.target as HTMLInputElement).value, 10) || 0)}
         class="w-16 bg-neutral-700 text-neutral-200 text-xs rounded px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-blue-500"
       />
+      {u !== 'pt' && (
+        <span class="text-neutral-600 text-[10px]">{formatMeasure(value, u)}</span>
+      )}
     </label>
   );
 
@@ -129,23 +135,44 @@ export function Inspector({ selected, state, previewState = 'normal', onPreviewS
       {/* Hide condition */}
       {calcInput('Hide Condition', selected.hideCondition ?? '', v => update({ hideCondition: v || undefined }))}
 
-      {/* Position */}
-      <div>
-        <div class="text-[10px] text-neutral-500 uppercase tracking-wide mb-1">Position</div>
-        <div class="flex flex-wrap gap-2">
-          {numInput('X', selected.x, v => update({ x: v }))}
-          {numInput('Y', selected.y, v => update({ y: v }))}
-        </div>
-      </div>
+      {selected.type === 'line' && selected.lineEnd ? (
+        <>
+          <div>
+            <div class="text-[10px] text-neutral-500 uppercase tracking-wide mb-1">Start</div>
+            <div class="flex flex-wrap gap-2">
+              {numInput('X', selected.x, v => update({ x: v }), unit)}
+              {numInput('Y', selected.y, v => update({ y: v }), unit)}
+            </div>
+          </div>
+          <div>
+            <div class="text-[10px] text-neutral-500 uppercase tracking-wide mb-1">End</div>
+            <div class="flex flex-wrap gap-2">
+              {numInput('X', selected.lineEnd.x, v => update({ lineEnd: { ...selected.lineEnd!, x: v } }), unit)}
+              {numInput('Y', selected.lineEnd.y, v => update({ lineEnd: { ...selected.lineEnd!, y: v } }), unit)}
+            </div>
+          </div>
+        </>
+      ) : (
+        <>
+          {/* Position */}
+          <div>
+            <div class="text-[10px] text-neutral-500 uppercase tracking-wide mb-1">Position</div>
+            <div class="flex flex-wrap gap-2">
+              {numInput('X', selected.x, v => update({ x: v }), unit)}
+              {numInput('Y', selected.y, v => update({ y: v }), unit)}
+            </div>
+          </div>
 
-      {/* Size */}
-      <div>
-        <div class="text-[10px] text-neutral-500 uppercase tracking-wide mb-1">Size</div>
-        <div class="flex flex-wrap gap-2">
-          {numInput('W', selected.width,  v => update({ width: v }))}
-          {numInput('H', selected.height, v => update({ height: v }))}
-        </div>
-      </div>
+          {/* Size */}
+          <div>
+            <div class="text-[10px] text-neutral-500 uppercase tracking-wide mb-1">Size</div>
+            <div class="flex flex-wrap gap-2">
+              {numInput('W', selected.width,  v => update({ width: v }), unit)}
+              {numInput('H', selected.height, v => update({ height: v }), unit)}
+            </div>
+          </div>
+        </>
+      )}
 
       {/* Style */}
       <StyleSection selected={selected} />

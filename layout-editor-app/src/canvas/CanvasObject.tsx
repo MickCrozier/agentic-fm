@@ -245,7 +245,7 @@ function ButtonBarContent({ obj }: { obj: LayoutObject }) {
   const barUUID = obj.themeClass;
   return (
     <div class="fm-btn-bar-segments">
-      {segments.map((seg, i) => {
+      {segments.flatMap((seg, i) => {
         const pct = barWidth > 0 ? (seg.width / barWidth) * 100 : (100 / segments.length);
         const segThemeClasses = [
           'fm-theme-button_bar_segment',
@@ -254,7 +254,11 @@ function ButtonBarContent({ obj }: { obj: LayoutObject }) {
         const segStyle = buildSelfStyle(seg.localStyles ?? {});
         const posClass = (i === 0 ? ' first' : '') + (i === segments.length - 1 ? ' last' : '');
         const stateClass = i === 0 ? ' fm-state-checked' : '';
-        return (
+        const items = [];
+        if (i > 0) {
+          items.push(<div key={`div-${seg.id}`} class="button_bar_divider" />);
+        }
+        items.push(
           <div
             key={seg.id}
             class={`fm-btn-bar-seg${posClass}${stateClass} ${segThemeClasses}`}
@@ -265,6 +269,7 @@ function ButtonBarContent({ obj }: { obj: LayoutObject }) {
             </div>
           </div>
         );
+        return items;
       })}
     </div>
   );

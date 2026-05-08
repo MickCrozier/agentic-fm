@@ -3,6 +3,8 @@ import type { LayoutState, LayoutObject } from '@/xml/import';
 import { CanvasObject } from './CanvasObject';
 import { useSelection } from '@/hooks/useSelection';
 import { useDrag } from '@/hooks/useDrag';
+import { formatMeasure } from '@/utils/units';
+import type { MeasureUnit } from '@/utils/units';
 
 const PART_THEME_CLASS: Record<string, string> = {
   'Header':                   'header',
@@ -30,9 +32,10 @@ interface CanvasProps {
   openPopover: string | null;
   onOpenPopover: (id: string | null) => void;
   onAddObject?: (spec: Partial<LayoutObject>, x: number, y: number) => void;
+  unit?: MeasureUnit;
 }
 
-export function Canvas({ state, onStateChange, previewState, onSelect, onSelectionChange, showGrid = false, openPopover, onOpenPopover, onAddObject }: CanvasProps) {
+export function Canvas({ state, onStateChange, previewState, onSelect, onSelectionChange, showGrid = false, openPopover, onOpenPopover, onAddObject, unit = 'pt' }: CanvasProps) {
   const { selected, select, clearSelection } = useSelection();
 
   useEffect(() => {
@@ -191,7 +194,7 @@ export function Canvas({ state, onStateChange, previewState, onSelect, onSelecti
             >
               <div class="self" style={{ position: 'absolute', inset: '0' }} />
               <span class="layout-part-label">{part.type}</span>
-              <span class="layout-part-size">{height}px</span>
+              <span class="layout-part-size">{formatMeasure(height, unit)}</span>
             </div>
           );
         })}

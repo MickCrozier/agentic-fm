@@ -26,9 +26,9 @@ export function MessageList({ messages, onInsertScript }: MessageListProps) {
     return (
       <div class="flex-1 flex items-center justify-center text-neutral-500 text-sm p-4">
         <div class="text-center">
-          <p>Ask the AI to help write FileMaker scripts.</p>
+          <p>Ask the AI to help with your layout design.</p>
           <p class="text-xs mt-2 text-neutral-600">
-            The AI can see your current editor content and CONTEXT.json.
+            The AI can see your layout objects, parts, and field references.
           </p>
         </div>
       </div>
