@@ -48,6 +48,26 @@ function convertWebkitGradient(value: string): string {
  * All non-:normal state blocks are dropped.
  * Orphan blocks (no preceding selector, appear after FM state blocks) are also dropped.
  */
+const BORDER_SIDES = ['top', 'right', 'bottom', 'left'] as const;
+
+function completeBorderStyles(blockLines: string[]): string[] {
+  // FM theme CSS sets border-color for all sides but may only set border-X-style for some sides.
+  // Any side with no explicit style defaults to none in FM — inject it so the browser doesn't
+  // inherit a 'solid' style from a base rule and show an unintended colored border.
+  const setSides = new Set<string>();
+  for (const l of blockLines) {
+    const m = l.match(/border-(top|right|bottom|left)-style\s*:/);
+    if (m) setSides.add(m[1]);
+  }
+  if (setSides.size === 0 || setSides.size === 4) return blockLines;
+
+  const injected: string[] = [];
+  for (const side of BORDER_SIDES) {
+    if (!setSides.has(side)) injected.push(`    border-${side}-style: none;`);
+  }
+  return [...blockLines, ...injected];
+}
+
 export function convertThemeCSS(raw: string): string {
   let converted = convertFMColor(raw);
   converted = convertPt(converted);
@@ -55,11 +75,9 @@ export function convertThemeCSS(raw: string): string {
 
   const lines = converted.split('\n');
   const out: string[] = [];
-  // skip=true by default — only a :normal selector can open a block
   let skip = true;
   let depth = 0;
-  // Whether the current top-level block was opened by a :normal selector
-  let inNormalBlock = false;
+  let blockLines: string[] = [];
 
   for (const line of lines) {
     const trimmed = line.trim();
@@ -67,22 +85,26 @@ export function convertThemeCSS(raw: string): string {
     const fmSelector = trimmed.match(/^([\w-]+(?:\.FM-[\w-]+)?):([\w]+)\s+(\.[\w-]+)\s*$/);
     if (fmSelector) {
       const [, rawClass, state, subClass] = fmSelector;
+      const themeKey = rawClass.includes('.FM-')
+        ? 'FM-' + rawClass.split('.FM-')[1]
+        : rawClass;
       if (state === 'normal') {
-        const themeKey = rawClass.includes('.FM-')
-          ? 'FM-' + rawClass.split('.FM-')[1]
-          : rawClass;
         if (subClass === '.self') {
           out.push(`.fm-theme-${themeKey} .self, .fm-theme-${themeKey}.self`);
         } else {
           out.push(`.fm-theme-${themeKey} ${subClass}`);
         }
         skip = false;
-        inNormalBlock = true;
       } else {
-        skip = true;
-        inNormalBlock = false;
+        if (subClass === '.self') {
+          out.push(`.fm-state-${state}.fm-theme-${themeKey} .self, .fm-state-${state} .fm-theme-${themeKey} .self`);
+        } else {
+          out.push(`.fm-state-${state}.fm-theme-${themeKey} ${subClass}, .fm-state-${state} .fm-theme-${themeKey} ${subClass}`);
+        }
+        skip = false;
       }
       depth = 0;
+      blockLines = [];
       continue;
     }
 
@@ -92,13 +114,15 @@ export function convertThemeCSS(raw: string): string {
       continue;
     }
     if (trimmed === '}') {
-      if (!skip) out.push(line);
+      if (!skip) {
+        for (const bl of completeBorderStyles(blockLines)) out.push(bl);
+        blockLines = [];
+        out.push(line);
+      }
       depth--;
       if (depth <= 0) {
         depth = 0;
-        // After a block closes, reset: next block needs its own :normal selector
         skip = true;
-        inNormalBlock = false;
       }
       continue;
     }
@@ -106,15 +130,19 @@ export function convertThemeCSS(raw: string): string {
     if (skip) continue;
     if (/^\s*-fm-/.test(line)) continue;
     if (/line-height\s*:.*\bline\b/.test(line)) continue;
-    // Convert -fm-font-family(Display,PostScript) → font-family: "Display"
     if (/font-family\s*:.*-fm-font-family/.test(line)) {
       const m = line.match(/-fm-font-family\(([^,)]+)/);
-      if (m) out.push(line.replace(/-fm-font-family\([^)]+\)/, `"${m[1].trim()}"`));
+      if (m) {
+        const emitted = line.replace(/-fm-font-family\([^)]+\)/, `"${m[1].trim()}"`);
+        blockLines.push(emitted);
+        out.push(emitted);
+      }
       continue;
     }
     if (/background-image\s*:\s*none/.test(line)) continue;
     if (/border-image/.test(line)) continue;
 
+    blockLines.push(line);
     out.push(line);
   }
 

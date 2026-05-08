@@ -23,6 +23,7 @@ const PART_THEME_CLASS: Record<string, string> = {
 interface CanvasProps {
   state: LayoutState;
   onStateChange: (next: LayoutState) => void;
+  previewState?: string;
   onSelect?: (obj: LayoutObject | null) => void;
   onSelectionChange?: (ids: Set<string>) => void;
   showGrid?: boolean;
@@ -31,7 +32,7 @@ interface CanvasProps {
   onAddObject?: (spec: Partial<LayoutObject>, x: number, y: number) => void;
 }
 
-export function Canvas({ state, onStateChange, onSelect, onSelectionChange, showGrid = false, openPopover, onOpenPopover, onAddObject }: CanvasProps) {
+export function Canvas({ state, onStateChange, previewState, onSelect, onSelectionChange, showGrid = false, openPopover, onOpenPopover, onAddObject }: CanvasProps) {
   const { selected, select, clearSelection } = useSelection();
 
   useEffect(() => {
@@ -221,6 +222,7 @@ export function Canvas({ state, onStateChange, onSelect, onSelectionChange, show
               key={obj.id}
               obj={displayObj}
               selected={selected.has(obj.id)}
+              previewState={selected.has(obj.id) ? previewState : undefined}
               onMouseDown={handleObjMouseDown}
               onDblClick={handleObjDblClick}
             />

@@ -189,15 +189,17 @@
 }
 /* Fallback styles when no theme CSS is loaded */
 :where(.fm-button-bar) .fm-btn-bar-seg {
+  font-size: 11px; font-weight: 500; color: #1a1a2e;
+}
+:where(.fm-button-bar) .fm-btn-bar-seg .self {
   background: #e8e8ed;
   border-top: 1px solid #c0c0c8;
   border-bottom: 1px solid #c0c0c8;
   border-right: 1px solid #c0c0c8;
-  font-size: 11px; font-weight: 500; color: #1a1a2e;
 }
-:where(.fm-button-bar) .fm-btn-bar-seg.first { border-left: 1px solid #c0c0c8; border-radius: 5px 0 0 5px; }
-:where(.fm-button-bar) .fm-btn-bar-seg.last  { border-radius: 0 5px 5px 0; }
-:where(.fm-button-bar) .fm-btn-bar-seg.first.last { border-radius: 5px; }
+:where(.fm-button-bar) .fm-btn-bar-seg.first .self { border-left: 1px solid #c0c0c8; border-radius: 5px 0 0 5px; }
+:where(.fm-button-bar) .fm-btn-bar-seg.last .self  { border-radius: 0 5px 5px 0; }
+:where(.fm-button-bar) .fm-btn-bar-seg.first.last .self { border-radius: 5px; }
 
 :where(.fm-group) .self { background: rgba(0,100,255,0.04); border: 1px dashed #99b; }
 .fm-group-label { font-size: 10px; color: #99b; padding: 2px 4px; }

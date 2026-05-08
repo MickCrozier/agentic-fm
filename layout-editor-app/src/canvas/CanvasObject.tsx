@@ -35,6 +35,7 @@ const TYPE_THEME_BASE: Record<string, string> = {
 interface CanvasObjectProps {
   obj: LayoutObject;
   selected: boolean;
+  previewState?: string;
   onMouseDown: (e: MouseEvent, obj: LayoutObject) => void;
   onDblClick: (obj: LayoutObject) => void;
 }
@@ -74,16 +75,18 @@ function buildSelfStyle(s: ReturnType<typeof import('@/xml/parseFMCSS').parseFMC
     const bstyle = (s as Record<string, string>)[`border${side}Style`];
     if (color)  style[`border${side}Color`] = color;
     if (width)  style[`border${side}Width`] = width;
-    // Default to solid when color or width is present but style is absent
-    style[`border${side}Style`] = bstyle || ((color || width) ? 'solid' : 'none');
+    // Only set border style as inline when we have local values — otherwise let theme CSS control it
+    if (bstyle) style[`border${side}Style`] = bstyle;
+    else if (color || width) style[`border${side}Style`] = 'solid';
   }
   return style;
 }
 
-export function CanvasObject({ obj, selected, onMouseDown, onDblClick }: CanvasObjectProps) {
+export function CanvasObject({ obj, selected, previewState, onMouseDown, onDblClick }: CanvasObjectProps) {
   const typeClass = TYPE_CLASS[obj.type] ?? 'fm-unknown';
   const s = obj.localStyles ?? {};
   const themeClass = buildThemeClasses(obj.type, obj.themeClass);
+  const stateClass = selected && previewState && previewState !== 'normal' ? ` fm-state-${previewState}` : '';
 
   // Outer div: geometry + interaction only
   const outerStyle: Record<string, string> = {
@@ -100,7 +103,7 @@ export function CanvasObject({ obj, selected, onMouseDown, onDblClick }: CanvasO
 
   return (
     <div
-      class={`fm-object ${typeClass}${themeClass}${selected ? ' selected' : ''}`}
+      class={`fm-object ${typeClass}${themeClass}${stateClass}${selected ? ' selected' : ''}`}
       style={outerStyle}
       onMouseDown={(e) => onMouseDown(e as MouseEvent, obj)}
       onDblClick={(e) => { e.stopPropagation(); onDblClick(obj); }}
@@ -250,10 +253,11 @@ function ButtonBarContent({ obj }: { obj: LayoutObject }) {
         ].filter(Boolean).join(' ');
         const segStyle = buildSelfStyle(seg.localStyles ?? {});
         const posClass = (i === 0 ? ' first' : '') + (i === segments.length - 1 ? ' last' : '');
+        const stateClass = i === 0 ? ' fm-state-checked' : '';
         return (
           <div
             key={seg.id}
-            class={`fm-btn-bar-seg${posClass} ${segThemeClasses}`}
+            class={`fm-btn-bar-seg${posClass}${stateClass} ${segThemeClasses}`}
             style={{ width: pct + '%', height: '100%', position: 'relative', overflow: 'hidden', boxSizing: 'border-box' }}
           >
             <div class="self" style={segStyle}>

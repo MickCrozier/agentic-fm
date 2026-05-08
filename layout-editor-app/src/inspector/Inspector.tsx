@@ -2,13 +2,23 @@ import { useCallback } from 'preact/hooks';
 import type { LayoutObject, LayoutState } from '@/xml/import';
 import type { FMStyles } from '@/xml/parseFMCSS';
 
+const FM_STATES: { label: string; value: string }[] = [
+  { label: 'Normal',   value: 'normal' },
+  { label: 'Hover',    value: 'hover' },
+  { label: 'Pressed',  value: 'pressed' },
+  { label: 'Active',   value: 'checked' },
+  { label: 'Focus',    value: 'focus' },
+];
+
 interface InspectorProps {
   selected: LayoutObject | null;
   state: LayoutState;
+  previewState?: string;
+  onPreviewStateChange?: (s: string) => void;
   onStateChange: (next: LayoutState) => void;
 }
 
-export function Inspector({ selected, state, onStateChange }: InspectorProps) {
+export function Inspector({ selected, state, previewState = 'normal', onPreviewStateChange, onStateChange }: InspectorProps) {
   const update = useCallback((patch: Partial<LayoutObject>) => {
     if (!selected) return;
     // Check top-level objects
@@ -74,12 +84,27 @@ export function Inspector({ selected, state, onStateChange }: InspectorProps) {
 
   return (
     <div class="px-3 py-2 text-xs space-y-2.5 overflow-y-auto max-h-full">
-      {/* Type badge */}
-      <div class="flex items-center gap-2">
+      {/* Type badge + state picker */}
+      <div class="flex items-center gap-2 flex-wrap">
         <span class="text-[10px] font-semibold uppercase tracking-wide text-neutral-400 bg-neutral-700 rounded px-1.5 py-0.5">
           {selected.type}
         </span>
         <span class="text-neutral-600 text-[10px]">FM #{selected.fmId}</span>
+        <div class="flex gap-0.5 ml-auto">
+          {FM_STATES.map(({ label, value }) => (
+            <button
+              key={value}
+              onClick={() => onPreviewStateChange?.(value)}
+              class={`text-[9px] px-1.5 py-0.5 rounded ${
+                previewState === value
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-neutral-700 text-neutral-400 hover:text-neutral-200'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Object name */}

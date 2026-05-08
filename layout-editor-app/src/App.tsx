@@ -26,6 +26,7 @@ export function App() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [copyMsg, setCopyMsg] = useState('');
   const [showGrid, setShowGrid] = useState(false);
+  const [previewState, setPreviewState] = useState('normal');
   const [openPopover, setOpenPopover] = useState<string | null>(null);
   const [rightPanelWidth, setRightPanelWidth] = useState(288); // 72 * 4 = 288px
   const isResizing = useRef(false);
@@ -252,6 +253,7 @@ export function App() {
               showGrid={showGrid}
               openPopover={openPopover}
               onOpenPopover={setOpenPopover}
+              previewState={previewState}
               onAddObject={handleAddObject}
             />
           ) : loadError ? (
@@ -284,6 +286,8 @@ export function App() {
             <Inspector
               selected={selected}
               state={state}
+              previewState={previewState}
+              onPreviewStateChange={setPreviewState}
               onStateChange={handleStateChange}
             />
           </div>
