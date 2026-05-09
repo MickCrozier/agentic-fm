@@ -394,24 +394,15 @@ export function apiMiddleware(): Plugin {
         }
       });
 
-      // Auto-save the current extracted theme into agent/themes/ when requested
+      // Serve the current solution's theme CSS (no side-effects)
       server.middlewares.use('/api/theme.css', (_req, res) => {
         const ctx = readContext();
         const solution = ctx?.solution as string | undefined;
         if (solution) {
           const cssPath = path.join(agentDir(), 'context', solution, 'theme-web.css');
           if (fs.existsSync(cssPath)) {
-            const css = fs.readFileSync(cssPath, 'utf-8');
-            try {
-              const manifestPath = path.join(agentDir(), 'context', solution, 'theme-manifest.json');
-              const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
-              const themeName: string = manifest?.theme?.name ?? 'Theme';
-              const themesDir = path.join(agentDir(), 'themes');
-              fs.mkdirSync(themesDir, { recursive: true });
-              fs.writeFileSync(path.join(themesDir, `${themeName}.css`), css, 'utf-8');
-            } catch { /* manifest missing — skip auto-save */ }
             res.writeHead(200, { 'Content-Type': 'text/css' });
-            res.end(css);
+            res.end(fs.readFileSync(cssPath, 'utf-8'));
             return;
           }
         }
@@ -419,49 +410,68 @@ export function apiMiddleware(): Plugin {
         res.end('');
       });
 
-      // List / serve themes from agent/themes/ (custom) and agent/themes/defaults/ (default)
-      // source: 'custom'   = solution-specific only
-      //         'default'  = default only
-      //         'override' = solution-specific overrides a default of the same name
+      // List / serve themes.
+      // Primary source:  agent/context/{solution}/theme-manifest.json + theme-web.css
+      // Fallback source: agent/themes/*.css (custom flat files)
+      //                  agent/themes/defaults/*.css (bundled defaults)
+      // source tag: 'context' | 'custom' | 'default'
       server.middlewares.use('/api/themes', (req, res) => {
-        const themesDir    = path.join(agentDir(), 'themes');
-        const defaultsDir  = path.join(themesDir, 'defaults');
+        const contextDir  = path.join(agentDir(), 'context');
+        const themesDir   = path.join(agentDir(), 'themes');
+        const defaultsDir = path.join(themesDir, 'defaults');
 
+        // Build a map of theme name → { source, cssPath }
+        const themeMap = new Map<string, { source: string; cssPath: string }>();
+
+        // 1. Scan agent/themes/defaults/*.css
+        if (fs.existsSync(defaultsDir)) {
+          for (const f of fs.readdirSync(defaultsDir)) {
+            if (!f.endsWith('.css')) continue;
+            const name = f.replace(/\.css$/, '');
+            themeMap.set(name, { source: 'default', cssPath: path.join(defaultsDir, f) });
+          }
+        }
+
+        // 2. Scan agent/themes/*.css (custom flat files override defaults)
+        if (fs.existsSync(themesDir)) {
+          for (const f of fs.readdirSync(themesDir)) {
+            if (!f.endsWith('.css')) continue;
+            const name = f.replace(/\.css$/, '');
+            const source = themeMap.has(name) ? 'override' : 'custom';
+            themeMap.set(name, { source, cssPath: path.join(themesDir, f) });
+          }
+        }
+
+        // 3. Scan agent/context/*/theme-manifest.json (context themes override all)
+        if (fs.existsSync(contextDir)) {
+          for (const sol of fs.readdirSync(contextDir, { withFileTypes: true })) {
+            if (!sol.isDirectory()) continue;
+            const manifestPath = path.join(contextDir, sol.name, 'theme-manifest.json');
+            const cssPath      = path.join(contextDir, sol.name, 'theme-web.css');
+            if (!fs.existsSync(manifestPath) || !fs.existsSync(cssPath)) continue;
+            try {
+              const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+              const name: string = manifest?.theme?.name;
+              if (name) themeMap.set(name, { source: 'context', cssPath });
+            } catch { /* malformed manifest — skip */ }
+          }
+        }
+
+        // Serve a single theme by name
         if (req.url && req.url !== '/' && req.url !== '') {
-          const name = decodeURIComponent(req.url.replace(/^\//, ''));
-          if (!name || name.includes('..')) { res.writeHead(400); res.end(''); return; }
-          const cssName = name.endsWith('.css') ? name : `${name}.css`;
-          // Prefer solution-specific over default
-          const customPath  = path.join(themesDir, cssName);
-          const defaultPath = path.join(defaultsDir, cssName);
-          const filePath = fs.existsSync(customPath) ? customPath
-                         : fs.existsSync(defaultPath) ? defaultPath
-                         : null;
-          if (!filePath) { res.writeHead(404); res.end(''); return; }
+          const rawName = decodeURIComponent(req.url.replace(/^\//, '').replace(/\.css$/, ''));
+          if (!rawName || rawName.includes('..')) { res.writeHead(400); res.end(''); return; }
+          const entry = themeMap.get(rawName);
+          if (!entry) { res.writeHead(404); res.end(''); return; }
           res.writeHead(200, { 'Content-Type': 'text/css' });
-          res.end(fs.readFileSync(filePath, 'utf-8'));
+          res.end(fs.readFileSync(entry.cssPath, 'utf-8'));
           return;
         }
 
-        const customNames  = new Set<string>();
-        const defaultNames = new Set<string>();
-        if (fs.existsSync(themesDir)) {
-          for (const f of fs.readdirSync(themesDir)) {
-            if (f.endsWith('.css')) customNames.add(f.replace(/\.css$/, ''));
-          }
-        }
-        if (fs.existsSync(defaultsDir)) {
-          for (const f of fs.readdirSync(defaultsDir)) {
-            if (f.endsWith('.css')) defaultNames.add(f.replace(/\.css$/, ''));
-          }
-        }
-        const allNames = new Set([...customNames, ...defaultNames]);
-        const themes = [...allNames].sort().map(name => ({
-          name,
-          source: customNames.has(name) && defaultNames.has(name) ? 'override'
-                : customNames.has(name) ? 'custom'
-                : 'default',
-        }));
+        // List all themes
+        const themes = [...themeMap.entries()]
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([name, { source }]) => ({ name, source }));
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(themes));
       });
