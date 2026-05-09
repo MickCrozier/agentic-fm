@@ -447,13 +447,25 @@ function parseObject(
     else if (iconType === '5') iconPosition = 'right';
     // type 1 = icon only → iconPosition stays undefined
 
-    // background-position [h] [v] encodes content alignment within button
+    // background-position [h] [v] in the .icon block encodes content alignment (V1-style themes)
     const lcssText = objEl.querySelector('LocalCSS')?.textContent ?? '';
     const bgPosMatch = lcssText.match(/background-position\s*:\s*(left|center|right)\s+(top|center|bottom)/);
     if (bgPosMatch) {
       const [, h, v] = bgPosMatch;
       iconAlignH = h as 'left' | 'center' | 'right';
       iconAlignV = v === 'top' ? 'top' : v === 'bottom' ? 'bottom' : 'middle';
+    } else {
+      // Fall back to text-align / -fm-text-vertical-align from .self block (V2-style themes)
+      if (localStyles.textAlign === 'left' || localStyles.textAlign === 'right') {
+        iconAlignH = localStyles.textAlign;
+      } else if (localStyles.textAlign === 'center') {
+        iconAlignH = 'center';
+      }
+      if (localStyles.verticalAlign) {
+        iconAlignV = localStyles.verticalAlign === 'top' ? 'top'
+          : localStyles.verticalAlign === 'bottom' ? 'bottom'
+          : 'middle';
+      }
     }
   }
 

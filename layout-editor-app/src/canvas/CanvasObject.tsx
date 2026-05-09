@@ -119,7 +119,10 @@ export function CanvasObject({ obj, selected, previewState, onMouseDown, onDblCl
     >
       <div class="self" style={selfStyle}>
         {obj.type === 'button' || obj.type === 'popover-btn'
-          ? <div class="inner_border" style={{ position: 'absolute', inset: '0', boxSizing: 'border-box', display: 'flex', overflow: 'hidden' }}>{renderContent(obj)}</div>
+          ? <div class="inner_border" style={{ position: 'absolute', inset: '0', boxSizing: 'border-box', display: 'flex', overflow: 'hidden',
+              justifyContent: selfStyle.justifyContent,
+              alignItems: selfStyle.alignItems,
+            }}>{renderContent(obj)}</div>
           : renderContent(obj)
         }
       </div>

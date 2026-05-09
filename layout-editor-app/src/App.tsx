@@ -18,7 +18,7 @@ const EMPTY: LayoutState = { width: 760, parts: [], objects: [], popoverPanels: 
 export function App() {
   const [themes, setThemes] = useState<{ name: string; source: 'default' | 'custom' | 'override' }[]>([]);
   const [activeTheme, setActiveTheme] = useState<string | null>(null);
-  useThemeCSS(activeTheme);
+  useThemeCSS(activeTheme);  // theme is always driven by context, not user preference
   const { unit, setUnit } = useUnit();
   const { current: state, push, undo, redo, canUndo, canRedo } = useHistory<LayoutState>(EMPTY);
   const [loadError, setLoadError] = useState('');
@@ -64,18 +64,12 @@ export function App() {
       })
       .catch(() => {});
 
-    // Trigger auto-save of current extracted theme, then load theme list + saved selection
-    fetch('/api/theme.css').catch(() => {}).finally(() => {
-      Promise.all([
-        fetch('/api/themes').then(r => r.ok ? r.json() : []),
-        fetch('/api/active-theme').then(r => r.ok ? r.json() : { name: '' }),
-      ]).then(([list, active]: [{ name: string; source: 'default' | 'custom' | 'override' }[], { name: string }]) => {
+    // Load theme list; auto-select the first theme from the current context solution
+    fetch('/api/themes').then(r => r.ok ? r.json() : [])
+      .then((list: { name: string; source: 'default' | 'custom' | 'override' }[]) => {
         setThemes(list);
-        if (list.length === 0) return;
-        const saved = active.name;
-        setActiveTheme(saved && list.some(t => t.name === saved) ? saved : list[0].name);
+        if (list.length > 0) setActiveTheme(list[0].name);
       }).catch(() => {});
-    });
 
     fetch('/api/layout-xml')
       .then(async r => {
@@ -246,10 +240,7 @@ export function App() {
         })}
         themes={themes}
         activeTheme={activeTheme}
-        onThemeChange={t => {
-          setActiveTheme(t);
-          fetch('/api/active-theme', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: t ?? '' }) }).catch(() => {});
-        }}
+        onThemeChange={setActiveTheme}
         unit={unit}
         onUnitChange={setUnit}
         onUndo={undo}

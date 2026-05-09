@@ -394,66 +394,55 @@ export function apiMiddleware(): Plugin {
         }
       });
 
-      // Serve the current solution's theme CSS (no side-effects)
+      // Serve the current solution's default theme CSS.
+      // Looks in context/{solution}/themes/{ThemeName}/theme-web.css (first theme found).
       server.middlewares.use('/api/theme.css', (_req, res) => {
         const ctx = readContext();
         const solution = ctx?.solution as string | undefined;
         if (solution) {
-          const cssPath = path.join(agentDir(), 'context', solution, 'theme-web.css');
-          if (fs.existsSync(cssPath)) {
-            res.writeHead(200, { 'Content-Type': 'text/css' });
-            res.end(fs.readFileSync(cssPath, 'utf-8'));
-            return;
+          const themesSubDir = path.join(agentDir(), 'context', solution, 'themes');
+          if (fs.existsSync(themesSubDir)) {
+            const themeDirs = fs.readdirSync(themesSubDir, { withFileTypes: true })
+              .filter(e => e.isDirectory());
+            for (const td of themeDirs) {
+              const cssPath = path.join(themesSubDir, td.name, 'theme-web.css');
+              if (fs.existsSync(cssPath)) {
+                res.writeHead(200, { 'Content-Type': 'text/css' });
+                res.end(fs.readFileSync(cssPath, 'utf-8'));
+                return;
+              }
+            }
           }
         }
         res.writeHead(404);
         res.end('');
       });
 
-      // List / serve themes.
-      // Primary source:  agent/context/{solution}/theme-manifest.json + theme-web.css
-      // Fallback source: agent/themes/*.css (custom flat files)
-      //                  agent/themes/defaults/*.css (bundled defaults)
-      // source tag: 'context' | 'custom' | 'default'
+      // List / serve themes for the current context solution only.
       server.middlewares.use('/api/themes', (req, res) => {
-        const contextDir  = path.join(agentDir(), 'context');
-        const themesDir   = path.join(agentDir(), 'themes');
-        const defaultsDir = path.join(themesDir, 'defaults');
+        const ctx = readContext();
+        const solution = ctx?.solution as string | undefined;
 
         // Build a map of theme name → { source, cssPath }
         const themeMap = new Map<string, { source: string; cssPath: string }>();
 
-        // 1. Scan agent/themes/defaults/*.css
-        if (fs.existsSync(defaultsDir)) {
-          for (const f of fs.readdirSync(defaultsDir)) {
-            if (!f.endsWith('.css')) continue;
-            const name = f.replace(/\.css$/, '');
-            themeMap.set(name, { source: 'default', cssPath: path.join(defaultsDir, f) });
-          }
-        }
-
-        // 2. Scan agent/themes/*.css (custom flat files override defaults)
-        if (fs.existsSync(themesDir)) {
-          for (const f of fs.readdirSync(themesDir)) {
-            if (!f.endsWith('.css')) continue;
-            const name = f.replace(/\.css$/, '');
-            const source = themeMap.has(name) ? 'override' : 'custom';
-            themeMap.set(name, { source, cssPath: path.join(themesDir, f) });
-          }
-        }
-
-        // 3. Scan agent/context/*/theme-manifest.json (context themes override all)
-        if (fs.existsSync(contextDir)) {
-          for (const sol of fs.readdirSync(contextDir, { withFileTypes: true })) {
-            if (!sol.isDirectory()) continue;
-            const manifestPath = path.join(contextDir, sol.name, 'theme-manifest.json');
-            const cssPath      = path.join(contextDir, sol.name, 'theme-web.css');
-            if (!fs.existsSync(manifestPath) || !fs.existsSync(cssPath)) continue;
-            try {
-              const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
-              const name: string = manifest?.theme?.name;
-              if (name) themeMap.set(name, { source: 'context', cssPath });
-            } catch { /* malformed manifest — skip */ }
+        // Themes from the current context solution: context/{solution}/themes/{ThemeName}/
+        if (solution) {
+          const themesSubDir = path.join(agentDir(), 'context', solution, 'themes');
+          if (fs.existsSync(themesSubDir)) {
+            for (const themeDir of fs.readdirSync(themesSubDir, { withFileTypes: true })) {
+              if (!themeDir.isDirectory()) continue;
+              const manifestPath = path.join(themesSubDir, themeDir.name, 'theme-manifest.json');
+              const cssPath      = path.join(themesSubDir, themeDir.name, 'theme-web.css');
+              if (!fs.existsSync(cssPath)) continue;
+              try {
+                const manifest = fs.existsSync(manifestPath)
+                  ? JSON.parse(fs.readFileSync(manifestPath, 'utf-8'))
+                  : null;
+                const name: string = manifest?.theme?.name ?? themeDir.name;
+                themeMap.set(name, { source: 'context', cssPath });
+              } catch { /* malformed manifest — use folder name */ }
+            }
           }
         }
 
@@ -476,22 +465,6 @@ export function apiMiddleware(): Plugin {
         res.end(JSON.stringify(themes));
       });
 
-      // Persist the active theme selection in agent/themes/active.txt
-      server.middlewares.use('/api/active-theme', async (req, res) => {
-        const activeFile = path.join(agentDir(), 'themes', 'active.txt');
-        if (req.method === 'POST') {
-          const body = await readBody(req);
-          const { name } = JSON.parse(body);
-          fs.mkdirSync(path.dirname(activeFile), { recursive: true });
-          fs.writeFileSync(activeFile, name ?? '', 'utf-8');
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ ok: true }));
-          return;
-        }
-        const name = fs.existsSync(activeFile) ? fs.readFileSync(activeFile, 'utf-8').trim() : '';
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ name }));
-      });
     },
   };
 }
