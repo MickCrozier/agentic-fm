@@ -418,6 +418,24 @@ export function apiMiddleware(): Plugin {
         res.end('');
       });
 
+      // Serve extracted theme images: /api/theme-image/{themeName}/{filename}
+      server.middlewares.use('/api/theme-image', (req, res) => {
+        if (!req.url) { res.writeHead(404); res.end(''); return; }
+        const parts = req.url.replace(/^\//, '').split('/');
+        if (parts.length < 2) { res.writeHead(404); res.end(''); return; }
+        const [themeName, fileName] = parts.map(decodeURIComponent);
+        if (themeName.includes('..') || fileName.includes('..')) { res.writeHead(400); res.end(''); return; }
+        const ctx = readContext();
+        const solution = ctx?.solution as string | undefined;
+        if (!solution) { res.writeHead(404); res.end(''); return; }
+        const imgPath = path.join(agentDir(), 'context', solution, 'themes', themeName, fileName);
+        if (!fs.existsSync(imgPath)) { res.writeHead(404); res.end(''); return; }
+        const ext = path.extname(fileName).toLowerCase();
+        const mime = ext === '.png' ? 'image/png' : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : 'image/png';
+        res.writeHead(200, { 'Content-Type': mime, 'Cache-Control': 'max-age=86400' });
+        res.end(fs.readFileSync(imgPath));
+      });
+
       // List / serve themes for the current context solution only.
       server.middlewares.use('/api/themes', (req, res) => {
         const ctx = readContext();
@@ -446,14 +464,27 @@ export function apiMiddleware(): Plugin {
           }
         }
 
-        // Serve a single theme by name
+        // Serve a single theme by name — extract embedded images to files and rewrite CSS
         if (req.url && req.url !== '/' && req.url !== '') {
           const rawName = decodeURIComponent(req.url.replace(/^\//, '').replace(/\.css$/, ''));
           if (!rawName || rawName.includes('..')) { res.writeHead(400); res.end(''); return; }
           const entry = themeMap.get(rawName);
           if (!entry) { res.writeHead(404); res.end(''); return; }
+          const themeDir = path.dirname(entry.cssPath);
+          let css = fs.readFileSync(entry.cssPath, 'utf-8');
+          // Extract -fm-image-data(...) blobs to PNG files and replace with file URL
+          css = css.replace(/-fm-image-data\(([^;]+);(data:image\/[^;]+;base64,([^)]+))\)/g,
+            (_match, filename, _dataUrl, b64) => {
+              const imgPath = path.join(themeDir, filename);
+              if (!fs.existsSync(imgPath)) {
+                fs.writeFileSync(imgPath, Buffer.from(b64, 'base64'));
+              }
+              const encodedTheme = encodeURIComponent(rawName);
+              const encodedFile  = encodeURIComponent(filename);
+              return `url("/api/theme-image/${encodedTheme}/${encodedFile}")`;
+            });
           res.writeHead(200, { 'Content-Type': 'text/css' });
-          res.end(fs.readFileSync(entry.cssPath, 'utf-8'));
+          res.end(css);
           return;
         }
 

@@ -152,6 +152,8 @@ export function convertThemeCSS(raw: string): string {
     }
     if (/background-image\s*:\s*none/.test(line)) continue;
     if (/border-image/.test(line)) continue;
+    // -fm-image-data() is rewritten to a proper URL by the server before the CSS reaches the client
+    if (/background-image\s*:\s*-fm-image-data\(/.test(line)) continue;
 
     blockLines.push(line);
     out.push(line);

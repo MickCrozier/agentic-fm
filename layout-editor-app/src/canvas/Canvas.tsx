@@ -186,10 +186,11 @@ export function Canvas({ state, onStateChange, previewState, onSelect, onSelecti
           const height = part.bottom - top;
           partTop = part.bottom;
           const partTheme = PART_THEME_CLASS[part.type];
+          const isBody = part.type === 'Body' || part.type === 'Grand Summary';
           return (
             <div
               key={i}
-              class={`layout-part${partTheme ? ` fm-theme-${partTheme}` : ''}`}
+              class={`layout-part${partTheme ? ` fm-theme-${partTheme}` : ''}${isBody ? ' fm-theme-layout_background' : ''}`}
               style={{ top: top + 'px', height: height + 'px' }}
             >
               <div class="self" style={{ position: 'absolute', inset: '0' }} />
