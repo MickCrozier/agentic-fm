@@ -388,3 +388,14 @@ fi
 echo ""
 msg "Running fmcontext.sh to regenerate agent/context/$SOLUTION_NAME/..."
 "$SCRIPT_DIR/fmcontext.sh" -s "$SOLUTION_NAME"
+
+# ---------------------------------------------------------------------------
+# Step 8: Extract theme data
+# ---------------------------------------------------------------------------
+echo ""
+msg "Extracting theme data for '$SOLUTION_NAME'..."
+if command -v python3 &>/dev/null; then
+    python3 "$SCRIPT_DIR/agent/scripts/extract_theme.py" "$SOLUTION_NAME"
+else
+    msg "Warning: Python not found — skipping theme extraction."
+fi

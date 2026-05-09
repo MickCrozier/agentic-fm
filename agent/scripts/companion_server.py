@@ -915,16 +915,47 @@ class CompanionHandler(BaseHTTPRequestHandler):
             log.exception("Failed to write agent output: %s", exc)
             self._send_json({"success": False, "error": str(exc)}, status=500)
 
+    def _load_context_theme_css(self, repo_root: str) -> str:
+        """Return the theme-web.css for the current context solution, or empty string."""
+        ctx_path = os.path.join(repo_root, "agent", "CONTEXT.json")
+        try:
+            with open(ctx_path, "r", encoding="utf-8") as f:
+                ctx = json.load(f)
+            solution = ctx.get("solution", "")
+            if not solution:
+                return ""
+            themes_dir = os.path.join(repo_root, "agent", "context", solution, "themes")
+            if not os.path.isdir(themes_dir):
+                return ""
+            for entry in sorted(os.listdir(themes_dir)):
+                css_path = os.path.join(themes_dir, entry, "theme-web.css")
+                if os.path.isfile(css_path):
+                    with open(css_path, "r", encoding="utf-8") as f:
+                        return f.read()
+        except (OSError, json.JSONDecodeError, KeyError):
+            pass
+        return ""
+
+    def _inject_theme(self, html: str, css: str) -> str:
+        """Inject theme CSS into an HTML document before </head>."""
+        if not css:
+            return html
+        tag = f"<style id=\"fm-theme\">\n{css}\n</style>"
+        if "</head>" in html:
+            return html.replace("</head>", f"{tag}\n</head>", 1)
+        return tag + "\n" + html
+
     def _handle_preview_get(self, layout_name: str):
         """
         Serve a layout HTML preview.
 
         GET /preview/<layout_name>
-        Returns: text/html — the preview file, a fallback from .agent-output.json,
-                 or a placeholder message.
+        Returns: text/html — the preview file with the context theme injected,
+                 a fallback from .agent-output.json, or a placeholder message.
         """
         here = os.path.dirname(os.path.abspath(__file__))
         repo_root = os.path.dirname(os.path.dirname(here))
+        theme_css = self._load_context_theme_css(repo_root)
 
         # Look for agent/sandbox/{layout_name}_web.html
         html_path = os.path.join(repo_root, "agent", "sandbox", f"{layout_name}_web.html")
@@ -932,7 +963,7 @@ class CompanionHandler(BaseHTTPRequestHandler):
             try:
                 with open(html_path, "r", encoding="utf-8") as f:
                     content = f.read()
-                self._send_html(content)
+                self._send_html(self._inject_theme(content, theme_css))
                 return
             except OSError as exc:
                 log.warning("Could not read preview file %s: %s", html_path, exc)
@@ -945,7 +976,7 @@ class CompanionHandler(BaseHTTPRequestHandler):
                     data = json.load(f)
                 content = data.get("content", "")
                 if content:
-                    self._send_html(content)
+                    self._send_html(self._inject_theme(content, theme_css))
                     return
             except (OSError, json.JSONDecodeError) as exc:
                 log.warning("Could not read .agent-output.json: %s", exc)
