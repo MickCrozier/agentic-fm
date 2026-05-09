@@ -341,28 +341,53 @@ export function apiMiddleware(): Plugin {
         res.end(JSON.stringify(ctx));
       });
 
-      server.middlewares.use('/api/custom-instructions', (req, res) => {
-        const filePath = path.join(agentDir(), 'context', 'custom-instructions.txt');
-        if (req.method === 'POST') {
-          let body = '';
-          req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
-          req.on('end', () => {
-            try {
-              const { content } = JSON.parse(body);
-              fs.mkdirSync(path.dirname(filePath), { recursive: true });
-              fs.writeFileSync(filePath, content ?? '', 'utf-8');
-              res.writeHead(200, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ ok: true }));
-            } catch (e) {
-              res.writeHead(400, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ error: String(e) }));
-            }
-          });
-          return;
-        }
-        const content = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8') : '';
+      const makeInstructionsEndpoint = (route: string, fileName: string) => {
+        server.middlewares.use(route, (req, res) => {
+          const filePath = path.join(agentDir(), 'context', fileName);
+          if (req.method === 'POST') {
+            let body = '';
+            req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+            req.on('end', () => {
+              try {
+                const { content } = JSON.parse(body);
+                fs.mkdirSync(path.dirname(filePath), { recursive: true });
+                fs.writeFileSync(filePath, content ?? '', 'utf-8');
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ ok: true }));
+              } catch (e) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: String(e) }));
+              }
+            });
+            return;
+          }
+          const content = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8') : '';
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ content }));
+        });
+      };
+
+      makeInstructionsEndpoint('/api/custom-instructions', 'custom-instructions.txt');
+      makeInstructionsEndpoint('/api/layout-instructions', 'layout-instructions.txt');
+
+      // /api/docs — layout-relevant knowledge files (mirrors webviewer /api/docs)
+      server.middlewares.use('/api/docs', (_req, res) => {
+        const knowledgeDir = path.join(agentDir(), 'docs', 'knowledge');
+        const LAYOUT_PATTERN = /layout|theme/i;
+        let knowledge = '';
+        try {
+          const files = fs.readdirSync(knowledgeDir)
+            .filter(f => f.endsWith('.md') && f !== 'MANIFEST.md' && LAYOUT_PATTERN.test(f))
+            .sort();
+          knowledge = files
+            .map(f => {
+              const content = fs.readFileSync(path.join(knowledgeDir, f), 'utf-8');
+              return `## ${f.replace('.md', '')}\n\n${content}`;
+            })
+            .join('\n\n---\n\n');
+        } catch { /* not found */ }
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ content }));
+        res.end(JSON.stringify({ knowledge }));
       });
 
       // AI settings
@@ -399,7 +424,7 @@ export function apiMiddleware(): Plugin {
       server.middlewares.use('/api/fields', (_req, res) => {
         const ctx = readContext();
         const solution = ctx?.solution as string | undefined;
-        const baseTo = ctx?.current_layout?.base_to as string | undefined;
+        const baseTo = (ctx?.current_layout as { base_to?: string } | undefined)?.base_to;
         if (!solution || !baseTo) { res.writeHead(404); res.end('[]'); return; }
         const contextDir = path.join(agentDir(), 'context', solution);
 

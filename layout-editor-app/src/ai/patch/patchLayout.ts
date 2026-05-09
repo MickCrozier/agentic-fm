@@ -7,7 +7,7 @@ export type LayoutOp =
   | { op: 'update';     id: string; displayText?: string; fieldRef?: string; fmName?: string }
   | { op: 'style';      id: string; themeClass?: string; localStyles?: Partial<FMStyles> }
   | { op: 'delete';     id: string }
-  | { op: 'add';        object: Partial<LayoutObject> & { type: string; x: number; y: number; width: number; height: number } };
+  | { op: 'add';        object: Partial<LayoutObject> & { type: string; x: number; y: number; width: number; height: number; children?: Partial<LayoutObject>[] } };
 
 function patchObject(obj: LayoutObject, op: LayoutOp): LayoutObject {
   if (op.op === 'move') {
@@ -39,8 +39,22 @@ export function applyPatch(state: LayoutState, ops: LayoutOp[]): LayoutState {
 
   for (const op of ops) {
     if (op.op === 'add') {
+      const baseId = 'ai-' + Math.random().toString(36).slice(2, 8);
+      const children: LayoutObject[] | undefined = op.object.type === 'portal' && Array.isArray(op.object.children)
+        ? (op.object.children as Partial<LayoutObject>[]).map((c, i) => ({
+            id: baseId + '-c' + i,
+            fmId: '0',
+            fmName: c.fmName ?? '',
+            type: (c.type ?? 'field') as LayoutObject['type'],
+            x: c.x ?? 0, y: c.y ?? 22,
+            width: c.width ?? 120, height: c.height ?? 22,
+            bounds: { top: c.y ?? 22, left: c.x ?? 0, bottom: (c.y ?? 22) + (c.height ?? 22), right: (c.x ?? 0) + (c.width ?? 120) },
+            displayText: c.displayText,
+            fieldRef: c.fieldRef,
+          }))
+        : undefined;
       const newObj: LayoutObject = {
-        id: 'ai-' + Math.random().toString(36).slice(2, 8),
+        id: baseId,
         fmId: '0', fmName: op.object.fmName ?? '',
         type: op.object.type as LayoutObject['type'],
         x: op.object.x, y: op.object.y,
@@ -48,6 +62,7 @@ export function applyPatch(state: LayoutState, ops: LayoutOp[]): LayoutState {
         bounds: { top: op.object.y, left: op.object.x, bottom: op.object.y + op.object.height, right: op.object.x + op.object.width },
         displayText: op.object.displayText,
         fieldRef: op.object.fieldRef,
+        ...(children ? { children } : {}),
       };
       next = { ...next, objects: [...next.objects, newObj] };
       continue;

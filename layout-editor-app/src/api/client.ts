@@ -47,6 +47,28 @@ export async function saveCustomInstructions(content: string): Promise<void> {
   });
 }
 
+export async function fetchLayoutInstructions(): Promise<string> {
+  const res = await fetch(`${BASE}/api/layout-instructions`);
+  if (!res.ok) return '';
+  const data = await res.json();
+  return data.content ?? '';
+}
+
+export async function saveLayoutInstructions(content: string): Promise<void> {
+  await fetch(`${BASE}/api/layout-instructions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content }),
+  });
+}
+
+export async function fetchLayoutDocs(): Promise<string> {
+  const res = await fetch(`${BASE}/api/docs`);
+  if (!res.ok) return '';
+  const data = await res.json();
+  return data.knowledge ?? '';
+}
+
 // --- Layout context ---
 
 export interface LayoutObject {

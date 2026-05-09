@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'preact/hooks';
 import { listProviders, getProvider } from '../providers/registry';
-import { fetchSettings, saveSettings, fetchCustomInstructions, saveCustomInstructions } from '@/api/client';
+import { fetchSettings, saveSettings, fetchLayoutInstructions, saveLayoutInstructions } from '@/api/client';
 
 interface AISettingsProps {
   onClose: () => void;
@@ -26,7 +26,7 @@ export function AISettings({ onClose }: AISettingsProps) {
         setLoading(false);
       })
       .catch(() => setLoading(false));
-    fetchCustomInstructions().then(setCustomInstructions).catch(() => {});
+    fetchLayoutInstructions().then(setCustomInstructions).catch(() => {});
   }, []);
 
   // Update model when provider changes
@@ -50,7 +50,7 @@ export function AISettings({ onClose }: AISettingsProps) {
         setConfiguredProviders(result.configuredProviders);
       }
 
-      await saveCustomInstructions(customInstructions);
+      await saveLayoutInstructions(customInstructions);
 
       setKey('');
       setStatus('Saved');
@@ -152,17 +152,17 @@ export function AISettings({ onClose }: AISettingsProps) {
 
               {/* Custom Instructions */}
               <div>
-                <label class="block text-xs text-neutral-400 mb-1">Custom instructions</label>
+                <label class="block text-xs text-neutral-400 mb-1">Layout editor instructions</label>
                 <textarea
                   value={customInstructions}
                   onInput={(e) => setCustomInstructions((e.target as HTMLTextAreaElement).value)}
-                  placeholder="Additional instructions injected into every AI request..."
+                  placeholder="Layout design conventions, preferred spacing, portal row heights, theme class naming..."
                   rows={5}
                   class="w-full bg-neutral-700 text-neutral-200 text-xs rounded px-2 py-1.5 outline-none placeholder:text-neutral-500 font-mono resize-y"
                 />
                 <p class="text-xs text-neutral-500 mt-1">
-                  Injected as "Developer Instructions" in the system prompt. Also editable at{' '}
-                  <code>agent/config/.custom-instructions.md</code>.
+                  Injected as "Developer Instructions" in the layout chat system prompt. Saved to{' '}
+                  <code>agent/context/layout-instructions.txt</code>.
                 </p>
               </div>
             </div>

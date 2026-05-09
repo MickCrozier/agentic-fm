@@ -10,6 +10,7 @@ interface ChatPanelProps {
   layoutName?: string;
   state?: LayoutState | null;
   customInstructions?: string;
+  availableFields?: { table: string; name: string; type: string }[];
   onClearChat?: () => void;
   onStateChange?: (next: LayoutState) => void;
 }
@@ -20,7 +21,7 @@ interface ChatMessage {
   streaming?: boolean;
 }
 
-export function ChatPanel({ layoutName, state, customInstructions, onClearChat, onStateChange }: ChatPanelProps) {
+export function ChatPanel({ layoutName, state, customInstructions, availableFields, onClearChat, onStateChange }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
@@ -36,7 +37,7 @@ export function ChatPanel({ layoutName, state, customInstructions, onClearChat, 
     const userMsg: ChatMessage = { role: 'user', content: text };
     setMessages(prev => [...prev, userMsg]);
 
-    const systemPrompt = buildSystemPrompt({ layoutName, state, customInstructions });
+    const systemPrompt = buildSystemPrompt({ layoutName, state, customInstructions, availableFields });
 
     const apiMessages = sessionId
       ? [{ role: 'user', content: text }]

@@ -1,11 +1,18 @@
 import type { LayoutState, LayoutObject } from '@/xml/import';
 
+interface AvailableField {
+  table: string;
+  name: string;
+  type: string;
+}
+
 export function buildSystemPrompt(opts: {
   layoutName?: string;
   state?: LayoutState | null;
   customInstructions?: string;
+  availableFields?: AvailableField[];
 }): string {
-  const { layoutName, state, customInstructions } = opts;
+  const { layoutName, state, customInstructions, availableFields } = opts;
 
   let prompt = `You are a FileMaker layout design assistant embedded in a web-based visual layout editor. You can both advise on layout design AND directly apply changes to the layout.
 
@@ -26,11 +33,22 @@ Supported operations:
   { "op": "update", "id": "<objectId>", "displayText": "New Label" },
   { "op": "style",  "id": "<objectId>", "themeClass": "button-default-bd", "localStyles": { "backgroundColor": "#ff0000", "color": "#ffffff", "fontSize": "14px", "fontWeight": "bold", "textAlign": "center", "borderTopWidth": "1px", "borderTopColor": "#cccccc", "borderTopStyle": "solid" } },
   { "op": "delete", "id": "<objectId>" },
-  { "op": "add", "object": { "type": "text", "x": 10, "y": 10, "width": 120, "height": 22, "displayText": "Hello" } }
+  { "op": "add", "object": { "type": "text", "x": 10, "y": 10, "width": 120, "height": 22, "displayText": "Hello" } },
+  { "op": "add", "object": { "type": "field", "x": 10, "y": 40, "width": 140, "height": 22, "fmName": "InvoiceNumber", "fieldRef": "Invoice::InvoiceNumber" } },
+  { "op": "add", "object": { "type": "portal", "x": 10, "y": 100, "width": 600, "height": 200, "fmName": "InvoiceItem", "children": [
+    { "type": "field", "x": 0, "y": 22, "width": 200, "height": 22, "fmName": "Description", "fieldRef": "InvoiceItem::Description" },
+    { "type": "field", "x": 200, "y": 22, "width": 80, "height": 22, "fmName": "Quantity", "fieldRef": "InvoiceItem::Quantity" }
+  ]} }
 ]
 \`\`\`
 
-Object types for "add": field, text, button, rectangle, line.
+Object types for "add": field, text, button, rectangle, line, portal.
+
+- **field**: MUST include \`"fieldRef": "TableName::FieldName"\` and \`"fmName": "FieldName"\`. Use the exact table::field names from the Available Fields list below.
+- **portal**: Use \`"fmName"\` for the related table occurrence name. Include \`"children"\` array with field columns; child field x-coordinates are relative to the portal left edge, y is the row y-offset (first row is typically y=22, below the header row at y=0).
+- **text**: Use \`"displayText"\` for the label content.
+- **button**: Use \`"displayText"\` for the button label.
+
 Coordinates are in pixels from the layout top-left. Use the object IDs from the layout inventory below.
 
 The "style" op accepts:
@@ -59,6 +77,21 @@ Only emit a layout-patch block when you are actually making a change. For questi
 
     if (state.popoverPanels.length > 0) {
       prompt += `\n\nPopover panels: ${state.popoverPanels.length}`;
+    }
+  }
+
+  if (availableFields && availableFields.length > 0) {
+    const byTable = new Map<string, AvailableField[]>();
+    for (const f of availableFields) {
+      if (!byTable.has(f.table)) byTable.set(f.table, []);
+      byTable.get(f.table)!.push(f);
+    }
+    prompt += `\n\n## Available fields\nWhen adding field objects, use \`"fieldRef": "Table::FieldName"\` exactly as shown here:`;
+    for (const [table, fields] of byTable) {
+      prompt += `\n\n**${table}**`;
+      for (const f of fields) {
+        prompt += `\n  - ${table}::${f.name} (${f.type})`;
+      }
     }
   }
 

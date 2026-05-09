@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'preact/hooks';
-import { fetchCustomInstructions } from '@/api/client';
+import { fetchLayoutInstructions, fetchLayoutDocs } from '@/api/client';
 import { ChatPanel } from '@/ai/chat/ChatPanel';
 import { AISettings } from '@/ai/settings/AISettings';
 import { Canvas } from '@/canvas/Canvas';
@@ -32,6 +32,7 @@ export function App() {
   const [showGrid, setShowGrid] = useState(false);
   const [previewState, setPreviewState] = useState('normal');
   const [openPopover, setOpenPopover] = useState<string | null>(null);
+  const [availableFields, setAvailableFields] = useState<{ table: string; name: string; type: string }[]>([]);
   const [rightPanelWidth, setRightPanelWidth] = useState(288); // 72 * 4 = 288px
   const isResizing = useRef(false);
 
@@ -55,14 +56,18 @@ export function App() {
   }, [rightPanelWidth]);
 
   useEffect(() => {
-    fetchCustomInstructions().then(setCustomInstructions).catch(() => {});
+    Promise.all([fetchLayoutInstructions(), fetchLayoutDocs()]).then(([instructions, docs]) => {
+      const combined = [docs, instructions].filter(Boolean).join('\n\n');
+      setCustomInstructions(combined);
+    }).catch(() => {});
 
-    fetch('/api/context')
-      .then(r => r.ok ? r.json() : null)
-      .then((ctx: { current_layout?: { name: string; id: number } } | null) => {
-        if (ctx?.current_layout) setLayoutName(ctx.current_layout.name);
-      })
-      .catch(() => {});
+    Promise.all([
+      fetch('/api/context').then(r => r.ok ? r.json() : null),
+      fetch('/api/fields').then(r => r.ok ? r.json() : []),
+    ]).then(([ctx, fields]: [{ current_layout?: { name: string; id: number } } | null, { table: string; name: string; type: string }[]]) => {
+      if (ctx?.current_layout) setLayoutName(ctx.current_layout.name);
+      if (fields?.length) setAvailableFields(fields);
+    }).catch(() => {});
 
     // Load theme list; auto-select the first theme from the current context solution
     fetch('/api/themes').then(r => r.ok ? r.json() : [])
@@ -317,6 +322,7 @@ export function App() {
               layoutName={layoutName}
               state={state}
               customInstructions={customInstructions}
+              availableFields={availableFields}
               onClearChat={() => setChatKey(k => k + 1)}
               onStateChange={handleStateChange}
             />
