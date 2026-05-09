@@ -30,36 +30,61 @@ export function Palette({ state, onStateChange }: PaletteProps) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    fetch('/api/context')
-      .then(r => r.ok ? r.json() : null)
-      .then((ctx: {
-        current_layout?: { base_to: string };
-        tables?: Record<string, { to: string; fields: Record<string, { type: string }> }>;
-      } | null) => {
-        if (!ctx?.tables) return;
-        const baseTo = ctx.current_layout?.base_to ?? '';
-        const list: FMField[] = [];
+    Promise.all([
+      fetch('/api/context').then(r => r.ok ? r.json() : null),
+      fetch('/api/fields').then(r => r.ok ? r.json() : []),
+    ]).then(([ctx, indexFields]: [
+      { current_layout?: { base_to: string }; tables?: Record<string, { to: string; fields: Record<string, { type: string }> }> } | null,
+      { table: string; name: string; type: string }[]
+    ]) => {
+      const baseTo = ctx?.current_layout?.base_to ?? '';
+      const list: FMField[] = [];
+      const seen = new Set<string>(); // table::field
 
-        // Base TO first, then related TOs
-        const tableOrder = Object.keys(ctx.tables).sort((a, b) => {
-          if (a === baseTo) return -1;
-          if (b === baseTo) return 1;
-          return a.localeCompare(b);
-        });
+      // Primary source: CONTEXT.json tables (have IDs, preferred for field drops)
+      const tableOrder = Object.keys(ctx?.tables ?? {}).sort((a, b) => {
+        if (a === baseTo) return -1;
+        if (b === baseTo) return 1;
+        return a.localeCompare(b);
+      });
 
-        for (const table of tableOrder) {
-          const tdef = ctx.tables[table];
-          for (const [name, fdef] of Object.entries(tdef.fields)) {
-            // Skip FM separator pseudo-fields — they contain dashes/equals as majority of chars
-            const stripped = name.replace(/[-_=\s|]/g, '');
-            if (stripped.length < name.length * 0.5) continue;
-            list.push({ name, type: fdef.type, table: tdef.to ?? table });
-          }
+      for (const table of tableOrder) {
+        const tdef = ctx!.tables![table];
+        for (const [name, fdef] of Object.entries(tdef.fields)) {
+          const stripped = name.replace(/[-_=\s|]/g, '');
+          if (stripped.length < name.length * 0.5) continue;
+          const key = `${tdef.to ?? table}::${name}`;
+          seen.add(key);
+          list.push({ name, type: fdef.type, table: tdef.to ?? table });
         }
-        setFields(list);
-        setCollapsed(new Set(tableOrder));
-      })
-      .catch(() => {});
+      }
+
+      // Supplement: fields.index — adds tables not in CONTEXT.json
+      const indexByTable = new Map<string, { name: string; type: string }[]>();
+      for (const f of indexFields) {
+        const stripped = f.name.replace(/[-_=\s|]/g, '');
+        if (stripped.length < f.name.length * 0.5) continue;
+        if (seen.has(`${f.table}::${f.name}`)) continue;
+        if (!indexByTable.has(f.table)) indexByTable.set(f.table, []);
+        indexByTable.get(f.table)!.push({ name: f.name, type: f.type });
+      }
+
+      // Base TO first among index-only tables, then alpha
+      const indexTables = [...indexByTable.keys()].sort((a, b) => {
+        if (a === baseTo) return -1;
+        if (b === baseTo) return 1;
+        return a.localeCompare(b);
+      });
+      for (const table of indexTables) {
+        for (const f of indexByTable.get(table)!) {
+          list.push({ name: f.name, type: f.type, table });
+        }
+      }
+
+      const allTables = [...new Set([...tableOrder, ...indexTables])];
+      setFields(list);
+      setCollapsed(new Set(allTables));
+    }).catch(() => {});
   }, []);
 
   const addObject = (obj: Partial<LayoutObject>) => {

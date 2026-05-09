@@ -394,6 +394,42 @@ export function apiMiddleware(): Plugin {
         }
       });
 
+      // Serve fields from fields.index for the current solution.
+      // Only returns the base TO and TOs directly related to it via relationships.index.
+      server.middlewares.use('/api/fields', (_req, res) => {
+        const ctx = readContext();
+        const solution = ctx?.solution as string | undefined;
+        const baseTo = ctx?.current_layout?.base_to as string | undefined;
+        if (!solution || !baseTo) { res.writeHead(404); res.end('[]'); return; }
+        const contextDir = path.join(agentDir(), 'context', solution);
+
+        // Find related TOs from relationships.index
+        const relPath = path.join(contextDir, 'relationships.index');
+        const relatedTOs = new Set<string>([baseTo]);
+        if (fs.existsSync(relPath)) {
+          for (const line of fs.readFileSync(relPath, 'utf-8').split('\n')) {
+            if (!line || line.startsWith('#')) continue;
+            const [leftTO, , rightTO] = line.split('|');
+            if (leftTO === baseTo) relatedTOs.add(rightTO);
+            if (rightTO === baseTo) relatedTOs.add(leftTO);
+          }
+        }
+
+        const indexPath = path.join(contextDir, 'fields.index');
+        if (!fs.existsSync(indexPath)) { res.writeHead(404); res.end('[]'); return; }
+        const fields: { table: string; name: string; id: number; type: string }[] = [];
+        for (const line of fs.readFileSync(indexPath, 'utf-8').split('\n')) {
+          if (!line || line.startsWith('#')) continue;
+          const parts = line.split('|');
+          if (parts.length < 5) continue;
+          const [tableName, , fieldName, fieldId, dataType] = parts;
+          if (!relatedTOs.has(tableName)) continue;
+          fields.push({ table: tableName, name: fieldName, id: parseInt(fieldId) || 0, type: dataType });
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(fields));
+      });
+
       // Serve the current solution's default theme CSS.
       // Looks in context/{solution}/themes/{ThemeName}/theme-web.css (first theme found).
       server.middlewares.use('/api/theme.css', (_req, res) => {
