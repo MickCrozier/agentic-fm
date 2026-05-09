@@ -24,6 +24,14 @@
     "8765": {
       "label": "agentic-fm companion server",
       "onAutoForward": "ignore"
+    },
+    "8080": {
+      "label": "agentic-fm web server",
+      "onAutoForward": "ignore"
+    },
+    "8081": {
+      "label": "agentic-fm layout editor",
+      "onAutoForward": "ignore"
     }
   },
 
