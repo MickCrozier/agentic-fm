@@ -21,19 +21,12 @@
   "postCreateCommand": "bash .devcontainer/postCreate.sh",
   "postStartCommand": "bash .devcontainer/postStart.sh",
 
+  "forwardPorts": [8765, 8080, 8081],
+
   "portsAttributes": {
-    "8765": {
-      "label": "agentic-fm companion server",
-      "onAutoForward": "ignore"
-    },
-    "8080": {
-      "label": "agentic-fm web server",
-      "onAutoForward": "ignore"
-    },
-    "8081": {
-      "label": "agentic-fm layout editor",
-      "onAutoForward": "ignore"
-    }
+    "8765": { "label": "agentic-fm companion server" },
+    "8080": { "label": "agentic-fm web server" },
+    "8081": { "label": "agentic-fm layout editor" }
   },
 
   "customizations": {
