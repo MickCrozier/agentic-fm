@@ -23,6 +23,7 @@ interface ToolbarProps {
   onCopyXML: () => void;
   onGroup: () => void;
   onUngroup: () => void;
+  onReset: () => void;
   onOpenSettings: () => void;
 }
 
@@ -32,7 +33,7 @@ export function Toolbar({
   canGroup, canUngroup,
   unit, onUnitChange,
   themes, activeTheme, onThemeChange,
-  onUndo, onRedo, onToggleGrid, onCopyXML, onGroup, onUngroup, onOpenSettings,
+  onUndo, onRedo, onToggleGrid, onCopyXML, onGroup, onUngroup, onReset, onOpenSettings,
 }: ToolbarProps) {
   return (
     <div class="flex items-center gap-2 px-3 py-1.5 bg-neutral-800 border-b border-neutral-700 text-xs select-none flex-shrink-0">
@@ -152,6 +153,13 @@ export function Toolbar({
 
       {copyMsg && <span class="text-green-400 font-medium">{copyMsg}</span>}
 
+      <button
+        onClick={onReset}
+        class="px-2 py-1 rounded bg-neutral-700 hover:bg-neutral-600 text-neutral-300"
+        title="Discard changes and reload from FileMaker"
+      >
+        Reset
+      </button>
       <button
         onClick={onCopyXML}
         class="px-2 py-1 rounded bg-blue-700 hover:bg-blue-600 text-white"

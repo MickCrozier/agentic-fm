@@ -1,4 +1,4 @@
-import { useCallback } from 'preact/hooks';
+import { useCallback, useState } from 'preact/hooks';
 import type { LayoutObject, LayoutState } from '@/xml/import';
 import type { FMStyles } from '@/xml/parseFMCSS';
 import { formatMeasure } from '@/utils/units';
@@ -196,7 +196,7 @@ export function Inspector({ selected, state, previewState = 'normal', onPreviewS
       )}
 
       {/* Style */}
-      <StyleSection selected={selected} />
+      <StyleSection selected={selected} update={update} />
     </div>
   );
 }
@@ -217,33 +217,89 @@ const LOCAL_STYLE_LABELS: Partial<Record<keyof FMStyles, string>> = {
   borderLeftWidth:     'Border left',
 };
 
-function StyleSection({ selected }: { selected: LayoutObject }) {
-  const hasTheme  = !!selected.themeClass;
-  const local     = selected.localStyles ?? {};
-  const localKeys = Object.keys(local) as (keyof FMStyles)[];
-  const hasLocal  = localKeys.length > 0;
+const ALL_STYLE_KEYS = Object.keys(LOCAL_STYLE_LABELS) as (keyof FMStyles)[];
 
-  if (!hasTheme && !hasLocal) return null;
+interface StyleSectionProps {
+  selected: LayoutObject;
+  update: (patch: Partial<LayoutObject>) => void;
+}
+
+function StyleSection({ selected, update }: StyleSectionProps) {
+  const [addKey, setAddKey] = useState<keyof FMStyles | ''>('');
+  const local = selected.localStyles ?? {};
+  const localKeys = Object.keys(local) as (keyof FMStyles)[];
+  const availableKeys = ALL_STYLE_KEYS.filter(k => !(k in local));
+
+  const setThemeClass = (v: string) => update({ themeClass: v || undefined });
+
+  const setLocalProp = (key: keyof FMStyles, val: string) => {
+    update({ localStyles: { ...local, [key]: val } });
+  };
+
+  const removeLocalProp = (key: keyof FMStyles) => {
+    const next = { ...local };
+    delete next[key];
+    update({ localStyles: Object.keys(next).length ? next : undefined });
+  };
+
+  const handleAdd = (key: keyof FMStyles | '') => {
+    if (!key) return;
+    update({ localStyles: { ...local, [key]: '' } });
+    setAddKey('');
+  };
 
   return (
     <div>
       <div class="text-[10px] text-neutral-500 uppercase tracking-wide mb-1">Style</div>
-      <div class="space-y-1">
-        {hasTheme && (
-          <div class="flex items-center gap-1.5">
-            <span class="text-[9px] px-1 py-0.5 rounded bg-blue-900 text-blue-300 font-medium">theme</span>
-            <span class="text-neutral-400 text-[10px] font-mono truncate">{selected.themeClass}</span>
+      <div class="space-y-1.5">
+
+        {/* Theme class */}
+        <div class="flex items-center gap-1.5">
+          <span class="text-[9px] px-1 py-0.5 rounded bg-blue-900 text-blue-300 font-medium flex-shrink-0">theme</span>
+          <input
+            type="text"
+            value={selected.themeClass ?? ''}
+            placeholder="class name…"
+            onInput={e => setThemeClass((e.target as HTMLInputElement).value)}
+            class="flex-1 min-w-0 bg-neutral-700 text-neutral-200 text-[10px] font-mono rounded px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-blue-500 placeholder-neutral-600"
+          />
+        </div>
+
+        {/* Local style rows */}
+        {localKeys.map(key => (
+          <div key={key} class="flex items-center gap-1.5">
+            <span class="text-[9px] px-1 py-0.5 rounded bg-amber-900 text-amber-300 font-medium flex-shrink-0">local</span>
+            <span class="text-neutral-500 text-[10px] w-20 flex-shrink-0 truncate" title={LOCAL_STYLE_LABELS[key] ?? key}>
+              {LOCAL_STYLE_LABELS[key] ?? key}
+            </span>
+            <input
+              type="text"
+              value={String(local[key])}
+              onInput={e => setLocalProp(key, (e.target as HTMLInputElement).value)}
+              class="flex-1 min-w-0 bg-neutral-700 text-neutral-200 text-[10px] font-mono rounded px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-amber-500"
+            />
+            <button
+              onClick={() => removeLocalProp(key)}
+              class="text-neutral-600 hover:text-red-400 text-[10px] px-0.5 flex-shrink-0"
+              title="Remove"
+            >×</button>
           </div>
-        )}
-        {hasLocal && (
-          <div class="space-y-0.5">
-            {localKeys.map(key => (
-              <div key={key} class="flex items-center gap-1.5">
-                <span class="text-[9px] px-1 py-0.5 rounded bg-amber-900 text-amber-300 font-medium">local</span>
-                <span class="text-neutral-500 text-[10px] w-24 flex-shrink-0">{LOCAL_STYLE_LABELS[key] ?? key}</span>
-                <span class="text-neutral-300 text-[10px] font-mono break-all">{String(local[key])}</span>
-              </div>
-            ))}
+        ))}
+
+        {/* Add property */}
+        {availableKeys.length > 0 && (
+          <div class="flex items-center gap-1.5">
+            <span class="text-[9px] px-1 py-0.5 rounded bg-neutral-700 text-neutral-500 font-medium flex-shrink-0">add</span>
+            <select
+              value={addKey}
+              onChange={e => handleAdd((e.target as HTMLSelectElement).value as keyof FMStyles | '')}
+              class="flex-1 min-w-0 bg-neutral-700 text-neutral-400 text-[10px] rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              <option value="">property…</option>
+              {availableKeys.map(k => (
+                <option key={k} value={k}>{LOCAL_STYLE_LABELS[k] ?? k}</option>
+              ))}
+            </select>
           </div>
         )}
       </div>

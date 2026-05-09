@@ -31,6 +31,7 @@ Supported operations:
   { "op": "move",   "id": "<objectId>", "x": 10, "y": 20 },
   { "op": "resize", "id": "<objectId>", "width": 200, "height": 30 },
   { "op": "update", "id": "<objectId>", "displayText": "New Label" },
+  { "op": "update", "id": "<objectId>", "controlStyle": "pop-up-menu" },
   { "op": "style",  "id": "<objectId>", "themeClass": "button-default-bd", "localStyles": { "backgroundColor": "#ff0000", "color": "#ffffff", "fontSize": "14px", "fontWeight": "bold", "textAlign": "center", "borderTopWidth": "1px", "borderTopColor": "#cccccc", "borderTopStyle": "solid" } },
   { "op": "delete", "id": "<objectId>" },
   { "op": "add", "object": { "type": "text", "x": 10, "y": 10, "width": 120, "height": 22, "displayText": "Hello" } },
@@ -44,7 +45,7 @@ Supported operations:
 
 Object types for "add": field, text, button, rectangle, line, portal.
 
-- **field**: MUST include \`"fieldRef": "TableName::FieldName"\` and \`"fmName": "FieldName"\`. Use the exact table::field names from the Available Fields list below.
+- **field**: MUST include \`"fieldRef": "TableName::FieldName"\` and \`"fmName": "FieldName"\`. Use the exact table::field names from the Available Fields list below. Optionally include \`"controlStyle"\` to set the control type: \`"pop-up-menu"\`, \`"drop-down-list"\`, \`"drop-down-calendar"\`, \`"checkbox-set"\`, \`"radio-button-set"\`. Omit for a plain edit box.
 - **portal**: Use \`"fmName"\` for the related table occurrence name. Include \`"children"\` array with field columns; child field x-coordinates are relative to the portal left edge, y is the row y-offset (first row is typically y=22, below the header row at y=0).
 - **text**: Use \`"displayText"\` for the label content.
 - **button**: Use \`"displayText"\` for the button label.
@@ -52,8 +53,8 @@ Object types for "add": field, text, button, rectangle, line, portal.
 Coordinates are in pixels from the layout top-left. Use the object IDs from the layout inventory below.
 
 The "style" op accepts:
-- \`themeClass\`: the FileMaker theme style class name (e.g. "button-default-bd", "field-control-bd")
-- \`localStyles\`: partial style overrides — valid keys: backgroundColor, color, fontSize, fontWeight, textAlign, verticalAlign (top/center/bottom), fontFamily, borderTopWidth/RightWidth/BottomWidth/LeftWidth, borderTopColor/RightColor/BottomColor/LeftColor, borderTopStyle/RightStyle/BottomStyle/LeftStyle, boxShadow. Use standard CSS values (e.g. "#rrggbb", "14px", "bold"). Only include keys you want to change.
+- \`themeClass\`: the FileMaker theme style class name (e.g. "button", "edit_box", "field"). Set to null to remove the theme class.
+- \`localStyles\`: partial style overrides — valid keys: backgroundColor, color, fontSize, fontWeight, textAlign, verticalAlign (top/center/bottom), fontFamily, borderTopWidth/RightWidth/BottomWidth/LeftWidth, borderTopColor/RightColor/BottomColor/LeftColor, borderTopStyle/RightStyle/BottomStyle/LeftStyle, boxShadow. Use standard CSS values (e.g. "#rrggbb", "14px", "bold"). Only include keys you want to change. Set a key to null to remove that override. Set localStyles to null to clear all local overrides.
 
 Only emit a layout-patch block when you are actually making a change. For questions or analysis, respond with text only.`;
 

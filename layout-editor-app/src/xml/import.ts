@@ -48,6 +48,8 @@ export interface LayoutObject {
   lineEnd?: { x: number; y: number };
   /** Static image objects: base64 data URL (e.g. data:image/jpeg;base64,...) */
   imageData?: string;
+  /** Field control style (edit-box is default/undefined) */
+  controlStyle?: 'drop-down-list' | 'drop-down-calendar' | 'pop-up-menu' | 'checkbox-set' | 'radio-button-set';
   /** Button/field icon: inline SVG string (fm_fill class uses currentColor) */
   iconSVG?: string;
   /** Icon display size in pt */
@@ -130,6 +132,14 @@ const FM_THEME_CLASS_MAP: Record<string, string> = {
   'Rounded Rectangle':  'rounded',
   'Graphic':            'rectangle',
   'Web Viewer':         'web_viewer',
+};
+
+const FM_CONTROL_STYLE_MAP: Record<string, LayoutObject['controlStyle']> = {
+  'Drop-down List':     'drop-down-list',
+  'Drop-down Calendar': 'drop-down-calendar',
+  'Pop-up Menu':        'pop-up-menu',
+  'Checkbox Set':       'checkbox-set',
+  'Radio Button Set':   'radio-button-set',
 };
 
 function fmTypeToThemeClass(fmType: string): string | undefined {
@@ -469,7 +479,10 @@ function parseObject(
     }
   }
 
+  const controlStyle = FM_CONTROL_STYLE_MAP[fmType];
+
   return { ...base, displayText, fieldRef, tooltip, localStyles, themeClass,
+    ...(controlStyle ? { controlStyle } : {}),
     ...(iconSVG ? { iconSVG, iconSize, iconPosition, iconAlignH, iconAlignV } : {}) };
 }
 

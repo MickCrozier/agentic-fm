@@ -4,8 +4,8 @@ import type { FMStyles } from '@/xml/parseFMCSS';
 export type LayoutOp =
   | { op: 'move';       id: string; x: number; y: number }
   | { op: 'resize';     id: string; width: number; height: number }
-  | { op: 'update';     id: string; displayText?: string; fieldRef?: string; fmName?: string }
-  | { op: 'style';      id: string; themeClass?: string; localStyles?: Partial<FMStyles> }
+  | { op: 'update';     id: string; displayText?: string; fieldRef?: string; fmName?: string; controlStyle?: LayoutObject['controlStyle'] }
+  | { op: 'style';      id: string; themeClass?: string | null; localStyles?: Partial<Record<keyof FMStyles, string | null>> | null }
   | { op: 'delete';     id: string }
   | { op: 'add';        object: Partial<LayoutObject> & { type: string; x: number; y: number; width: number; height: number; children?: Partial<LayoutObject>[] } };
 
@@ -19,16 +19,28 @@ function patchObject(obj: LayoutObject, op: LayoutOp): LayoutObject {
   if (op.op === 'update') {
     return {
       ...obj,
-      ...(op.displayText !== undefined ? { displayText: op.displayText } : {}),
-      ...(op.fieldRef    !== undefined ? { fieldRef:    op.fieldRef    } : {}),
-      ...(op.fmName      !== undefined ? { fmName:      op.fmName      } : {}),
+      ...(op.displayText   !== undefined ? { displayText:   op.displayText   } : {}),
+      ...(op.fieldRef      !== undefined ? { fieldRef:      op.fieldRef      } : {}),
+      ...(op.fmName        !== undefined ? { fmName:        op.fmName        } : {}),
+      ...(op.controlStyle  !== undefined ? { controlStyle:  op.controlStyle  } : {}),
     };
   }
   if (op.op === 'style') {
+    let localStyles = obj.localStyles;
+    if (op.localStyles === null) {
+      localStyles = undefined;
+    } else if (op.localStyles !== undefined) {
+      const merged = { ...obj.localStyles } as Record<string, string | undefined>;
+      for (const [k, v] of Object.entries(op.localStyles)) {
+        if (v === null) delete merged[k];
+        else merged[k] = v as string;
+      }
+      localStyles = Object.keys(merged).length ? (merged as FMStyles) : undefined;
+    }
     return {
       ...obj,
-      ...(op.themeClass !== undefined ? { themeClass: op.themeClass } : {}),
-      ...(op.localStyles   !== undefined ? { localStyles: { ...obj.localStyles, ...op.localStyles } } : {}),
+      ...(op.themeClass === null ? { themeClass: undefined } : op.themeClass !== undefined ? { themeClass: op.themeClass } : {}),
+      localStyles,
     };
   }
   return obj;
@@ -62,6 +74,7 @@ export function applyPatch(state: LayoutState, ops: LayoutOp[]): LayoutState {
         bounds: { top: op.object.y, left: op.object.x, bottom: op.object.y + op.object.height, right: op.object.x + op.object.width },
         displayText: op.object.displayText,
         fieldRef: op.object.fieldRef,
+        ...(op.object.controlStyle ? { controlStyle: op.object.controlStyle } : {}),
         ...(children ? { children } : {}),
       };
       next = { ...next, objects: [...next.objects, newObj] };

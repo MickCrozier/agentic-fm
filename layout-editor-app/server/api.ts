@@ -370,7 +370,26 @@ export function apiMiddleware(): Plugin {
       makeInstructionsEndpoint('/api/custom-instructions', 'custom-instructions.txt');
       makeInstructionsEndpoint('/api/layout-instructions', 'layout-instructions.txt');
 
-      // /api/docs — layout-relevant knowledge files (mirrors webviewer /api/docs)
+      // /api/clipboard — proxy to companion server to avoid browser CORS restrictions
+      server.middlewares.use('/api/clipboard', async (req, res) => {
+        if (req.method !== 'POST') { res.writeHead(405); res.end(); return; }
+        try {
+          const body = await readBody(req);
+          const companionRes = await fetch('http://localhost:8765/clipboard', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body,
+          });
+          const json = await companionRes.json();
+          res.writeHead(companionRes.ok ? 200 : 500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(json));
+        } catch (e) {
+          res.writeHead(502, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: String(e) }));
+        }
+      });
+
+      // /api/docs — layout-relevant knowledge files + theme class reference
       server.middlewares.use('/api/docs', (_req, res) => {
         const knowledgeDir = path.join(agentDir(), 'docs', 'knowledge');
         const LAYOUT_PATTERN = /layout|theme/i;
@@ -386,6 +405,55 @@ export function apiMiddleware(): Plugin {
             })
             .join('\n\n---\n\n');
         } catch { /* not found */ }
+
+        // Append theme class summary from the active solution's theme CSS
+        try {
+          const ctx = readContext();
+          const solution = ctx?.solution as string | undefined;
+          if (solution) {
+            const themesDir = path.join(agentDir(), 'context', solution, 'themes');
+            if (fs.existsSync(themesDir)) {
+              const themeDirs = fs.readdirSync(themesDir, { withFileTypes: true })
+                .filter(d => d.isDirectory());
+              for (const td of themeDirs) {
+                const cssPath = path.join(themesDir, td.name, 'theme-web.css');
+                if (!fs.existsSync(cssPath)) continue;
+                const css = fs.readFileSync(cssPath, 'utf-8');
+
+                // Parse out className:normal .self { ... } blocks
+                const blocks: Record<string, string> = {};
+                const blockRe = /^([a-z][a-z0-9_-]*):normal \.self\s*\{([^}]*)\}/gm;
+                let m: RegExpExecArray | null;
+                while ((m = blockRe.exec(css)) !== null) {
+                  const cls = m[1];
+                  const props = m[2].trim()
+                    .split('\n')
+                    .map(l => l.trim())
+                    .filter(l => l && !l.startsWith('/*'));
+                  if (props.length > 0) blocks[cls] = props.join(' ');
+                }
+
+                // Collect all class names (including those with no :normal .self props)
+                const allClasses = new Set<string>();
+                const clsRe = /^([a-z][a-z0-9_-]*):(?:normal|hover|focus|pressed|checked)/gm;
+                while ((m = clsRe.exec(css)) !== null) allClasses.add(m[1]);
+
+                const lines: string[] = [];
+                for (const cls of [...allClasses].sort()) {
+                  const props = blocks[cls];
+                  lines.push(props ? `- \`${cls}\` — ${props}` : `- \`${cls}\``);
+                }
+
+                if (lines.length > 0) {
+                  const section = `## Theme Classes (${td.name})\n\nUse these class names as \`themeClass\` when adding or styling objects.\n\n${lines.join('\n')}`;
+                  knowledge = knowledge ? `${knowledge}\n\n---\n\n${section}` : section;
+                }
+                break; // use first theme found
+              }
+            }
+          }
+        } catch { /* theme parsing optional */ }
+
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ knowledge }));
       });

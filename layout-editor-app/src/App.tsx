@@ -35,6 +35,7 @@ export function App() {
   const [availableFields, setAvailableFields] = useState<{ table: string; name: string; type: string }[]>([]);
   const [rightPanelWidth, setRightPanelWidth] = useState(288); // 72 * 4 = 288px
   const isResizing = useRef(false);
+  const activeLayoutName = useRef(''); // tracks the current layout for change detection
 
   const handleResizeStart = useCallback((e: MouseEvent) => {
     e.preventDefault();
@@ -55,41 +56,87 @@ export function App() {
     window.addEventListener('mouseup', onUp);
   }, [rightPanelWidth]);
 
+  const LAYOUT_STORAGE_KEY = (name: string) => `layout-editor-state:${name}`;
+
+  const loadLayoutFromServer = useCallback(async (layoutName: string) => {
+    setLoadError('');
+    try {
+      const r = await fetch('/api/layout-xml');
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        throw new Error(body.error ?? `HTTP ${r.status}`);
+      }
+      const xml = await r.text();
+      const s = loadLayoutXML(xml);
+      if (!s) throw new Error('Failed to parse layout XML');
+      localStorage.removeItem(LAYOUT_STORAGE_KEY(layoutName));
+      push(s);
+    } catch (e) {
+      setLoadError(String(e));
+    }
+  }, [push]);
+
+  const applyLayout = useCallback((name: string, fromServer: boolean) => {
+    if (!fromServer) {
+      const saved = localStorage.getItem(LAYOUT_STORAGE_KEY(name));
+      if (saved) {
+        try {
+          const s: LayoutState = JSON.parse(saved);
+          push(s);
+          return;
+        } catch { /* fall through to server */ }
+      }
+    }
+    loadLayoutFromServer(name);
+  }, [push, loadLayoutFromServer]);
+
+  const handleReset = useCallback(() => {
+    loadLayoutFromServer(activeLayoutName.current);
+  }, [loadLayoutFromServer]);
+
+  // Persist state changes to localStorage
+  useEffect(() => {
+    if (!activeLayoutName.current || state.objects.length === 0) return;
+    try {
+      localStorage.setItem(LAYOUT_STORAGE_KEY(activeLayoutName.current), JSON.stringify(state));
+    } catch { /* quota */ }
+  }, [state]);
+
+  // Initial load + context polling for layout changes
   useEffect(() => {
     Promise.all([fetchLayoutInstructions(), fetchLayoutDocs()]).then(([instructions, docs]) => {
       const combined = [docs, instructions].filter(Boolean).join('\n\n');
       setCustomInstructions(combined);
     }).catch(() => {});
 
-    Promise.all([
-      fetch('/api/context').then(r => r.ok ? r.json() : null),
-      fetch('/api/fields').then(r => r.ok ? r.json() : []),
-    ]).then(([ctx, fields]: [{ current_layout?: { name: string; id: number } } | null, { table: string; name: string; type: string }[]]) => {
-      if (ctx?.current_layout) setLayoutName(ctx.current_layout.name);
-      if (fields?.length) setAvailableFields(fields);
-    }).catch(() => {});
-
-    // Load theme list; auto-select the first theme from the current context solution
     fetch('/api/themes').then(r => r.ok ? r.json() : [])
       .then((list: { name: string; source: 'default' | 'custom' | 'override' }[]) => {
         setThemes(list);
         if (list.length > 0) setActiveTheme(list[0].name);
       }).catch(() => {});
 
-    fetch('/api/layout-xml')
-      .then(async r => {
-        if (!r.ok) {
-          const body = await r.json().catch(() => ({}));
-          throw new Error(body.error ?? `HTTP ${r.status}`);
+    const checkContext = async (isFirst: boolean) => {
+      try {
+        const [ctx, fields] = await Promise.all([
+          fetch('/api/context').then(r => r.ok ? r.json() : null),
+          fetch('/api/fields').then(r => r.ok ? r.json() : []),
+        ]);
+        const name: string = ctx?.current_layout?.name ?? '';
+        if (fields?.length) setAvailableFields(fields);
+        if (!name) return;
+
+        if (name !== activeLayoutName.current) {
+          // Layout changed — load fresh from server
+          activeLayoutName.current = name;
+          setLayoutName(name);
+          applyLayout(name, !isFirst); // first load: try cache; layout change: always server
         }
-        return r.text();
-      })
-      .then(xml => {
-        const s = loadLayoutXML(xml);
-        if (s) push(s);
-        else throw new Error('Failed to parse layout XML');
-      })
-      .catch(e => setLoadError(String(e)));
+      } catch { /* ignore poll errors */ }
+    };
+
+    checkContext(true);
+    const poll = setInterval(() => checkContext(false), 5000);
+    return () => clearInterval(poll);
   }, []);
 
   const handleStateChange = useCallback((next: LayoutState) => {
@@ -119,12 +166,22 @@ export function App() {
     setSelected(newObj);
   }, [state, push]);
 
-  const handleCopyXML = useCallback(() => {
+  const handleCopyXML = useCallback(async () => {
     const xml = exportToXML(state);
-    navigator.clipboard.writeText(xml).then(() => {
+    try {
+      const res = await fetch('/api/clipboard', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ xml }),
+      });
+      if (!res.ok) throw new Error(`companion ${res.status}`);
       setCopyMsg('Copied!');
-      setTimeout(() => setCopyMsg(''), 2000);
-    });
+    } catch {
+      // Fallback to plain text if companion server is unreachable
+      await navigator.clipboard.writeText(xml).catch(() => {});
+      setCopyMsg('Copied as text');
+    }
+    setTimeout(() => setCopyMsg(''), 2000);
   }, [state]);
 
   const handleGroup = useCallback(() => {
@@ -254,6 +311,7 @@ export function App() {
         onCopyXML={handleCopyXML}
         onGroup={handleGroup}
         onUngroup={handleUngroup}
+        onReset={handleReset}
         onOpenSettings={() => setShowSettings(true)}
       />
 

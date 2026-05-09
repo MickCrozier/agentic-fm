@@ -21,13 +21,31 @@ interface ChatMessage {
   streaming?: boolean;
 }
 
+const STORAGE_KEY = 'layout-editor-chat-history';
+
+function loadMessages(): ChatMessage[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+function saveMessages(msgs: ChatMessage[]) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(msgs)); } catch { /* quota */ }
+}
+
 export function ChatPanel({ layoutName, state, customInstructions, availableFields, onClearChat, onStateChange }: ChatPanelProps) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>(loadMessages);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    const nonStreaming = messages.filter(m => !m.streaming);
+    saveMessages(nonStreaming);
+  }, [messages]);
 
   const sendMessage = useCallback(async () => {
     const text = input.trim();
@@ -133,7 +151,7 @@ export function ChatPanel({ layoutName, state, customInstructions, availableFiel
         <span>AI Chat</span>
         {onClearChat && (
           <button
-            onClick={onClearChat}
+            onClick={() => { localStorage.removeItem(STORAGE_KEY); onClearChat(); }}
             title="New chat"
             class="flex items-center justify-center w-5 h-5 rounded hover:bg-neutral-600 hover:text-neutral-200 transition-colors"
           >
