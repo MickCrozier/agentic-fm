@@ -19,6 +19,7 @@
   ],
 
   "postCreateCommand": "bash .devcontainer/postCreate.sh",
+  "postStartCommand": "bash .devcontainer/postStart.sh",
 
   "portsAttributes": {
     "8765": {
@@ -56,6 +57,7 @@
 
   "remoteEnv": {
     "ANTHROPIC_API_KEY": "${localEnv:ANTHROPIC_API_KEY}",
-    "PATH": "${containerEnv:PATH}:/home/vscode/bin"
+    "PATH": "${containerEnv:PATH}:/home/vscode/bin",
+    "CLIPBOARD_SERVER_URL": "http://host.docker.internal:8766"
   }
 }
