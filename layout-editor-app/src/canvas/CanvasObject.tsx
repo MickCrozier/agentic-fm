@@ -125,8 +125,8 @@ export function CanvasObject({ obj, selected, previewState, onMouseDown, onDblCl
       <div class="self" style={selfStyle}>
         {obj.type === 'button' || obj.type === 'popover-btn'
           ? <div class="inner_border" style={{ position: 'absolute', inset: '0', boxSizing: 'border-box', display: 'flex', overflow: 'hidden',
-              justifyContent: selfStyle.justifyContent,
-              alignItems: selfStyle.alignItems,
+              justifyContent: selfStyle.justifyContent ?? 'center',
+              alignItems: selfStyle.alignItems ?? 'center',
             }}>{renderContent(obj)}</div>
           : obj.type === 'portal'
             ? <PortalContent obj={obj} onChildMouseDown={onChildMouseDown} childDragPositions={childDragPositions} selectedIds={selectedIds} />
