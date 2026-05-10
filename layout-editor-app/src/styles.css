@@ -128,10 +128,16 @@
 }
 .fm-btn-icon svg { width: 100%; height: 100%; }
 .fm-btn-icon + .fm-obj-label { margin-left: 4px; }
-.fm-button .inner_border,
-.fm-popover-btn .inner_border { align-items: center; justify-content: center; }
 .fm-button .fm-obj-label,
-.fm-popover-btn .fm-obj-label { text-align: center; width: auto; }
+.fm-popover-btn .fm-obj-label {
+  text-align: center;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  white-space: pre-wrap;
+}
 .fm-field .fm-obj-label,
 .fm-label .fm-obj-label { padding: 0.25em 0.5em; }
 
