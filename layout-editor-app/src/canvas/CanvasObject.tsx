@@ -41,6 +41,9 @@ interface CanvasObjectProps {
   previewState?: string;
   onMouseDown: (e: MouseEvent, obj: LayoutObject) => void;
   onDblClick: (obj: LayoutObject) => void;
+  onChildMouseDown?: (e: MouseEvent, child: LayoutObject) => void;
+  childDragPositions?: Map<string, { x: number; y: number }>;
+  selectedIds?: Set<string>;
 }
 
 function buildThemeClasses(type: string, themeClass: string | undefined): string {
@@ -90,7 +93,7 @@ function buildSelfStyle(s: ReturnType<typeof import('@/xml/parseFMCSS').parseFMC
   return style;
 }
 
-export function CanvasObject({ obj, selected, previewState, onMouseDown, onDblClick }: CanvasObjectProps) {
+export function CanvasObject({ obj, selected, previewState, onMouseDown, onDblClick, onChildMouseDown, childDragPositions, selectedIds }: CanvasObjectProps) {
   const typeClass = TYPE_CLASS[obj.type] ?? 'fm-unknown';
   const s = obj.localStyles ?? {};
   const themeClass = buildThemeClasses(obj.type, obj.themeClass);
@@ -108,6 +111,8 @@ export function CanvasObject({ obj, selected, previewState, onMouseDown, onDblCl
 
   const selfStyle = buildSelfStyle(s);
   if (s.borderRadius) selfStyle.borderRadius = s.borderRadius;
+  // Portals should be transparent by default; theme CSS may set a background
+  if (obj.type === 'portal' && !s.backgroundColor) selfStyle.backgroundColor = 'transparent';
 
   return (
     <div
@@ -123,7 +128,9 @@ export function CanvasObject({ obj, selected, previewState, onMouseDown, onDblCl
               justifyContent: selfStyle.justifyContent,
               alignItems: selfStyle.alignItems,
             }}>{renderContent(obj)}</div>
-          : renderContent(obj)
+          : obj.type === 'portal'
+            ? <PortalContent obj={obj} onChildMouseDown={onChildMouseDown} childDragPositions={childDragPositions} selectedIds={selectedIds} />
+            : renderContent(obj)
         }
       </div>
     </div>
@@ -228,8 +235,6 @@ function renderContent(obj: LayoutObject) {
       );
     case 'field':
       return <span class="fm-obj-label" style={labelStyle(obj)}>{obj.fieldRef?.split('::')[1] ?? obj.fmName ?? ''}</span>;
-    case 'portal':
-      return <PortalContent obj={obj} />;
     case 'tab-control':
       return <TabContent obj={obj} />;
     case 'slide-control':
@@ -280,18 +285,63 @@ function GroupContent({ obj }: { obj: LayoutObject }) {
 }
 
 
-function PortalContent({ obj }: { obj: LayoutObject }) {
+function PortalContent({ obj, onChildMouseDown, childDragPositions, selectedIds }: {
+  obj: LayoutObject;
+  onChildMouseDown?: (e: MouseEvent, child: LayoutObject) => void;
+  childDragPositions?: Map<string, { x: number; y: number }>;
+  selectedIds?: Set<string>;
+}) {
   const cols = obj.children ?? [];
+  if (cols.length === 0) return null;
+
+  const rowHeight = cols[0].height ?? 22;
+  const visibleRows = Math.max(1, Math.floor(obj.height / rowHeight));
+  const greyTop = rowHeight;
+  const greyHeight = (visibleRows - 1) * rowHeight;
+
   return (
     <>
-      <div class="fm-portal-header">
-        {cols.map((c, i) => (
-          <div key={i} class="fm-portal-col">{c.fieldRef?.split('::')[1] ?? c.displayText ?? ''}</div>
-        ))}
-      </div>
-      <div class="fm-portal-row" style={{ opacity: 0.4 }}>
-        {cols.map((_, i) => <div key={i} class="fm-portal-col">—</div>)}
-      </div>
+      {/* First row — full opacity, selectable, draggable */}
+      {cols.map((col) => {
+        const livePos = childDragPositions?.get(col.id);
+        const displayCol = livePos ? { ...col, x: livePos.x, y: livePos.y } : col;
+        const colSelfStyle = buildSelfStyle(col.localStyles ?? {});
+        const typeClass = TYPE_CLASS[col.type] ?? 'fm-unknown';
+        const themeClasses = buildThemeClasses(col.type, col.themeClass);
+        const isSelected = selectedIds?.has(col.id);
+        return (
+          <div
+            key={col.id}
+            class={`fm-object ${typeClass}${themeClasses}${isSelected ? ' selected' : ''}`}
+            style={{
+              position: 'absolute',
+              left: displayCol.x,
+              top: 0,
+              width: displayCol.width,
+              height: displayCol.height,
+              cursor: 'pointer',
+            }}
+            onMouseDown={onChildMouseDown ? (e) => { e.stopPropagation(); onChildMouseDown(e as MouseEvent, col); } : undefined}
+          >
+            <div class="self" style={colSelfStyle}>
+              <span class="fm-obj-label">{col.fieldRef?.split('::')[1] ?? col.displayText ?? ''}</span>
+            </div>
+          </div>
+        );
+      })}
+
+      {/* Greyed block covering remaining rows */}
+      {greyHeight > 0 && (
+        <div style={{
+          position: 'absolute',
+          left: 0,
+          top: greyTop,
+          width: '100%',
+          height: greyHeight,
+          backgroundColor: 'rgba(128,128,128,0.25)',
+          pointerEvents: 'none',
+        }} />
+      )}
     </>
   );
 }

@@ -54,13 +54,16 @@ function localStylesCSS(styles: FMStyles | undefined): string {
   return `self:normal .self\n{\n${lines.join('\n')}\n}\n`;
 }
 
-function stylesXML(obj: LayoutObject): string {
+function stylesXML(obj: LayoutObject, themeInternalName?: string): string {
   const css = localStylesCSS(obj.localStyles);
-  if (!css) return '';
+  if (!css && !obj.themeClass) return '';
   // Encode newlines and tabs as XML entities to match FM's format
-  const encoded = css.replace(/\n/g, '&#10;').replace(/\t/g, '&#09;');
-  const nameAttr = obj.themeClass ? ` name="" displayName="${esc(obj.themeClass)}"` : ' name="" displayName=""';
-  return `<Styles><LocalCSS${nameAttr}>${encoded}</LocalCSS></Styles>`;
+  const encoded = css ? css.replace(/\n/g, '&#10;').replace(/\t/g, '&#09;') : '';
+  const customStyles = obj.themeClass
+    ? `<CustomStyles><Name>${esc(obj.themeClass)}</Name></CustomStyles>\n` : '';
+  const localCSSEl = css ? `<LocalCSS>${encoded}</LocalCSS>\n` : '';
+  const themeEl = themeInternalName ? `<ThemeName>${esc(themeInternalName)}</ThemeName>` : '';
+  return `<Styles>\n${customStyles}${localCSSEl}${themeEl}</Styles>`;
 }
 
 function extendedAttributes(): string {
@@ -74,10 +77,10 @@ function extendedAttributes(): string {
 </ExtendedAttributes>`;
 }
 
-function textObj(text: string, isButton: boolean, obj?: LayoutObject): string {
+function textObj(text: string, isButton: boolean, obj?: LayoutObject, themeInternalName?: string): string {
   const flags = isButton ? '2' : '0';
   const escaped = text.replace(/]]>/g, ']]]]><![CDATA[>');
-  const styles = obj ? stylesXML(obj) : '';
+  const styles = obj ? stylesXML(obj, themeInternalName) : '';
   return `<TextObj flags="${flags}">
 ${extendedAttributes()}${styles ? '\n' + styles : ''}
 <CharacterStyleVector>
@@ -89,28 +92,20 @@ ${extendedAttributes()}${styles ? '\n' + styles : ''}
 </TextObj>`;
 }
 
-const CONTROL_STYLE_FM_TYPE: Record<string, string> = {
-  'drop-down-list':     'Drop-down List',
-  'drop-down-calendar': 'Drop-down Calendar',
-  'pop-up-menu':        'Pop-up Menu',
-  'checkbox-set':       'Checkbox Set',
-  'radio-button-set':   'Radio Button Set',
-};
-
 const CONTROL_STYLE_DISPLAY_TYPE: Record<string, string> = {
   'drop-down-list':     '1',
-  'drop-down-calendar': '3',
   'pop-up-menu':        '2',
-  'checkbox-set':       '5',
-  'radio-button-set':   '6',
+  'checkbox-set':       '3',
+  'radio-button-set':   '4',
+  'drop-down-calendar': '6',
 };
 
-function fieldObjXML(fieldRef: string, obj: LayoutObject): string {
+function fieldObjXML(fieldRef: string, obj: LayoutObject, themeInternalName?: string): string {
   const parts = fieldRef.split('::');
   const table = parts.length === 2 ? parts[0] : '';
   const field = parts.length === 2 ? parts[1] : fieldRef;
   const displayType = obj.controlStyle ? (CONTROL_STYLE_DISPLAY_TYPE[obj.controlStyle] ?? '0') : '0';
-  const styles = stylesXML(obj);
+  const styles = stylesXML(obj, themeInternalName);
   return `<FieldObj numOfReps="1" flags="32" inputMode="0" keyboardType="1" displayType="${displayType}" quickFind="1" pictFormat="5">
 <Name>${esc(fieldRef)}</Name>
 ${extendedAttributes()}${styles ? '\n' + styles : ''}
@@ -123,29 +118,31 @@ function boundsXML(x: number, y: number, w: number, h: number): string {
   return `<Bounds top="${t}.0000000" left="${l}.0000000" bottom="${b}.0000000" right="${r}.0000000"/>`;
 }
 
-function portalObjXML(obj: LayoutObject, startKey: number): { xml: string; nextKey: number } {
+function portalObjXML(obj: LayoutObject, startKey: number, themeInternalName?: string): { xml: string; nextKey: number } {
   const toName = obj.fmName || (obj.children?.[0]?.fieldRef?.split('::')?.[0] ?? '');
   const children = obj.children ?? [];
   const rowHeight = children.length > 0 ? (children[0].height ?? 22) : 22;
   const visibleRows = Math.max(1, Math.floor(obj.height / rowHeight));
 
+  // Normalize child y so the topmost child starts at 0 regardless of stored value
+  const minChildY = children.length > 0 ? Math.min(...children.map(c => c.y)) : 0;
+
   let key = startKey + 1;
   const childXMLs: string[] = [];
   for (const child of children) {
     if (!child.fieldRef) continue;
-    const cb = boundsXML(child.x, child.y, child.width, child.height);
-    const fmType = child.controlStyle ? (CONTROL_STYLE_FM_TYPE[child.controlStyle] ?? 'Field') : 'Field';
-    childXMLs.push(`<Object type="${fmType}" key="${key++}" LabelKey="0" flags="0" rotation="0">
+    const cb = boundsXML(child.x, child.y - minChildY, child.width, child.height);
+    childXMLs.push(`<Object type="Field" key="${key++}" LabelKey="0" flags="1048608" rotation="0">
 ${cb}
-${fieldObjXML(child.fieldRef, child)}
+${fieldObjXML(child.fieldRef, child, themeInternalName)}
 </Object>`);
   }
 
-  const inner = `<PortalObj showScrollBar="1" scrollBarType="1" rows="${visibleRows}" rowHeight="${rowHeight}.0000000" showBorders="0" showHeader="0">
-<TableOccurrenceReference id="0" name="${esc(toName)}"/>
-<ObjectList>
+  const inner = `<PortalObj portalFlags="0" numOfRows="${visibleRows}" initialRow="1">
+<TableAliasKey>${esc(toName)}</TableAliasKey>
+<SortList>
+</SortList>
 ${childXMLs.join('\n')}
-</ObjectList>
 </PortalObj>`;
 
   const bounds = boundsXML(obj.x, obj.y, obj.width, obj.height);
@@ -158,9 +155,9 @@ ${inner}
   return { xml, nextKey: key };
 }
 
-function objectToXML(obj: LayoutObject, key: number): { xml: string; nextKey: number } {
+function objectToXML(obj: LayoutObject, key: number, themeInternalName?: string): { xml: string; nextKey: number } {
   if (obj.type === 'portal') {
-    return portalObjXML(obj, key);
+    return portalObjXML(obj, key, themeInternalName);
   }
 
   const bounds = boundsXML(obj.x, obj.y, obj.width, obj.height);
@@ -169,27 +166,29 @@ function objectToXML(obj: LayoutObject, key: number): { xml: string; nextKey: nu
 
   switch (obj.type) {
     case 'field':
-      fmType = obj.controlStyle ? (CONTROL_STYLE_FM_TYPE[obj.controlStyle] ?? 'Field') : 'Field';
-      inner  = fieldObjXML(obj.fieldRef ?? obj.displayText ?? '', obj);
+      fmType = 'Field';
+      inner  = fieldObjXML(obj.fieldRef ?? obj.displayText ?? '', obj, themeInternalName);
       break;
     case 'button':
       fmType = 'Button';
-      inner  = `${textObj(obj.displayText ?? '', true, obj)}
+      inner  = `${textObj(obj.displayText ?? '', true, obj, themeInternalName)}
 <ButtonObj buttonFlags="0" iconSize="16" displayType="0">
 <Step enable="True" id="0" name=""/>
 </ButtonObj>`;
       break;
-    case 'rectangle':
+    case 'rectangle': {
+      const s = stylesXML(obj, themeInternalName);
       fmType = 'Rectangle';
-      inner  = `<RectObj/>${stylesXML(obj) ? '\n' + stylesXML(obj) : ''}`;
+      inner  = `<RectObj/>${s ? '\n' + s : ''}`;
       break;
+    }
     case 'line':
       fmType = 'Line';
       inner  = '<LineObj/>';
       break;
     default:
       fmType = 'Text';
-      inner  = textObj(obj.displayText ?? '', false, obj);
+      inner  = textObj(obj.displayText ?? '', false, obj, themeInternalName);
   }
 
   const nameAttr = obj.fmName ? ` name="${esc(obj.fmName)}"` : '';
@@ -202,7 +201,7 @@ ${inner}
   };
 }
 
-export function exportToXML(state: LayoutState): string {
+export function exportToXML(state: LayoutState, themeInternalName?: string): string {
   const objects = state.objects;
   if (objects.length === 0) {
     return '<?xml version="1.0" encoding="UTF-8"?>\n<fmxmlsnippet type="LayoutObjectList">\n<Layout enclosingRectTop="0.0000000" enclosingRectLeft="0.0000000" enclosingRectBottom="0.0000000" enclosingRectRight="0.0000000">\n</Layout>\n</fmxmlsnippet>';
@@ -217,7 +216,7 @@ export function exportToXML(state: LayoutState): string {
     minL = Math.min(minL, obj.x);
     maxB = Math.max(maxB, obj.y + obj.height);
     maxR = Math.max(maxR, obj.x + obj.width);
-    const result = objectToXML(obj, key);
+    const result = objectToXML(obj, key, themeInternalName);
     objXML.push(result.xml);
     key = result.nextKey;
   }

@@ -406,6 +406,23 @@ function parseObject(
     return { ...base, tooltip, localStyles, themeClass, imageData, imageFormat };
   }
 
+  // ── Portal ────────────────────────────────────────────────────────────────
+  if (effectiveType === 'portal') {
+    const portalObjEl = objEl.querySelector('PortalObj');
+    const toRefEl     = portalObjEl?.querySelector('TableOccurrenceReference');
+    const toName      = toRefEl ? attr(toRefEl, 'name') : fmName;
+    const children: LayoutObject[] = [];
+    const portalObjList = portalObjEl?.querySelector('ObjectList');
+    if (portalObjList) {
+      for (const childEl of childElements(portalObjList, 'LayoutObject')) {
+        // Child bounds in the XML are relative to the portal row origin (not canvas)
+        const child = parseObject(childEl, 0, 0, uniqueId, popoverPanels);
+        if (child) children.push(child);
+      }
+    }
+    return { ...base, fmName: toName, tooltip, localStyles, themeClass, children };
+  }
+
   // ── Regular object ────────────────────────────────────────────────────────
   let fieldRef: string | undefined;
   const fieldEl = objEl.querySelector('Field > FieldReference');

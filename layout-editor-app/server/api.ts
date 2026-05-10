@@ -200,9 +200,10 @@ async function handleChat(body: { messages: { role: string; content: string }[];
   if (provider === 'anthropic') {
     await proxyStream({
       hostname: 'api.anthropic.com', path: '/v1/messages',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'prompt-caching-2024-07-31' },
       payload: JSON.stringify({ model: model || 'claude-sonnet-4-6', max_tokens: 4096, temperature: 0.3,
-        system: systemMessage, messages: conversation, stream: true }),
+        system: [{ type: 'text', text: systemMessage, cache_control: { type: 'ephemeral' } }],
+        messages: conversation, stream: true }),
       res,
       extractText(e) {
         if (e.type === 'content_block_delta') {
@@ -392,7 +393,7 @@ export function apiMiddleware(): Plugin {
       // /api/docs — layout-relevant knowledge files + theme class reference
       server.middlewares.use('/api/docs', (_req, res) => {
         const knowledgeDir = path.join(agentDir(), 'docs', 'knowledge');
-        const LAYOUT_PATTERN = /layout|theme/i;
+        const LAYOUT_PATTERN = /^layout/i;
         let knowledge = '';
         try {
           const files = fs.readdirSync(knowledgeDir)
@@ -571,7 +572,7 @@ export function apiMiddleware(): Plugin {
         const solution = ctx?.solution as string | undefined;
 
         // Build a map of theme name → { source, cssPath }
-        const themeMap = new Map<string, { source: string; cssPath: string }>();
+        const themeMap = new Map<string, { source: string; cssPath: string; internalName?: string }>();
 
         // Themes from the current context solution: context/{solution}/themes/{ThemeName}/
         if (solution) {
@@ -587,7 +588,8 @@ export function apiMiddleware(): Plugin {
                   ? JSON.parse(fs.readFileSync(manifestPath, 'utf-8'))
                   : null;
                 const name: string = manifest?.theme?.name ?? themeDir.name;
-                themeMap.set(name, { source: 'context', cssPath });
+                const internalName: string | undefined = manifest?.theme?.internalName;
+                themeMap.set(name, { source: 'context', cssPath, internalName });
               } catch { /* malformed manifest — use folder name */ }
             }
           }
@@ -620,9 +622,56 @@ export function apiMiddleware(): Plugin {
         // List all themes
         const themes = [...themeMap.entries()]
           .sort(([a], [b]) => a.localeCompare(b))
-          .map(([name, { source }]) => ({ name, source }));
+          .map(([name, { source, internalName }]) => ({ name, source, internalName }));
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(themes));
+      });
+
+      // List theme class names for a given theme, optionally filtered by FM base type.
+      // GET /api/theme-classes/{ThemeName}?fmType=button
+      // Returns { classes: string[] }
+      server.middlewares.use('/api/theme-classes', (req, res) => {
+        const ctx = readContext();
+        const solution = ctx?.solution as string | undefined;
+        if (!solution || !req.url || req.url === '/') {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ classes: [] }));
+          return;
+        }
+
+        const urlObj = new URL(req.url, 'http://localhost');
+        const rawName = decodeURIComponent(urlObj.pathname.replace(/^\//, ''));
+        const fmTypeFilter = urlObj.searchParams.get('fmType') ?? null;
+
+        const cssPath = path.join(agentDir(), 'context', solution, 'themes', rawName, 'theme-web.css');
+        if (!fs.existsSync(cssPath)) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ classes: [] }));
+          return;
+        }
+
+        const css = fs.readFileSync(cssPath, 'utf-8');
+        // Parse selectors: baseType.namedClass:state .sub
+        const clsRe = /^([\w-]+)\.([\w-]+):(normal|hover|focus|pressed|checked)\s+\.[\w-]+\s*$/gm;
+        const seen = new Map<string, Set<string>>(); // fmType → set of class names
+        let m: RegExpExecArray | null;
+        while ((m = clsRe.exec(css)) !== null) {
+          const [, fmType, cls] = m;
+          if (!seen.has(fmType)) seen.set(fmType, new Set());
+          seen.get(fmType)!.add(cls);
+        }
+
+        let classes: string[];
+        if (fmTypeFilter) {
+          classes = [...(seen.get(fmTypeFilter) ?? [])].sort();
+        } else {
+          const all = new Set<string>();
+          for (const s of seen.values()) s.forEach(c => all.add(c));
+          classes = [...all].sort();
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ classes }));
       });
 
     },

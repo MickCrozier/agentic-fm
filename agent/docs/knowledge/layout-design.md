@@ -15,7 +15,6 @@ The AI chat has access to:
 What is NOT automatically available:
 - Value lists — ask the developer to paste the list of value lists from CONTEXT.json or `value_lists.index`
 - Script names — ask the developer to provide script names from CONTEXT.json or `scripts.index`
-- Theme class names — ask the developer to provide theme class names, or suggest generic ones and note they need verification
 
 ---
 
@@ -174,22 +173,11 @@ Common patterns:
 
 **Always prefer theme style classes over custom CSS.** Objects exported without a theme class get FM's bare default appearance. Objects with a named theme class inherit the solution's full visual language — borders, fills, fonts, hover states — automatically.
 
-When adding or styling objects via layout-patch, always include `themeClass` if the class name is known. Ask the developer for class names when uncertain:
+When adding or styling objects via layout-patch, always include `themeClass` using a class name from the **Theme Classes** section of this prompt. Do not invent or guess class names — only use names that appear in that list. If no theme class list is available, ask the developer:
 
-> "What theme class should I use for this field? Check the Inspector panel when a similar field is selected, or look in `agent/context/{solution}/theme-classes.json`."
+> "What theme class should I use? Check the Inspector panel when a similar field is selected."
 
-Common naming conventions (verify against `theme-classes.json` — names vary per solution):
-
-| Object | Typical class names |
-|--------|-------------------|
-| Edit field | `field-control-bd`, `Data Field`, `Edit Box` |
-| Label | `Field Label`, `Label`, `Section Header` |
-| Primary button | `button-default-bd`, `Primary Button`, `FilledButton` |
-| Secondary button | `Secondary Button`, `Ghost Button` |
-| Portal body | `Portal`, `In-Tab Portal` |
-| Portal row | `Portal Row` |
-| Section background | `Card`, `Panel` |
-| Navigation background | `Navigation Background`, `Header` |
+**Do not use internal type names** (`edit_box`, `text_box`, `portal`, `button`, `line`, `rectangle`) as theme classes — these are FM internal identifiers, not theme style classes, and will not apply any styling.
 
 ### Theme class in layout-patch
 
@@ -231,3 +219,4 @@ Body height: set to contain all content with 20px bottom padding.
 - **Portals at the bottom** of the body, after all header fields
 - **One logical thing per portal** — don't mix unrelated related records in one portal
 - **Don't crowd** — prefer whitespace over packing in more fields
+- **Don't add visual separators between layout parts** — where sections are separated by parts (Header, Body, Footer, etc.), do not add rectangles, lines, or other decorative separators. The part boundary itself defines the section break.

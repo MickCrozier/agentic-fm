@@ -3,6 +3,21 @@ import type { LayoutObject, LayoutState } from '@/xml/import';
 import type { FMStyles } from '@/xml/parseFMCSS';
 import { formatMeasure } from '@/utils/units';
 import type { MeasureUnit } from '@/utils/units';
+import { useThemeClasses } from '@/hooks/useThemeClasses';
+
+const TYPE_THEME_BASE: Record<string, string> = {
+  field:         'edit_box',
+  text:          'text_box',
+  button:        'button',
+  'button-bar':  'button_bar',
+  'popover-btn': 'button',
+  line:          'line',
+  rectangle:     'rectangle',
+  portal:        'portal',
+  'web-viewer':  'web_viewer',
+  container:     'container',
+  'tab-control': 'tab_panel',
+};
 
 const FM_STATES: { label: string; value: string }[] = [
   { label: 'Normal',   value: 'normal' },
@@ -19,15 +34,25 @@ interface InspectorProps {
   onPreviewStateChange?: (s: string) => void;
   onStateChange: (next: LayoutState) => void;
   unit?: MeasureUnit;
+  activeTheme?: string | null;
 }
 
-export function Inspector({ selected, state, previewState = 'normal', onPreviewStateChange, onStateChange, unit = 'pt' }: InspectorProps) {
+export function Inspector({ selected, state, previewState = 'normal', onPreviewStateChange, onStateChange, unit = 'pt', activeTheme }: InspectorProps) {
   const update = useCallback((patch: Partial<LayoutObject>) => {
     if (!selected) return;
     // Check top-level objects
     if (state.objects.some(o => o.id === selected.id)) {
       const objects = state.objects.map(o => o.id === selected.id ? { ...o, ...patch } : o);
       onStateChange({ ...state, objects });
+      return;
+    }
+    // Check portal children
+    const portalUpdated = state.objects.map(o => {
+      if (o.type !== 'portal' || !o.children?.some(c => c.id === selected.id)) return o;
+      return { ...o, children: o.children.map(c => c.id === selected.id ? { ...c, ...patch } : c) };
+    });
+    if (portalUpdated.some((o, i) => o !== state.objects[i])) {
+      onStateChange({ ...state, objects: portalUpdated });
       return;
     }
     // Check popover panel children
@@ -196,7 +221,7 @@ export function Inspector({ selected, state, previewState = 'normal', onPreviewS
       )}
 
       {/* Style */}
-      <StyleSection selected={selected} update={update} />
+      <StyleSection selected={selected} update={update} activeTheme={activeTheme ?? null} />
     </div>
   );
 }
@@ -222,13 +247,21 @@ const ALL_STYLE_KEYS = Object.keys(LOCAL_STYLE_LABELS) as (keyof FMStyles)[];
 interface StyleSectionProps {
   selected: LayoutObject;
   update: (patch: Partial<LayoutObject>) => void;
+  activeTheme: string | null;
 }
 
-function StyleSection({ selected, update }: StyleSectionProps) {
+function toLabel(cls: string): string {
+  return cls.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function StyleSection({ selected, update, activeTheme }: StyleSectionProps) {
   const [addKey, setAddKey] = useState<keyof FMStyles | ''>('');
   const local = selected.localStyles ?? {};
   const localKeys = Object.keys(local) as (keyof FMStyles)[];
   const availableKeys = ALL_STYLE_KEYS.filter(k => !(k in local));
+
+  const fmType = TYPE_THEME_BASE[selected.type] ?? null;
+  const themeClasses = useThemeClasses(activeTheme, fmType);
 
   const setThemeClass = (v: string) => update({ themeClass: v || undefined });
 
@@ -256,13 +289,26 @@ function StyleSection({ selected, update }: StyleSectionProps) {
         {/* Theme class */}
         <div class="flex items-center gap-1.5">
           <span class="text-[9px] px-1 py-0.5 rounded bg-blue-900 text-blue-300 font-medium flex-shrink-0">theme</span>
-          <input
-            type="text"
-            value={selected.themeClass ?? ''}
-            placeholder="class name…"
-            onInput={e => setThemeClass((e.target as HTMLInputElement).value)}
-            class="flex-1 min-w-0 bg-neutral-700 text-neutral-200 text-[10px] font-mono rounded px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-blue-500 placeholder-neutral-600"
-          />
+          {themeClasses.length > 0 ? (
+            <select
+              value={selected.themeClass ?? ''}
+              onChange={e => setThemeClass((e.target as HTMLSelectElement).value)}
+              class="flex-1 min-w-0 bg-neutral-700 text-neutral-200 text-[10px] font-mono rounded px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              <option value="">— default —</option>
+              {themeClasses.map(cls => (
+                <option key={cls} value={cls}>{toLabel(cls)}</option>
+              ))}
+            </select>
+          ) : (
+            <input
+              type="text"
+              value={selected.themeClass ?? ''}
+              placeholder="class name…"
+              onInput={e => setThemeClass((e.target as HTMLInputElement).value)}
+              class="flex-1 min-w-0 bg-neutral-700 text-neutral-200 text-[10px] font-mono rounded px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-blue-500 placeholder-neutral-600"
+            />
+          )}
         </div>
 
         {/* Local style rows */}

@@ -48,6 +48,13 @@ export function Canvas({ state, onStateChange, previewState, onSelect, onSelecti
     if (state.objects.some(o => o.id === id)) {
       const objects = state.objects.map(o => o.id === id ? { ...o, x, y } : o);
       onStateChange({ ...state, objects });
+    } else if (state.objects.some(o => o.children?.some(c => c.id === id))) {
+      // Portal child — coords from useDrag are already portal-relative (origX/Y from child.x/y)
+      const objects = state.objects.map(o => {
+        if (!o.children?.some(c => c.id === id)) return o;
+        return { ...o, children: o.children.map(c => c.id === id ? { ...c, x, y } : c) };
+      });
+      onStateChange({ ...state, objects });
     } else {
       // Popover panel child — coords are panel-relative, store directly
       const popoverPanels = state.popoverPanels.map(panel => {
@@ -229,6 +236,9 @@ export function Canvas({ state, onStateChange, previewState, onSelect, onSelecti
               previewState={selected.has(obj.id) ? previewState : undefined}
               onMouseDown={handleObjMouseDown}
               onDblClick={handleObjDblClick}
+              onChildMouseDown={handleObjMouseDown}
+              childDragPositions={dragPositions}
+              selectedIds={selected}
             />
           );
         })}

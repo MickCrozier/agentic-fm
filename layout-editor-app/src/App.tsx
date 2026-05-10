@@ -16,8 +16,9 @@ import type { LayoutState, LayoutObject } from '@/xml/import';
 const EMPTY: LayoutState = { width: 760, parts: [], objects: [], popoverPanels: [] };
 
 export function App() {
-  const [themes, setThemes] = useState<{ name: string; source: 'default' | 'custom' | 'override' }[]>([]);
+  const [themes, setThemes] = useState<{ name: string; source: 'default' | 'custom' | 'override'; internalName?: string }[]>([]);
   const [activeTheme, setActiveTheme] = useState<string | null>(null);
+  const [activeThemeInternalName, setActiveThemeInternalName] = useState<string | null>(null);
   useThemeCSS(activeTheme);  // theme is always driven by context, not user preference
   const { unit, setUnit } = useUnit();
   const { current: state, push, undo, redo, canUndo, canRedo } = useHistory<LayoutState>(EMPTY);
@@ -110,9 +111,12 @@ export function App() {
     }).catch(() => {});
 
     fetch('/api/themes').then(r => r.ok ? r.json() : [])
-      .then((list: { name: string; source: 'default' | 'custom' | 'override' }[]) => {
+      .then((list: { name: string; source: 'default' | 'custom' | 'override'; internalName?: string }[]) => {
         setThemes(list);
-        if (list.length > 0) setActiveTheme(list[0].name);
+        if (list.length > 0) {
+          setActiveTheme(list[0].name);
+          setActiveThemeInternalName(list[0].internalName ?? null);
+        }
       }).catch(() => {});
 
     const checkContext = async (isFirst: boolean) => {
@@ -144,7 +148,8 @@ export function App() {
     setSelected(prev => {
       if (!prev) return null;
       return next.objects.find(o => o.id === prev.id)
-        ?? next.popoverPanels.flatMap(p => p.children ?? []).find(o => o.id === prev.id)
+        ?? next.objects.flatMap(o => o.children ?? []).find(o => o.id === prev.id)
+          ?? next.popoverPanels.flatMap(p => p.children ?? []).find(o => o.id === prev.id)
         ?? null;
     });
   }, [push]);
@@ -167,7 +172,7 @@ export function App() {
   }, [state, push]);
 
   const handleCopyXML = useCallback(async () => {
-    const xml = exportToXML(state);
+    const xml = exportToXML(state, activeThemeInternalName ?? undefined);
     try {
       const res = await fetch('/api/clipboard', {
         method: 'POST',
@@ -302,7 +307,11 @@ export function App() {
         })}
         themes={themes}
         activeTheme={activeTheme}
-        onThemeChange={setActiveTheme}
+        onThemeChange={(name) => {
+          setActiveTheme(name);
+          const t = themes.find(t => t.name === name);
+          setActiveThemeInternalName(t?.internalName ?? null);
+        }}
         unit={unit}
         onUnitChange={setUnit}
         onUndo={undo}
@@ -370,6 +379,7 @@ export function App() {
               onPreviewStateChange={setPreviewState}
               onStateChange={handleStateChange}
               unit={unit}
+              activeTheme={activeTheme}
             />
           </div>
 

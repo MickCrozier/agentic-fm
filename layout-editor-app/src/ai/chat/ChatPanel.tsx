@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'preact/hooks';
 import { streamChat } from '@/api/client';
 import type { ChatStreamEvent } from '@/api/client';
-import { buildSystemPrompt } from '../prompt/system-prompt';
+import { buildStaticSystemPrompt, buildLayoutStateMessage } from '../prompt/system-prompt';
 import { MessageList } from './MessageList';
 import { extractPatches, applyPatch } from '../patch/patchLayout';
 import type { LayoutState } from '@/xml/import';
@@ -55,13 +55,27 @@ export function ChatPanel({ layoutName, state, customInstructions, availableFiel
     const userMsg: ChatMessage = { role: 'user', content: text };
     setMessages(prev => [...prev, userMsg]);
 
-    const systemPrompt = buildSystemPrompt({ layoutName, state, customInstructions, availableFields });
+    // Static prompt: instructions + fields + docs — eligible for Anthropic prompt caching
+    const staticPrompt = buildStaticSystemPrompt({ customInstructions, availableFields });
+
+    // Layout state injected as a context message so the static prompt stays cacheable
+    const layoutStateMsg = buildLayoutStateMessage({ layoutName, state });
+
+    // Strip layout-patch code blocks from history — large JSON blobs already applied
+    const stripPatches = (content: string) =>
+      content.replace(/```layout-patch[\s\S]*?```/g, '[layout-patch applied]').trim();
+
+    // Cap history to last 8 messages (4 turns) to prevent unbounded growth
+    const HISTORY_LIMIT = 8;
+    const trimmedHistory = messages.slice(-HISTORY_LIMIT);
 
     const apiMessages = sessionId
       ? [{ role: 'user', content: text }]
       : [
-          { role: 'system', content: systemPrompt },
-          ...messages.map(m => ({ role: m.role, content: m.content })),
+          { role: 'system', content: staticPrompt },
+          // Inject current layout state as a synthetic context message
+          ...(layoutStateMsg ? [{ role: 'user', content: layoutStateMsg }, { role: 'assistant', content: 'Understood — I have the current layout state.' }] : []),
+          ...trimmedHistory.map(m => ({ role: m.role, content: stripPatches(m.content) })),
           { role: 'user', content: text },
         ];
 
