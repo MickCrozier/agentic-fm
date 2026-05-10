@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Field Definition snippet (clipboard class: XMFD)
+     Paste into Manage Database > Fields with the target table selected.
+
+     CRITICAL: formula is inline CDATA inside <Calculation table="TO Name">
+     Do NOT use a <Text> child or <TableOccurrenceReference> — those produce an empty calculation. -->
+<fmxmlsnippet type="FMObjectList">
+
+  <Field id="0" dataType="Number" fieldType="Calculated" name="MyCalcField">
+    <Calculation table="MyTable"><![CDATA[PatternCount ( List ( RelatedTable::FieldName ) ; "Value" )]]></Calculation>
+    <Comment/>
+    <AutoEnter alwaysEvaluate="False"/>
+    <Storage storeCalculationResults="False" indexLanguage="English" global="False" maxRepetition="1"/>
+  </Field>
+
+</fmxmlsnippet>

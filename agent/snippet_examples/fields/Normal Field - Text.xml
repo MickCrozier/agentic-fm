@@ -1,0 +1,80 @@
+<?xml version="1.0"?>
+<!-- Field Definition snippet (clipboard class: XMFD)
+     Paste into Manage Database > Fields with the target table selected.
+
+     Auto-enter activation is controlled by boolean ATTRIBUTES on <AutoEnter>:
+       constant="True"    → activates constant data (use <ConstantData>value</ConstantData>)
+       calculation="True" → activates calculation (use <Calculation table="TO">...</Calculation>)
+       lookup="True"      → activates lookup
+     The corresponding child element must also be present.
+
+     Serial auto-enter uses <Serial increment="1" next="1" generate="OnCreation|OnCommit"/>
+     with all boolean attrs set to False.
+
+     CRITICAL: The full <Validation> block with child elements is required — omitting it
+     causes auto-enter settings to be silently ignored on paste. -->
+<fmxmlsnippet type="FMObjectList">
+
+  <!-- Plain text field, no auto-enter -->
+  <Field id="0" dataType="Text" fieldType="Normal" name="MyTextField">
+    <Comment/>
+    <AutoEnter allowEditing="True" overwriteExistingValue="False" alwaysEvaluate="False" constant="False" furigana="False" lookup="False" calculation="False">
+      <ConstantData/>
+    </AutoEnter>
+    <Validation messageCalc="False" message="False" maxLength="False" valuelist="False" calculation="False" alwaysValidateCalculation="False" type="OnlyDuringDataEntry">
+      <NotEmpty value="False"/>
+      <Unique value="False"/>
+      <Existing value="False"/>
+      <StrictValidation value="False"/>
+    </Validation>
+    <Storage autoIndex="True" index="None" indexLanguage="English" global="False" maxRepetition="1"/>
+  </Field>
+
+  <!-- Constant auto-enter -->
+  <Field id="0" dataType="Text" fieldType="Normal" name="Status">
+    <Comment/>
+    <AutoEnter allowEditing="True" overwriteExistingValue="False" alwaysEvaluate="False" constant="True" furigana="False" lookup="False" calculation="False">
+      <ConstantData>Draft</ConstantData>
+    </AutoEnter>
+    <Validation messageCalc="False" message="False" maxLength="False" valuelist="False" calculation="False" alwaysValidateCalculation="False" type="OnlyDuringDataEntry">
+      <NotEmpty value="False"/>
+      <Unique value="False"/>
+      <Existing value="False"/>
+      <StrictValidation value="False"/>
+    </Validation>
+    <Storage autoIndex="True" index="None" indexLanguage="English" global="False" maxRepetition="1"/>
+  </Field>
+
+  <!-- Calculation auto-enter (Date example) -->
+  <Field id="0" dataType="Date" fieldType="Normal" name="InvoiceDate">
+    <Comment/>
+    <AutoEnter allowEditing="True" overwriteExistingValue="False" alwaysEvaluate="False" constant="False" furigana="False" lookup="False" calculation="True">
+      <ConstantData/>
+      <Calculation table="Invoice"><![CDATA[Get(CurrentDate)]]></Calculation>
+    </AutoEnter>
+    <Validation messageCalc="False" message="False" maxLength="False" valuelist="False" calculation="False" alwaysValidateCalculation="False" type="OnlyDuringDataEntry">
+      <NotEmpty value="False"/>
+      <Unique value="False"/>
+      <Existing value="False"/>
+      <StrictValidation value="False"/>
+    </Validation>
+    <Storage autoIndex="True" index="None" indexLanguage="English" global="False" maxRepetition="1"/>
+  </Field>
+
+  <!-- Serial auto-enter -->
+  <Field id="0" dataType="Number" fieldType="Normal" name="InvoiceNumber">
+    <Comment/>
+    <AutoEnter allowEditing="True" overwriteExistingValue="False" alwaysEvaluate="False" constant="False" furigana="False" lookup="False" calculation="False">
+      <ConstantData/>
+      <Serial increment="1" next="1" generate="OnCreation"/>
+    </AutoEnter>
+    <Validation messageCalc="False" message="False" maxLength="False" valuelist="False" calculation="False" alwaysValidateCalculation="False" type="OnlyDuringDataEntry">
+      <NotEmpty value="False"/>
+      <Unique value="False"/>
+      <Existing value="False"/>
+      <StrictValidation value="False"/>
+    </Validation>
+    <Storage autoIndex="True" index="None" indexLanguage="English" global="False" maxRepetition="1"/>
+  </Field>
+
+</fmxmlsnippet>

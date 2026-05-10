@@ -19,6 +19,7 @@ Usage:
 import argparse
 import json
 import logging
+import mimetypes
 import os
 import signal
 import subprocess
@@ -228,9 +229,17 @@ class CompanionHandler(BaseHTTPRequestHandler):
             self._handle_webviewer_status()
         elif self.path == "/clipboard":
             self._handle_clipboard_read()
+        elif self.path == "/context":
+            self._handle_context_read()
+        elif self.path == "/layout":
+            self._handle_layout_read()
+        elif self.path == "/fields":
+            self._handle_fields_read()
         elif self.path.startswith("/preview/"):
             layout_name = self.path[len("/preview/"):]
             self._handle_preview_get(layout_name)
+        elif self.path.startswith("/sandbox/"):
+            self._handle_sandbox_file(self.path[len("/sandbox/"):])
         else:
             self._send_json({"error": "Not found"}, status=404)
 
@@ -355,6 +364,187 @@ class CompanionHandler(BaseHTTPRequestHandler):
             status = 500
 
         self._send_json(response, status=status)
+
+    def _handle_context_read(self):
+        """Return the current CONTEXT.json content."""
+        here = os.path.dirname(os.path.abspath(__file__))
+        repo_root = os.path.join(here, "..", "..")
+        context_path = os.path.join(repo_root, "agent", "CONTEXT.json")
+        if not os.path.isfile(context_path):
+            self._send_json({"error": "No CONTEXT.json found"}, status=404)
+            return
+        try:
+            with open(context_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self._send_json(data)
+        except Exception as exc:
+            self._send_json({"error": str(exc)}, status=500)
+
+    def _handle_layout_read(self):
+        """Return the layout XML for the current layout from CONTEXT.json."""
+        here = os.path.dirname(os.path.abspath(__file__))
+        repo_root = os.path.join(here, "..", "..")
+        context_path = os.path.join(repo_root, "agent", "CONTEXT.json")
+
+        if not os.path.isfile(context_path):
+            self._send_json({"error": "No CONTEXT.json found"}, status=404)
+            return
+
+        try:
+            with open(context_path, "r", encoding="utf-8") as f:
+                ctx = json.load(f)
+        except Exception as exc:
+            self._send_json({"error": str(exc)}, status=500)
+            return
+
+        solution = ctx.get("solution", "")
+        layout = ctx.get("current_layout", {})
+        layout_id = layout.get("id")
+
+        if not solution or not layout_id:
+            self._send_json({"error": "CONTEXT.json missing solution or current_layout.id"}, status=404)
+            return
+
+        layouts_root = os.path.join(repo_root, "agent", "xml_parsed", "layouts", solution)
+        if not os.path.isdir(layouts_root):
+            self._send_json({"error": f"No layouts directory for solution '{solution}'"}, status=404)
+            return
+
+        # Walk recursively to find "... - ID {layout_id}.xml"
+        suffix = f"- ID {layout_id}.xml"
+        found = None
+        for dirpath, _dirs, files in os.walk(layouts_root):
+            for fname in files:
+                if fname.endswith(suffix):
+                    found = os.path.join(dirpath, fname)
+                    break
+            if found:
+                break
+
+        if not found:
+            self._send_json({"error": f"Layout ID {layout_id} not found in {solution}"}, status=404)
+            return
+
+        try:
+            with open(found, "r", encoding="utf-8") as f:
+                xml = f.read()
+            body = xml.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/xml; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except Exception as exc:
+            self._send_json({"error": str(exc)}, status=500)
+
+    def _handle_fields_read(self):
+        """Return a structured list of fields grouped by TO from CONTEXT.json,
+        falling back to fields.index if CONTEXT.json is absent.
+
+        CONTEXT.json tables is a dict keyed by TO name; fields within each table
+        is also a dict keyed by field name. Separator entries (names containing
+        '---') are skipped. The dict already contains only TOs relevant to the
+        current layout (base TO + related TOs), so all keys are shown directly.
+        """
+        here = os.path.dirname(os.path.abspath(__file__))
+        repo_root = os.path.join(here, "..", "..")
+        context_path = os.path.join(repo_root, "agent", "CONTEXT.json")
+
+        tables = []
+
+        # Primary: CONTEXT.json
+        if os.path.isfile(context_path):
+            try:
+                with open(context_path, "r", encoding="utf-8") as f:
+                    ctx = json.load(f)
+                tables_dict = ctx.get("tables", {})
+                base_to = ctx.get("current_layout", {}).get("base_to", "")
+                # Put base TO first, then remaining TOs in sorted order
+                to_names = list(tables_dict.keys())
+                if base_to in to_names:
+                    to_names = [base_to] + sorted(n for n in to_names if n != base_to)
+                else:
+                    to_names = sorted(to_names)
+                for to_name in to_names:
+                    to_data = tables_dict[to_name]
+                    fields_dict = to_data.get("fields", {})
+                    fields = []
+                    for field_name, field_data in fields_dict.items():
+                        # Skip separator entries like "--- CONTACT FIELDS ---"
+                        if "---" in field_name:
+                            continue
+                        if isinstance(field_data, dict):
+                            fid = field_data.get("id", 0)
+                            ftype = field_data.get("type", "")
+                        else:
+                            fid = 0
+                            ftype = ""
+                        fields.append({
+                            "name": field_name,
+                            "id":   fid,
+                            "type": ftype,
+                            "ref":  f"{to_name}::{field_name}",
+                        })
+                    if fields:
+                        tables.append({"table": to_name, "fields": fields})
+                if tables:
+                    self._send_json({"source": "context", "tables": tables})
+                    return
+            except Exception as exc:
+                log.warning("Could not parse CONTEXT.json for fields: %s", exc)
+
+        # Fallback: fields.index scoped to the solution named in CONTEXT.json
+        context_dir = os.path.join(repo_root, "agent", "context")
+        index_file = None
+        solution_name = None
+        if os.path.isfile(context_path):
+            try:
+                with open(context_path, "r", encoding="utf-8") as f:
+                    solution_name = json.load(f).get("solution")
+            except Exception:
+                pass
+        if solution_name:
+            candidate = os.path.join(context_dir, solution_name, "fields.index")
+            if os.path.isfile(candidate):
+                index_file = candidate
+        if not index_file and os.path.isdir(context_dir):
+            # Last resort: first solution folder found
+            for entry in os.scandir(context_dir):
+                candidate = os.path.join(context_dir, entry.name, "fields.index")
+                if os.path.isfile(candidate):
+                    index_file = candidate
+                    break
+
+        if index_file:
+            try:
+                by_table = {}
+                with open(index_file, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line or line.startswith("#"):
+                            continue
+                        parts = line.split("|")
+                        if len(parts) < 3:
+                            continue
+                        # Format: TableName|TableID|FieldName|FieldID|DataType|FieldType|...
+                        tbl  = parts[0]
+                        name = parts[2] if len(parts) > 2 else ""
+                        fid  = parts[3] if len(parts) > 3 else "0"
+                        ftype = parts[4] if len(parts) > 4 else ""
+                        by_table.setdefault(tbl, []).append({
+                            "name": name,
+                            "id":   fid,
+                            "type": ftype,
+                            "ref":  f"{tbl}::{name}",
+                        })
+                for tbl, fields in sorted(by_table.items()):
+                    tables.append({"table": tbl, "fields": fields})
+                self._send_json({"source": "index", "tables": tables})
+                return
+            except Exception as exc:
+                log.warning("Could not parse fields.index: %s", exc)
+
+        self._send_json({"source": "none", "tables": []})
 
     def _handle_context(self):
         try:
@@ -564,6 +754,8 @@ class CompanionHandler(BaseHTTPRequestHandler):
             self._send_json({"success": False, "error": "Missing required field: xml"}, status=400)
             return
 
+        cls = payload.get("class")  # optional FM class override, e.g. "XMSS"
+
         import tempfile
         script_dir = os.path.dirname(os.path.abspath(__file__))
         clipboard_py = os.path.join(script_dir, "clipboard.py")
@@ -575,10 +767,10 @@ class CompanionHandler(BaseHTTPRequestHandler):
                 tmp.write(xml)
                 tmp_path = tmp.name
 
-            result = subprocess.run(
-                ["python3", clipboard_py, "write", tmp_path],
-                capture_output=True, text=True
-            )
+            cmd = ["python3", clipboard_py, "write", tmp_path]
+            if cls:
+                cmd += ["--class", cls]
+            result = subprocess.run(cmd, capture_output=True, text=True)
             os.unlink(tmp_path)
 
             if result.returncode == 0:
@@ -723,16 +915,47 @@ class CompanionHandler(BaseHTTPRequestHandler):
             log.exception("Failed to write agent output: %s", exc)
             self._send_json({"success": False, "error": str(exc)}, status=500)
 
+    def _load_context_theme_css(self, repo_root: str) -> str:
+        """Return the theme-web.css for the current context solution, or empty string."""
+        ctx_path = os.path.join(repo_root, "agent", "CONTEXT.json")
+        try:
+            with open(ctx_path, "r", encoding="utf-8") as f:
+                ctx = json.load(f)
+            solution = ctx.get("solution", "")
+            if not solution:
+                return ""
+            themes_dir = os.path.join(repo_root, "agent", "context", solution, "themes")
+            if not os.path.isdir(themes_dir):
+                return ""
+            for entry in sorted(os.listdir(themes_dir)):
+                css_path = os.path.join(themes_dir, entry, "theme-web.css")
+                if os.path.isfile(css_path):
+                    with open(css_path, "r", encoding="utf-8") as f:
+                        return f.read()
+        except (OSError, json.JSONDecodeError, KeyError):
+            pass
+        return ""
+
+    def _inject_theme(self, html: str, css: str) -> str:
+        """Inject theme CSS into an HTML document before </head>."""
+        if not css:
+            return html
+        tag = f"<style id=\"fm-theme\">\n{css}\n</style>"
+        if "</head>" in html:
+            return html.replace("</head>", f"{tag}\n</head>", 1)
+        return tag + "\n" + html
+
     def _handle_preview_get(self, layout_name: str):
         """
         Serve a layout HTML preview.
 
         GET /preview/<layout_name>
-        Returns: text/html — the preview file, a fallback from .agent-output.json,
-                 or a placeholder message.
+        Returns: text/html — the preview file with the context theme injected,
+                 a fallback from .agent-output.json, or a placeholder message.
         """
         here = os.path.dirname(os.path.abspath(__file__))
         repo_root = os.path.dirname(os.path.dirname(here))
+        theme_css = self._load_context_theme_css(repo_root)
 
         # Look for agent/sandbox/{layout_name}_web.html
         html_path = os.path.join(repo_root, "agent", "sandbox", f"{layout_name}_web.html")
@@ -740,7 +963,7 @@ class CompanionHandler(BaseHTTPRequestHandler):
             try:
                 with open(html_path, "r", encoding="utf-8") as f:
                     content = f.read()
-                self._send_html(content)
+                self._send_html(self._inject_theme(content, theme_css))
                 return
             except OSError as exc:
                 log.warning("Could not read preview file %s: %s", html_path, exc)
@@ -753,7 +976,7 @@ class CompanionHandler(BaseHTTPRequestHandler):
                     data = json.load(f)
                 content = data.get("content", "")
                 if content:
-                    self._send_html(content)
+                    self._send_html(self._inject_theme(content, theme_css))
                     return
             except (OSError, json.JSONDecodeError) as exc:
                 log.warning("Could not read .agent-output.json: %s", exc)
@@ -861,6 +1084,27 @@ class CompanionHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _handle_sandbox_file(self, filename: str):
+        # Prevent path traversal
+        if ".." in filename or filename.startswith("/"):
+            self._send_json({"error": "Forbidden"}, status=403)
+            return
+        here = os.path.dirname(os.path.abspath(__file__))
+        repo_root = os.path.dirname(os.path.dirname(here))
+        file_path = os.path.join(repo_root, "agent", "sandbox", filename)
+        if not os.path.isfile(file_path):
+            self._send_json({"error": f"Not found: {filename}"}, status=404)
+            return
+        mime, _ = mimetypes.guess_type(file_path)
+        mime = mime or "application/octet-stream"
+        with open(file_path, "rb") as f:
+            body = f.read()
+        self.send_response(200)
+        self.send_header("Content-Type", mime)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def _send_html(self, content: str, status: int = 200):
         body = content.encode("utf-8")
         self.send_response(status)
@@ -917,7 +1161,7 @@ def main():
 
     log.info("companion_server v%s listening on %s:%d", VERSION, BIND_HOST, port)
     threading.Thread(target=_check_for_updates, daemon=True).start()
-    log.info("Endpoints: GET /health  GET /clipboard  GET /webviewer/status  GET /preview/<name>  POST /explode  POST /context  POST /clipboard  POST /trigger  POST /debug  POST /webviewer/start  POST /webviewer/stop  POST /webviewer/push  POST /preview/<name>")
+    log.info("Endpoints: GET /health  GET /clipboard  GET /context  GET /layout  GET /fields  GET /webviewer/status  GET /preview/<name>  GET /sandbox/<file>  POST /explode  POST /context  POST /clipboard  POST /trigger  POST /debug  POST /webviewer/start  POST /webviewer/stop  POST /webviewer/push  POST /preview/<name>")
     log.info("Press Ctrl-C to stop.")
 
     try:

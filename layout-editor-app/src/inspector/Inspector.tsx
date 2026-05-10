@@ -1,0 +1,354 @@
+import { useCallback, useState } from 'preact/hooks';
+import type { LayoutObject, LayoutState } from '@/xml/import';
+import type { FMStyles } from '@/xml/parseFMCSS';
+import { formatMeasure } from '@/utils/units';
+import type { MeasureUnit } from '@/utils/units';
+import { useThemeClasses } from '@/hooks/useThemeClasses';
+
+const TYPE_THEME_BASE: Record<string, string> = {
+  field:         'edit_box',
+  text:          'text_box',
+  button:        'button',
+  'button-bar':  'button_bar',
+  'popover-btn': 'button',
+  line:          'line',
+  rectangle:     'rectangle',
+  portal:        'portal',
+  'web-viewer':  'web_viewer',
+  container:     'container',
+  'tab-control': 'tab_panel',
+};
+
+const FM_STATES: { label: string; value: string }[] = [
+  { label: 'Normal',   value: 'normal' },
+  { label: 'Hover',    value: 'hover' },
+  { label: 'Pressed',  value: 'pressed' },
+  { label: 'Active',   value: 'checked' },
+  { label: 'Focus',    value: 'focus' },
+];
+
+interface InspectorProps {
+  selected: LayoutObject | null;
+  state: LayoutState;
+  previewState?: string;
+  onPreviewStateChange?: (s: string) => void;
+  onStateChange: (next: LayoutState) => void;
+  unit?: MeasureUnit;
+  activeTheme?: string | null;
+}
+
+export function Inspector({ selected, state, previewState = 'normal', onPreviewStateChange, onStateChange, unit = 'pt', activeTheme }: InspectorProps) {
+  const update = useCallback((patch: Partial<LayoutObject>) => {
+    if (!selected) return;
+    // Check top-level objects
+    if (state.objects.some(o => o.id === selected.id)) {
+      const objects = state.objects.map(o => o.id === selected.id ? { ...o, ...patch } : o);
+      onStateChange({ ...state, objects });
+      return;
+    }
+    // Check portal children
+    const portalUpdated = state.objects.map(o => {
+      if (o.type !== 'portal' || !o.children?.some(c => c.id === selected.id)) return o;
+      return { ...o, children: o.children.map(c => c.id === selected.id ? { ...c, ...patch } : c) };
+    });
+    if (portalUpdated.some((o, i) => o !== state.objects[i])) {
+      onStateChange({ ...state, objects: portalUpdated });
+      return;
+    }
+    // Check popover panel children
+    const popoverPanels = state.popoverPanels.map(panel => {
+      if (!panel.children?.some(c => c.id === selected.id)) return panel;
+      return { ...panel, children: panel.children.map(c => c.id === selected.id ? { ...c, ...patch } : c) };
+    });
+    onStateChange({ ...state, popoverPanels });
+  }, [selected, state, onStateChange]);
+
+  const numInput = (label: string, value: number, onChange: (v: number) => void, u: MeasureUnit = 'pt') => (
+    <label class="flex items-center gap-1">
+      <span class="text-neutral-500 w-4 text-right text-[10px]">{label}</span>
+      <input
+        type="number"
+        value={value}
+        onInput={e => onChange(parseInt((e.target as HTMLInputElement).value, 10) || 0)}
+        class="w-16 bg-neutral-700 text-neutral-200 text-xs rounded px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-blue-500"
+      />
+      {u !== 'pt' && (
+        <span class="text-neutral-600 text-[10px]">{formatMeasure(value, u)}</span>
+      )}
+    </label>
+  );
+
+  const textInput = (label: string, value: string, onChange: (v: string) => void) => (
+    <div>
+      <div class="text-[10px] text-neutral-500 uppercase tracking-wide mb-0.5">{label}</div>
+      <input
+        type="text"
+        value={value}
+        onInput={e => onChange((e.target as HTMLInputElement).value)}
+        class="w-full bg-neutral-700 text-neutral-200 text-xs rounded px-2 py-1 outline-none focus:ring-1 focus:ring-blue-500"
+      />
+    </div>
+  );
+
+  const calcInput = (label: string, value: string, onChange: (v: string) => void) => (
+    <div>
+      <div class="text-[10px] text-neutral-500 uppercase tracking-wide mb-0.5">{label}</div>
+      <textarea
+        value={value}
+        onInput={e => onChange((e.target as HTMLTextAreaElement).value)}
+        rows={2}
+        class="w-full bg-neutral-700 text-neutral-200 text-xs rounded px-2 py-1 outline-none focus:ring-1 focus:ring-blue-500 font-mono resize-none"
+      />
+    </div>
+  );
+
+  if (!selected) {
+    return (
+      <div class="px-3 py-3 text-xs text-neutral-600 italic">
+        No object selected
+      </div>
+    );
+  }
+
+  const showDisplayText  = selected.type === 'button' || selected.type === 'text';
+  const showFieldRef     = selected.type === 'field' || selected.type === 'container';
+
+  return (
+    <div class="px-3 py-2 text-xs space-y-2.5 overflow-y-auto max-h-full">
+      {/* Type badge + state picker */}
+      <div class="flex items-center gap-2 flex-wrap">
+        <span class="text-[10px] font-semibold uppercase tracking-wide text-neutral-400 bg-neutral-700 rounded px-1.5 py-0.5">
+          {selected.type}
+        </span>
+        <span class="text-neutral-600 text-[10px]">FM #{selected.fmId}</span>
+        <div class="flex gap-0.5 ml-auto">
+          {FM_STATES.map(({ label, value }) => (
+            <button
+              key={value}
+              onClick={() => onPreviewStateChange?.(value)}
+              class={`text-[9px] px-1.5 py-0.5 rounded ${
+                previewState === value
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-neutral-700 text-neutral-400 hover:text-neutral-200'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Object name */}
+      {textInput('Object Name', selected.fmName, v => update({ fmName: v }))}
+
+      {/* Field ref (read-only display) */}
+      {showFieldRef && selected.fieldRef && (
+        <div>
+          <div class="text-[10px] text-neutral-500 uppercase tracking-wide mb-0.5">Field</div>
+          <div class="text-blue-300 bg-neutral-800 rounded px-2 py-1 font-mono text-[10px] truncate" title={selected.fieldRef}>
+            {selected.fieldRef}
+          </div>
+        </div>
+      )}
+
+      {/* Display text for buttons and text labels */}
+      {showDisplayText && textInput('Text', selected.displayText ?? '', v => update({ displayText: v }))}
+
+      {/* Tooltip */}
+      {calcInput('Tooltip', selected.tooltip ?? '', v => update({ tooltip: v || undefined }))}
+
+      {/* Hide condition */}
+      {calcInput('Hide Condition', selected.hideCondition ?? '', v => update({ hideCondition: v || undefined }))}
+
+      {selected.type === 'line' && selected.lineEnd ? (
+        <>
+          <div>
+            <div class="text-[10px] text-neutral-500 uppercase tracking-wide mb-1">Start</div>
+            <div class="flex flex-wrap gap-2">
+              {numInput('X', selected.x, v => update({ x: v }), unit)}
+              {numInput('Y', selected.y, v => update({ y: v }), unit)}
+            </div>
+          </div>
+          <div>
+            <div class="text-[10px] text-neutral-500 uppercase tracking-wide mb-1">End</div>
+            <div class="flex flex-wrap gap-2">
+              {numInput('X', selected.lineEnd.x, v => update({ lineEnd: { ...selected.lineEnd!, x: v } }), unit)}
+              {numInput('Y', selected.lineEnd.y, v => update({ lineEnd: { ...selected.lineEnd!, y: v } }), unit)}
+            </div>
+          </div>
+        </>
+      ) : (
+        <>
+          {/* Position */}
+          <div>
+            <div class="text-[10px] text-neutral-500 uppercase tracking-wide mb-1">Position</div>
+            <div class="flex flex-wrap gap-2">
+              {numInput('X', selected.x, v => update({ x: v }), unit)}
+              {numInput('Y', selected.y, v => update({ y: v }), unit)}
+            </div>
+          </div>
+
+          {/* Size */}
+          <div>
+            <div class="text-[10px] text-neutral-500 uppercase tracking-wide mb-1">Size</div>
+            <div class="flex flex-wrap gap-2">
+              {numInput('W', selected.width,  v => update({ width: v }), unit)}
+              {numInput('H', selected.height, v => update({ height: v }), unit)}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Image format */}
+      {selected.type === 'image' && selected.imageFormat && (
+        <div>
+          <div class="text-[10px] text-neutral-500 uppercase tracking-wide mb-1">Image</div>
+          <div class="space-y-0.5 text-[10px]">
+            <div class="text-neutral-300">
+              {selected.imageFormat.reduce && selected.imageFormat.enlarge ? 'Reduce or Enlarge to Fit'
+                : selected.imageFormat.reduce ? 'Reduce to Fit'
+                : selected.imageFormat.enlarge ? 'Enlarge to Fit'
+                : 'Crop to Frame'}
+            </div>
+            <div class="text-neutral-500">
+              {selected.imageFormat.maintainProportions ? 'Maintain Proportions' : 'Stretch to Fill'}
+            </div>
+            <div class="text-neutral-500">
+              H: {selected.imageFormat.hAlign} · V: {selected.imageFormat.vAlign}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Style */}
+      <StyleSection selected={selected} update={update} activeTheme={activeTheme ?? null} />
+    </div>
+  );
+}
+
+const LOCAL_STYLE_LABELS: Partial<Record<keyof FMStyles, string>> = {
+  backgroundColor: 'Fill',
+  color:           'Text color',
+  fontSize:        'Font size',
+  fontWeight:      'Weight',
+  fontFamily:      'Font',
+  textAlign:       'Align',
+  verticalAlign:   'V-align',
+  borderRadius:    'Corner radius',
+  boxShadow:       'Shadow',
+  borderTopWidth:      'Border top',
+  borderRightWidth:    'Border right',
+  borderBottomWidth:   'Border bottom',
+  borderLeftWidth:     'Border left',
+};
+
+const ALL_STYLE_KEYS = Object.keys(LOCAL_STYLE_LABELS) as (keyof FMStyles)[];
+
+interface StyleSectionProps {
+  selected: LayoutObject;
+  update: (patch: Partial<LayoutObject>) => void;
+  activeTheme: string | null;
+}
+
+function toLabel(cls: string): string {
+  return cls.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function StyleSection({ selected, update, activeTheme }: StyleSectionProps) {
+  const [addKey, setAddKey] = useState<keyof FMStyles | ''>('');
+  const local = selected.localStyles ?? {};
+  const localKeys = Object.keys(local) as (keyof FMStyles)[];
+  const availableKeys = ALL_STYLE_KEYS.filter(k => !(k in local));
+
+  const fmType = TYPE_THEME_BASE[selected.type] ?? null;
+  const themeClasses = useThemeClasses(activeTheme, fmType);
+
+  const setThemeClass = (v: string) => update({ themeClass: v || undefined });
+
+  const setLocalProp = (key: keyof FMStyles, val: string) => {
+    update({ localStyles: { ...local, [key]: val } });
+  };
+
+  const removeLocalProp = (key: keyof FMStyles) => {
+    const next = { ...local };
+    delete next[key];
+    update({ localStyles: Object.keys(next).length ? next : undefined });
+  };
+
+  const handleAdd = (key: keyof FMStyles | '') => {
+    if (!key) return;
+    update({ localStyles: { ...local, [key]: '' } });
+    setAddKey('');
+  };
+
+  return (
+    <div>
+      <div class="text-[10px] text-neutral-500 uppercase tracking-wide mb-1">Style</div>
+      <div class="space-y-1.5">
+
+        {/* Theme class */}
+        <div class="flex items-center gap-1.5">
+          <span class="text-[9px] px-1 py-0.5 rounded bg-blue-900 text-blue-300 font-medium flex-shrink-0">theme</span>
+          {themeClasses.length > 0 ? (
+            <select
+              value={selected.themeClass ?? ''}
+              onChange={e => setThemeClass((e.target as HTMLSelectElement).value)}
+              class="flex-1 min-w-0 bg-neutral-700 text-neutral-200 text-[10px] font-mono rounded px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              <option value="">— default —</option>
+              {themeClasses.map(cls => (
+                <option key={cls} value={cls}>{toLabel(cls)}</option>
+              ))}
+            </select>
+          ) : (
+            <input
+              type="text"
+              value={selected.themeClass ?? ''}
+              placeholder="class name…"
+              onInput={e => setThemeClass((e.target as HTMLInputElement).value)}
+              class="flex-1 min-w-0 bg-neutral-700 text-neutral-200 text-[10px] font-mono rounded px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-blue-500 placeholder-neutral-600"
+            />
+          )}
+        </div>
+
+        {/* Local style rows */}
+        {localKeys.map(key => (
+          <div key={key} class="flex items-center gap-1.5">
+            <span class="text-[9px] px-1 py-0.5 rounded bg-amber-900 text-amber-300 font-medium flex-shrink-0">local</span>
+            <span class="text-neutral-500 text-[10px] w-20 flex-shrink-0 truncate" title={LOCAL_STYLE_LABELS[key] ?? key}>
+              {LOCAL_STYLE_LABELS[key] ?? key}
+            </span>
+            <input
+              type="text"
+              value={String(local[key])}
+              onInput={e => setLocalProp(key, (e.target as HTMLInputElement).value)}
+              class="flex-1 min-w-0 bg-neutral-700 text-neutral-200 text-[10px] font-mono rounded px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-amber-500"
+            />
+            <button
+              onClick={() => removeLocalProp(key)}
+              class="text-neutral-600 hover:text-red-400 text-[10px] px-0.5 flex-shrink-0"
+              title="Remove"
+            >×</button>
+          </div>
+        ))}
+
+        {/* Add property */}
+        {availableKeys.length > 0 && (
+          <div class="flex items-center gap-1.5">
+            <span class="text-[9px] px-1 py-0.5 rounded bg-neutral-700 text-neutral-500 font-medium flex-shrink-0">add</span>
+            <select
+              value={addKey}
+              onChange={e => handleAdd((e.target as HTMLSelectElement).value as keyof FMStyles | '')}
+              class="flex-1 min-w-0 bg-neutral-700 text-neutral-400 text-[10px] rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              <option value="">property…</option>
+              {availableKeys.map(k => (
+                <option key={k} value={k}>{LOCAL_STYLE_LABELS[k] ?? k}</option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
