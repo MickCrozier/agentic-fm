@@ -408,7 +408,8 @@ function parseObject(
 
   // ── Portal ────────────────────────────────────────────────────────────────
   if (effectiveType === 'portal') {
-    const portalObjEl = objEl.querySelector('PortalObj');
+    // FM layout XML uses <Portal>; fmxmlsnippet format uses <PortalObj>
+    const portalObjEl = objEl.querySelector('PortalObj') ?? objEl.querySelector('Portal');
     const toRefEl     = portalObjEl?.querySelector('TableOccurrenceReference');
     const toName      = toRefEl ? attr(toRefEl, 'name') : fmName;
     const children: LayoutObject[] = [];
