@@ -294,14 +294,6 @@ function findLayoutXML(layoutName: string, layoutId: number, solution?: string):
   return null;
 }
 
-// ── Agent state sync ─────────────────────────────────────────────────────────
-// Allows external agents to GET the current layout state and POST a modified
-// version back. The client pushes its state on every change; incoming state
-// from an agent is held here until the client polls and picks it up.
-
-let currentState: unknown = null;
-let incomingState: unknown = null;
-
 export function apiMiddleware(): Plugin {
   return {
     name: 'layout-editor-api',
@@ -633,55 +625,6 @@ export function apiMiddleware(): Plugin {
           .map(([name, { source, internalName }]) => ({ name, source, internalName }));
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(themes));
-      });
-
-      // Agent state sync — GET/POST /api/state and /api/state/incoming
-      server.middlewares.use('/api/state/incoming', async (req, res) => {
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        if (req.method === 'POST') {
-          try {
-            incomingState = JSON.parse(await readBody(req));
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ ok: true }));
-          } catch (e) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: String(e) }));
-          }
-          return;
-        }
-        // GET — return pending state and clear it
-        if (incomingState !== null) {
-          const payload = incomingState;
-          incomingState = null;
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ state: payload }));
-        } else {
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ state: null }));
-        }
-      });
-
-      server.middlewares.use('/api/state', async (req, res) => {
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        if (req.method === 'POST') {
-          try {
-            currentState = JSON.parse(await readBody(req));
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ ok: true }));
-          } catch (e) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: String(e) }));
-          }
-          return;
-        }
-        // GET — return current state as seen by the client
-        if (currentState !== null) {
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify(currentState));
-        } else {
-          res.writeHead(404, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'No state received from client yet' }));
-        }
       });
 
       // List theme class names for a given theme, optionally filtered by FM base type.

@@ -47,11 +47,6 @@ ALLOWED_IPS = os.environ.get(
     "127.0.0.1,172.17.0.0/16,172.18.0.0/16,172.19.0.0/16,172.20.0.0/16,192.168.0.0/16"
 ).split(",")
 
-# When set, clipboard reads/writes are proxied to the host clipboard server
-# instead of invoking clipboard.py directly. Set this in devcontainer.json:
-#   "remoteEnv": { "CLIPBOARD_SERVER_URL": "http://host.docker.internal:8766" }
-CLIPBOARD_SERVER_URL = os.environ.get("CLIPBOARD_SERVER_URL", "").rstrip("/")
-
 def _ip_in_range(ip: str, cidr: str) -> bool:
     """Check if an IP is within a CIDR range."""
     try:
@@ -717,33 +712,10 @@ class CompanionHandler(BaseHTTPRequestHandler):
             self._send_json({"success": False, "error": str(exc)}, status=500)
 
     def _handle_clipboard_read(self):
-        """Read FM objects from the clipboard and return as XML.
-
-        Proxies to CLIPBOARD_SERVER_URL when set (dev container mode),
-        otherwise invokes clipboard.py directly (native macOS mode).
-        """
-        if CLIPBOARD_SERVER_URL:
-            try:
-                req = urllib.request.Request(f"{CLIPBOARD_SERVER_URL}/clipboard")
-                with urllib.request.urlopen(req, timeout=10) as resp:
-                    data = json.loads(resp.read())
-                status = 200 if data.get("success") else 404
-                self._send_json(data, status=status)
-                log.info("Clipboard read via host server: success=%s", data.get("success"))
-            except urllib.error.HTTPError as exc:
-                body = exc.read()
-                try:
-                    data = json.loads(body)
-                except Exception:
-                    data = {"success": False, "error": str(exc)}
-                self._send_json(data, status=exc.code)
-            except Exception as exc:
-                log.exception("Clipboard proxy read error: %s", exc)
-                self._send_json({"success": False, "error": str(exc)}, status=500)
-            return
-
+        """Read FM objects from the macOS clipboard and return as XML."""
         script_dir = os.path.dirname(os.path.abspath(__file__))
         clipboard_py = os.path.join(script_dir, "clipboard.py")
+
         try:
             result = subprocess.run(
                 ["python3", clipboard_py, "read"],
@@ -760,17 +732,16 @@ class CompanionHandler(BaseHTTPRequestHandler):
                     status=404 if "No FileMaker" in error else 500,
                 )
         except subprocess.TimeoutExpired:
-            self._send_json({"success": False, "error": "Clipboard read timed out"}, status=500)
+            self._send_json(
+                {"success": False, "error": "Clipboard read timed out"},
+                status=500,
+            )
         except Exception as exc:
             log.exception("Clipboard read error: %s", exc)
             self._send_json({"success": False, "error": str(exc)}, status=500)
 
     def _handle_clipboard(self):
-        """Write XML to the clipboard.
-
-        Proxies to CLIPBOARD_SERVER_URL when set (dev container mode),
-        otherwise invokes clipboard.py directly (native macOS mode).
-        """
+        """Accept XML content and write it to the macOS clipboard via clipboard.py."""
         try:
             body = self._read_body()
             payload = json.loads(body)
@@ -784,31 +755,6 @@ class CompanionHandler(BaseHTTPRequestHandler):
             return
 
         cls = payload.get("class")  # optional FM class override, e.g. "XMSS"
-
-        if CLIPBOARD_SERVER_URL:
-            try:
-                body_out = json.dumps({"xml": xml, **({"class": cls} if cls else {})}).encode("utf-8")
-                req = urllib.request.Request(
-                    f"{CLIPBOARD_SERVER_URL}/clipboard",
-                    data=body_out,
-                    headers={"Content-Type": "application/json"},
-                    method="POST",
-                )
-                with urllib.request.urlopen(req, timeout=10) as resp:
-                    data = json.loads(resp.read())
-                self._send_json(data)
-                log.info("Clipboard write via host server: success=%s", data.get("success"))
-            except urllib.error.HTTPError as exc:
-                body_err = exc.read()
-                try:
-                    data = json.loads(body_err)
-                except Exception:
-                    data = {"success": False, "error": str(exc)}
-                self._send_json(data, status=exc.code)
-            except Exception as exc:
-                log.exception("Clipboard proxy write error: %s", exc)
-                self._send_json({"success": False, "error": str(exc)}, status=500)
-            return
 
         import tempfile
         script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -1214,10 +1160,6 @@ def main():
     server = ThreadingHTTPServer((BIND_HOST, port), CompanionHandler)
 
     log.info("companion_server v%s listening on %s:%d", VERSION, BIND_HOST, port)
-    if CLIPBOARD_SERVER_URL:
-        log.info("Clipboard mode: proxy → %s", CLIPBOARD_SERVER_URL)
-    else:
-        log.info("Clipboard mode: local (clipboard.py)")
     threading.Thread(target=_check_for_updates, daemon=True).start()
     log.info("Endpoints: GET /health  GET /clipboard  GET /context  GET /layout  GET /fields  GET /webviewer/status  GET /preview/<name>  GET /sandbox/<file>  POST /explode  POST /context  POST /clipboard  POST /trigger  POST /debug  POST /webviewer/start  POST /webviewer/stop  POST /webviewer/push  POST /preview/<name>")
     log.info("Press Ctrl-C to stop.")

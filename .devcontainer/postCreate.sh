@@ -1,10 +1,6 @@
 #!/usr/bin/env bash
 set -e
 
-# Install system dependencies
-sudo apt-get update -qq --allow-insecure-repositories 2>/dev/null || true
-sudo apt-get install -y --no-install-recommends libxml2-utils
-
 # Fix ownership of mounted host directories
 sudo chown -R vscode:vscode /home/vscode/.claude /home/vscode/.config/gh 2>/dev/null || true
 
