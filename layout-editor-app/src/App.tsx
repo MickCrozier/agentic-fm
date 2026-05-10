@@ -103,6 +103,15 @@ export function App() {
     } catch { /* quota */ }
   }, [state]);
 
+  // Push current state to server so agents can read it via GET /api/state
+  useEffect(() => {
+    if (state.objects.length === 0 && state.parts.length === 0) return;
+    const t = setTimeout(() => {
+      fetch('/api/state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(state) }).catch(() => {});
+    }, 300);
+    return () => clearTimeout(t);
+  }, [state]);
+
   // Initial load + context polling for layout changes
   useEffect(() => {
     Promise.all([fetchLayoutInstructions(), fetchLayoutDocs()]).then(([instructions, docs]) => {
@@ -153,6 +162,19 @@ export function App() {
         ?? null;
     });
   }, [push]);
+
+  // Poll for incoming state posted by an agent via POST /api/state/incoming
+  useEffect(() => {
+    const poll = setInterval(async () => {
+      try {
+        const r = await fetch('/api/state/incoming');
+        if (!r.ok) return;
+        const { state: incoming } = await r.json();
+        if (incoming) handleStateChange(incoming as LayoutState);
+      } catch { /* ignore */ }
+    }, 1500);
+    return () => clearInterval(poll);
+  }, [handleStateChange]);
 
   const handleAddObject = useCallback((spec: Partial<LayoutObject>, x: number, y: number) => {
     const newObj: LayoutObject = {
