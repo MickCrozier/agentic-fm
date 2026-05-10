@@ -66,10 +66,11 @@ pnpm-lock.yaml
 
 # Environment Variables
 .env
-
-# All local files
-*.local.*
-*.local
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env*.local
 
 # Build Output
 .astro/
@@ -152,6 +153,3 @@ $RECYCLE.BIN/
 # Git
 *.orig
 *.rej
-
-agent/themes/MidTown.css
-agent/themes/defaults/Universal Touch.css
