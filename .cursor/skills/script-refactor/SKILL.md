@@ -30,7 +30,7 @@ If neither exists, convert the SaXML version to fmxmlsnippet:
 python3 agent/scripts/fm_xml_to_snippet.py "agent/xml_parsed/scripts/{solution}/{path}.xml" "agent/sandbox/{ScriptName}.xml"
 ```
 
-Read `agent/CONTEXT.json` or index files for any field/layout/script references needed.
+Use the plugin (`GET /api/context`) for field/layout/script references. Fall back to `agent/CONTEXT.json` or index files if plugin is unavailable.
 
 ---
 
@@ -53,20 +53,30 @@ This returns lines like:
 - `Perform Script [ "Subscript B" ]` — extract `Subscript B`
 - `Perform Script By Name [ ... ]` — flag as unresolvable (calculated name)
 
-### 3b. Batch-resolve names to file paths
+### 3b. Batch-resolve names to IDs and file paths
 
-Take ALL extracted script names and resolve them to file paths in a **single grep** against the scripts index:
+Resolve all extracted script names to IDs using the plugin context (preferred) or index fallback:
 
+**Plugin (preferred):**
+```bash
+curl -s -H "Authorization: Bearer $(grep AGFM_PLUGIN_TOKEN /workspaces/agentic-fm/.env.local | cut -d= -f2)" \
+  $(grep AGFM_PLUGIN_URL /workspaces/agentic-fm/.env.local | cut -d= -f2)/api/context | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+for name, info in d.get('scripts', {}).items():
+    print(f\"{info.get('id')}|{name}\")
+" | grep -iE "Subscript A|Subscript B|Subscript C"
+```
+
+**Index fallback (if plugin unavailable):**
 ```bash
 grep -E "Subscript A|Subscript B|Subscript C" "agent/context/{solution}/scripts.index"
 ```
 
-This returns pipe-delimited rows (`ScriptName|ScriptID|FolderPath`) for every match. From each row, derive the sanitized file path:
-
-- **With folder path**: `agent/xml_parsed/scripts_sanitized/{solution}/{FolderPath}*/{ScriptName} - ID {ScriptID}.txt`
-- **Top-level** (empty folder path): `agent/xml_parsed/scripts_sanitized/{solution}/{ScriptName} - ID {ScriptID}.txt`
-
-Since folder directory names include an ID suffix not in the index, use a glob to resolve the exact path if needed.
+From the results, derive the sanitized file path using a glob:
+```bash
+find "agent/xml_parsed/scripts_sanitized/{solution}" -name "*ID {ScriptID}*" -type f | head -1
+```
 
 ### 3c. Parallel-read ALL subscripts
 
@@ -174,7 +184,7 @@ Work from the fmxmlsnippet base in `agent/sandbox/`. Apply only the targeted cha
 Follow all output rules from CLAUDE.md:
 - Steps only within `<fmxmlsnippet type="FMObjectList">` — no `<Script>` wrapper
 - Use step catalog for step structure, not xml_parsed verbose format
-- Validate all field/layout/script references against CONTEXT.json or index files
+- Validate all field/layout/script references against the plugin (`GET /api/context`), or CONTEXT.json/index files if plugin unavailable
 
 Run the validator:
 

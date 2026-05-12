@@ -35,7 +35,15 @@ Look up the script source from `agent/xml_parsed/scripts_sanitized/` and read th
 Before forming hypotheses, load the full call tree — the bug may be in a subscript.
 
 1. **Extract Perform Script references** — scan the human-readable script for all `Perform Script` lines. Extract every target script name.
-2. **Load each subscript** — locate and read each subscript's human-readable version from `scripts_sanitized/`. Use the scripts index: `grep "ScriptName" "agent/context/{solution}/scripts.index"`
+2. **Load each subscript** — locate and read each subscript's human-readable version from `scripts_sanitized/`. Resolve name→ID via plugin (preferred):
+   ```bash
+   curl -s -H "Authorization: Bearer $(grep AGFM_PLUGIN_TOKEN /workspaces/agentic-fm/.env.local | cut -d= -f2)" \
+     $(grep AGFM_PLUGIN_URL /workspaces/agentic-fm/.env.local | cut -d= -f2)/api/context | python3 -c "
+   import sys, json; d=json.load(sys.stdin)
+   for n,i in d.get('scripts',{}).items(): print(f\"{i.get('id')}|{n}\")
+   " | grep -i "ScriptName"
+   ```
+   Index fallback: `grep "ScriptName" "agent/context/{solution}/scripts.index"`
 3. **Recurse** — each subscript may call further subscripts. Repeat until no new references are found. Track visited scripts to avoid cycles.
 4. **Present the call tree**:
 
@@ -106,10 +114,15 @@ Perform Script [ "Agentic-fm Debug" ; Parameter: JSONSetElement ( "{}" ;
 
 **Important**: the error capture `Set Variable` must be the **very next step** after the risky step. Do not insert a comment step or any other step between them — it would clear the error state.
 
-Look up the Agentic-fm Debug script ID from CONTEXT.json or the scripts index:
+Look up the Agentic-fm Debug script ID from the plugin (preferred) or index fallback:
 
 ```bash
-grep "Agentic-fm Debug" "agent/context/{solution}/scripts.index"
+curl -s -H "Authorization: Bearer $(grep AGFM_PLUGIN_TOKEN /workspaces/agentic-fm/.env.local | cut -d= -f2)" \
+  $(grep AGFM_PLUGIN_URL /workspaces/agentic-fm/.env.local | cut -d= -f2)/api/context | python3 -c "
+import sys, json; d=json.load(sys.stdin)
+for n,i in d.get('scripts',{}).items(): print(f\"{i.get('id')}|{n}\")
+" | grep -i "Agentic-fm Debug"
+# Fallback: grep "Agentic-fm Debug" "agent/context/{solution}/scripts.index"
 ```
 
 Generate the instrumented script as fmxmlsnippet in `agent/sandbox/` and validate:

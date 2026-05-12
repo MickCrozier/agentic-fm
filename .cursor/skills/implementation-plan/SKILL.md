@@ -25,17 +25,22 @@ Decompose a script or feature request into a structured plan before generating a
 
 ## Step 1: Gather context
 
-Read `agent/CONTEXT.json` if it exists. Extract:
+Fetch live context from the plugin:
 
+```bash
+curl -s -H "Authorization: Bearer $(grep AGFM_PLUGIN_TOKEN /workspaces/agentic-fm/.env.local | cut -d= -f2)" \
+  $(grep AGFM_PLUGIN_URL /workspaces/agentic-fm/.env.local | cut -d= -f2)/api/context
+```
+
+Extract:
 - `task` — the developer's description of what to build
 - `current_layout` — the starting layout context (name, base TO)
 - `tables` — available tables and their fields
-- `relationships` — how tables connect (needed for Go to Related Record, portal context)
 - `scripts` — existing scripts that may need to be called
 - `layouts` — layouts that may need to be navigated to
 - `value_lists` — value lists that may be referenced
 
-If CONTEXT.json is absent or stale (doesn't match the developer's request), suggest running Push Context on the relevant layout before proceeding.
+**Verify context matches the request** — check `solution`, `current_layout.name`, and `task`. If mismatched, say so before proceeding. Fall back to `agent/CONTEXT.json` if the plugin is unavailable.
 
 ---
 
@@ -84,15 +89,15 @@ After the outline, explicitly call out:
 
 ### Objects needed
 List every FM object the script will reference, with where to find the ID:
-- Fields: table::field (from CONTEXT.json or fields.index)
-- Layouts: name (from CONTEXT.json or layouts.index)
-- Scripts: name (from CONTEXT.json or scripts.index)
+- Fields: table::field (from plugin `/api/context`, or CONTEXT.json/fields.index as fallback)
+- Layouts: name (from plugin, or layouts.index)
+- Scripts: name (from plugin, or scripts.index)
 - Value lists, custom functions if applicable
 
 ### Missing context
-If the plan requires objects not in CONTEXT.json, say so:
-- "This script references the Staff table but CONTEXT.json is scoped to Invoices — suggest running Push Context on a layout with Staff access"
-- "Script 'Send Email' is not in CONTEXT.json — check scripts.index or ask the developer"
+If the plan requires objects not in the plugin context, say so:
+- "This script references the Staff table but the plugin context is scoped to Invoices — the developer may need to navigate to a Staff layout in FM"
+- "Script 'Send Email' is not in the plugin context — use `POST /api/query` to check all scripts or ask the developer"
 
 ### Error handling strategy
 State which pattern will be used:

@@ -36,20 +36,33 @@ This returns lines like:
 - `Perform Script [ "Subscript B" ]` — extract `Subscript B`
 - `Perform Script By Name [ ... ]` — flag as unresolvable (calculated name)
 
-### 2b. Batch-resolve names to file paths
+### 2b. Batch-resolve names to IDs and file paths
 
-Take ALL extracted script names and resolve them to file paths in a **single grep** against the scripts index:
+Resolve all extracted script names to IDs using the plugin context (preferred) or index fallback:
 
+**Plugin (preferred):**
+```bash
+curl -s -H "Authorization: Bearer $(grep AGFM_PLUGIN_TOKEN /workspaces/agentic-fm/.env.local | cut -d= -f2)" \
+  $(grep AGFM_PLUGIN_URL /workspaces/agentic-fm/.env.local | cut -d= -f2)/api/context | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+for name, info in d.get('scripts', {}).items():
+    print(f\"{info.get('id')}|{name}\")
+" | grep -iE "Subscript A|Subscript B|Subscript C"
+```
+
+**Index fallback (if plugin unavailable):**
 ```bash
 grep -E "Subscript A|Subscript B|Subscript C" "agent/context/{solution}/scripts.index"
 ```
 
-This returns pipe-delimited rows (`ScriptName|ScriptID|FolderPath`) for every match. From each row, derive the sanitized file path:
+From the results, extract `ScriptName` and `ScriptID`. Derive the sanitized file path using a glob (folder path not available from plugin):
 
-- **With folder path**: `agent/xml_parsed/scripts_sanitized/{solution}/{FolderPath}*/{ScriptName} - ID {ScriptID}.txt`
-- **Top-level** (empty folder path): `agent/xml_parsed/scripts_sanitized/{solution}/{ScriptName} - ID {ScriptID}.txt`
+```bash
+find "agent/xml_parsed/scripts_sanitized/{solution}" -name "*ID {ScriptID}*" -type f | head -1
+```
 
-Since folder directory names include an ID suffix not in the index, use a glob to resolve the exact path if needed.
+Or with folder path from the index: `agent/xml_parsed/scripts_sanitized/{solution}/{FolderPath}*/{ScriptName} - ID {ScriptID}.txt`
 
 ### 2c. Parallel-read ALL subscripts
 

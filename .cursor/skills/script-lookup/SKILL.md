@@ -1,6 +1,6 @@
 ---
 name: script-lookup
-description: Locate a specific FileMaker script in the `agent/xml_parsed/` folder, resolving to the matching pair of scripts from `scripts_sanitized` - human-readable version - and the Save a Copy as XML (SaXML)  version. Use when the user says "review/refactor/optimize/open/show" a script, mentions "script ID", or asks about a specific script by name.
+description: Locate a specific FileMaker script using the plugin API (primary) or index files (fallback), resolving to the matching pair of scripts from `scripts_sanitized` - human-readable version - and the Save a Copy as XML (SaXML) version. Use when the user says "review/refactor/optimize/open/show" a script, mentions "script ID", or asks about a specific script by name.
 ---
 
 # Script Lookup
@@ -31,16 +31,32 @@ Normalize name hints:
 
 ## Lookup workflow
 
-### Step 1 — Index lookup (PARALLEL)
+### Step 1 — Script lookup (PARALLEL)
 
-**This is the critical optimization.** `agent/context/{solution}/scripts.index` is a pipe-delimited file (`ScriptName|ScriptID|FolderPath`) covering every script in the solution. Use it as the **primary lookup source** — never start with filesystem traversal.
+**This is the critical optimization.** Use the plugin API as the **primary lookup source** — it is always live and requires no index files.
 
 Run these in **parallel** (single message, multiple tool calls):
 
-**Tool call A — Grep the index:**
+**Tool call A — Query plugin for scripts:**
 
-- **ID-based**: `grep "|{id}|" agent/context/*/scripts.index` — returns the exact match plus the solution name from the file path.
-- **Name-based**: `grep -i "{name_hint}" agent/context/*/scripts.index` — returns matching rows. If the user also mentions a solution name, include it in the grep path: `agent/context/{solution_hint}*/scripts.index`.
+Fetch the full script list from the plugin context:
+```bash
+curl -s -H "Authorization: Bearer $(grep AGFM_PLUGIN_TOKEN /workspaces/agentic-fm/.env.local | cut -d= -f2)" \
+  $(grep AGFM_PLUGIN_URL /workspaces/agentic-fm/.env.local | cut -d= -f2)/api/context | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+print('solution:', d.get('solution'))
+for name, info in sorted(d.get('scripts', {}).items()):
+    print(f\"{info.get('id')}|{name}\")
+"
+```
+
+- **ID-based**: filter the output for `{id}|`
+- **Name-based**: filter for lines matching the name hint (case-insensitive)
+
+**Fallback** — if the plugin is unreachable, fall back to grepping the index:
+- **ID-based**: `grep "|{id}|" agent/context/*/scripts.index`
+- **Name-based**: `grep -i "{name_hint}" agent/context/*/scripts.index`
 
 **Tool call B — List sandbox:**
 
@@ -48,20 +64,25 @@ Run these in **parallel** (single message, multiple tool calls):
 
 ### Step 2 — Resolve paths and read excerpt
 
-From the index result, extract:
-- **Script name** (column 1)
-- **Script ID** (column 2)
-- **Folder path** (column 3)
-- **Solution name** (from the index file path: `agent/context/{solution}/scripts.index`)
+From the plugin result (or index fallback), extract:
+- **Script name**
+- **Script ID**
+- **Solution name** — from the plugin's `solution` field, or from the index file path: `agent/context/{solution}/scripts.index`
+- **Folder path** — only available from the index fallback (column 3); not returned by the plugin
 
-**Multi-solution handling**: If index results come from multiple solution paths, or the user mentions a specific solution, resolve to one. If ambiguous, use `AskUserQuestion` to ask which solution.
+**Multi-solution handling**: If the plugin returns a solution name that doesn't match the user's request, or the index has results from multiple solutions, use `AskUserQuestion` to disambiguate.
 
-**Derive file paths** — the sanitized filename follows the pattern `{ScriptName} - ID {ScriptID}.txt`, nested inside a folder whose name starts with the folder path value from the index. Since the folder's own ID suffix isn't in the index, use a glob:
+**Derive file paths** — the sanitized filename follows the pattern `{ScriptName} - ID {ScriptID}.txt`:
 
 - Sanitized: `agent/xml_parsed/scripts_sanitized/{solution}/{FolderPath}*/{ScriptName} - ID {ScriptID}.txt`
 - Save-As-XML: `agent/xml_parsed/scripts/{solution}/{FolderPath}*/{ScriptName} - ID {ScriptID}.xml`
 
-For **top-level scripts** (empty folder path in index): files are directly in `agent/xml_parsed/scripts_sanitized/{solution}/`.
+When folder path is unknown (plugin lookup), use a glob across all subfolders:
+```bash
+find "agent/xml_parsed/scripts_sanitized/{solution}" -name "*ID {ScriptID}*" -type f | head -1
+```
+
+For **top-level scripts**: files are directly in `agent/xml_parsed/scripts_sanitized/{solution}/`.
 
 **Sandbox match**: From the sandbox listing (Step 1B), check if any file matches the script name (sandbox files don't include IDs — match by name).
 
@@ -126,9 +147,9 @@ When the index grep returns multiple rows, rank candidates:
 
 Pick the best candidate and continue. The confirmation step is the redirect gate — don't block on a separate disambiguation question unless confidence is truly Low across all candidates.
 
-## Fallback: no index available
+## Fallback: plugin and index both unavailable
 
-If `agent/context/` has no `scripts.index` files, fall back to filesystem search:
+If both the plugin and `agent/context/` index files are unavailable, fall back to filesystem search:
 
 1. `ls agent/xml_parsed/scripts_sanitized/` — determine solution subfolders.
    - One subfolder → use automatically.

@@ -22,19 +22,25 @@ Also read `companion_url` and `webviewer_url` from `automation.json` — these a
 
 ## Step 2: Gather context
 
-1. Read `agent/CONTEXT.json` for:
+1. Fetch live context from the plugin:
+   ```bash
+   curl -s -H "Authorization: Bearer $(grep AGFM_PLUGIN_TOKEN /workspaces/agentic-fm/.env.local | cut -d= -f2)" \
+     $(grep AGFM_PLUGIN_URL /workspaces/agentic-fm/.env.local | cut -d= -f2)/api/context
+   ```
+   Extract:
    - `current_layout` — the target layout (name, ID, base TO)
    - `tables` — fields with IDs, types, and TO references
-   - `relationships` — related TOs for portals
    - `scripts` — scripts for button wiring
    - `value_lists` — for dropdowns and radio buttons
    - `layouts` — for navigation button targets
 
-2. If CONTEXT.json is absent or scoped to the wrong layout, ask the developer to create the layout shell in FM first, then run **Push Context** on it. The agent cannot generate layout objects without knowing the target layout's TO and the field IDs available in that context.
+   **Verify context matches the request** — check `solution` and `current_layout.name`. If mismatched, tell the developer and ask them to navigate to the correct layout in FileMaker first. Fall back to `agent/CONTEXT.json` if plugin is unavailable.
+
+2. If context is scoped to the wrong layout or layout doesn't exist yet, ask the developer to create the layout shell in FM first, then navigate to it — the agent needs the target layout's TO and field IDs.
 
 3. Read the theme data from `agent/context/{solution}/`:
    ```bash
-   # Resolve solution name from CONTEXT.json
+   # Resolve solution name from plugin context
    cat agent/context/*/theme-manifest.json 2>/dev/null
    cat agent/context/*/theme.css 2>/dev/null
    cat agent/context/*/theme-classes.json 2>/dev/null
@@ -191,7 +197,7 @@ Read one layout file to use as a structural reference for object types, attribut
 - Each object is a `<LayoutObject>` element with a `type` attribute
 - Position every object with `<Bounds top="T" left="L" bottom="B" right="R"/>`
 - Apply theme classes with `<LocalCSS name="ClassName"/>` — only use classes from `theme-classes.json`
-- Bind fields with `<FieldObj table="TOName" id="FieldID" name="FieldName"/>` — resolve all IDs from CONTEXT.json
+- Bind fields with `<FieldObj table="TOName" id="FieldID" name="FieldName"/>` — resolve all IDs from plugin context (or CONTEXT.json fallback)
 - Portal objects contain child `<LayoutObject>` elements for each column field
 - Button objects include `<Script id="N" name="ScriptName"/>` for the wired script and optional `<Parameter>` for the script parameter calculation
 
@@ -257,7 +263,7 @@ After deployment, provide guidance based on the output path:
 ## Constraints
 
 - The agent **cannot create the layout container** — only objects on it. The developer must create the layout in FM first and run Push Context.
-- All field references must resolve to real IDs from CONTEXT.json — never use placeholder or invented IDs.
+- All field references must resolve to real IDs from plugin context (or CONTEXT.json fallback) — never use placeholder or invented IDs.
 - All style class names must come from `theme-classes.json` — never invent class names. If no class fits, use the closest match and note the limitation.
 - FM layouts are **not responsive** — all objects use fixed pixel positions. The preview must reflect this (no flexbox, no percentage widths).
 - Portal child objects are positioned relative to the portal, not the layout.

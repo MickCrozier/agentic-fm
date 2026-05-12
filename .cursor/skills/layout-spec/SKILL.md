@@ -11,15 +11,19 @@ Design a complete layout specification through a structured conversation with th
 
 ## Step 1: Gather context
 
-1. Check for `agent/CONTEXT.json`. If it exists, read it for:
-   - `current_layout` — the layout being designed (name, TO, dimensions if available)
+1. Fetch live context from the plugin:
+   ```bash
+   curl -s -H "Authorization: Bearer $(grep AGFM_PLUGIN_TOKEN /workspaces/agentic-fm/.env.local | cut -d= -f2)" \
+     $(grep AGFM_PLUGIN_URL /workspaces/agentic-fm/.env.local | cut -d= -f2)/api/context
+   ```
+   Extract:
+   - `current_layout` — the layout being designed (name, TO)
    - `tables` — available fields and their types
-   - `relationships` — related TOs available for portals
    - `scripts` — scripts available for button wiring
    - `value_lists` — value lists for dropdowns and radio buttons
    - `layouts` — other layouts for navigation buttons
 
-2. If CONTEXT.json is absent or scoped to the wrong layout, ask the developer to run **Push Context** on the target layout before proceeding.
+2. **Verify context matches the request** — check `solution` and `current_layout.name`. If mismatched, tell the developer and ask them to navigate to the correct layout in FileMaker first. Fall back to `agent/CONTEXT.json` if plugin is unavailable.
 
 3. Read the theme manifest and style classes if they exist:
    ```bash

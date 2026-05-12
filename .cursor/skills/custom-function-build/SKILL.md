@@ -17,7 +17,7 @@ Before writing, check whether the function already exists:
 grep -r "name=\"FunctionName\"" agent/xml_parsed/custom_function_calcs/*/
 ```
 
-Also check `agent/CONTEXT.json` → `custom_functions` section if present. If the function exists, read it and modify rather than creating from scratch.
+Also check the plugin context for custom functions — `GET /api/context` may include a `custom_functions` section. Fall back to `agent/CONTEXT.json` if plugin is unavailable. If the function exists, read it and modify rather than creating from scratch.
 
 ---
 

@@ -22,9 +22,32 @@ This skill analyzes a FileMaker solution's relationship graph and produces a **t
 
 ## Data sources
 
-The skill uses two possible data sources, in order of preference:
+The skill uses three possible data sources, in order of preference:
 
-### 1. Exploded XML index files (preferred)
+### 1. Plugin API (preferred)
+
+Use `POST /api/query` to fetch TOs, relationships, and fields directly from the live solution:
+
+```bash
+TOKEN=$(grep AGFM_PLUGIN_TOKEN /workspaces/agentic-fm/.env.local | cut -d= -f2)
+URL=$(grep AGFM_PLUGIN_URL /workspaces/agentic-fm/.env.local | cut -d= -f2)
+
+# All TOs with base table mapping
+curl -s -H "Authorization: Bearer $TOKEN" -X POST "$URL/api/query" \
+  -H "Content-Type: application/json" \
+  -d '{"sql": "SELECT TableName, TableID FROM FileMaker_Tables"}'
+
+# All fields per TO
+curl -s -H "Authorization: Bearer $TOKEN" -X POST "$URL/api/query" \
+  -H "Content-Type: application/json" \
+  -d '{"sql": "SELECT TableName, FieldName, FieldType, FieldID FROM FileMaker_Fields"}'
+```
+
+Both queries are async — poll `GET $URL/api/eval/:id` until `complete: true`. The `/api/context` response also provides `tables` (fields with types) and `layouts` for supplementary context.
+
+Note: `/api/query` exposes TOs (not base tables) — group TOs by identical field sets to infer base tables, same as the OData path.
+
+### 2. Exploded XML index files (secondary)
 
 When `agent/context/{solution}/` exists with index files:
 
@@ -32,7 +55,7 @@ When `agent/context/{solution}/` exists with index files:
 - `relationships.index` — all relationships between TOs (columns: `LeftTO|LeftTOID|RightTO|RightTOID|JoinType|JoinFields|CascadeCreate|CascadeDelete`)
 - `fields.index` — all fields per base table (columns: `TableName|TableID|FieldName|FieldID|DataType|FieldType|AutoEnter|Flags`)
 
-### 2. OData `$metadata` endpoint (fallback)
+### 3. OData `$metadata` endpoint (fallback)
 
 When index files are not available but `agent/config/automation.json` has an `odata` block for the solution:
 
@@ -41,27 +64,36 @@ When index files are not available but `agent/config/automation.json` has an `od
 - Parse `NavigationProperty` and `NavigationPropertyBinding` for relationships
 - **Infer base tables** by grouping EntityTypes with identical field sets (same field names in same order = same base table). OData exposes TOs, not base tables — this heuristic resolves the mapping.
 
-If neither source is available, instruct the developer to either run **Explode XML** or configure OData access.
+If none of the three sources are available, instruct the developer to either ensure the plugin is running, run **Explode XML**, or configure OData access.
 
 ## Workflow
 
 ### Step 1 — Determine the solution and gather raw data
 
-List subdirectories under `agent/context/` using Bash `ls`.
+**Try the plugin first** — check if it is reachable and query all TOs and fields in parallel (two async queries, poll both):
 
-- If one subfolder exists, use it automatically and proceed directly to reading index files.
-- If multiple exist, ask the developer which solution, then proceed to reading index files.
-- If none exist, check `automation.json` for OData config and fall back to the OData path.
+```bash
+TOKEN=$(grep AGFM_PLUGIN_TOKEN /workspaces/agentic-fm/.env.local | cut -d= -f2)
+URL=$(grep AGFM_PLUGIN_URL /workspaces/agentic-fm/.env.local | cut -d= -f2)
+curl -s -H "Authorization: Bearer $TOKEN" -X POST "$URL/api/query" \
+  -H "Content-Type: application/json" -d '{"sql": "SELECT TableName, TableID FROM FileMaker_Tables"}'
+curl -s -H "Authorization: Bearer $TOKEN" -X POST "$URL/api/query" \
+  -H "Content-Type: application/json" -d '{"sql": "SELECT TableName, FieldName, FieldType, FieldID FROM FileMaker_Fields"}'
+```
 
-**Index file path — read all three files in parallel:**
+Also fetch `/api/context` for the solution name. If the plugin returns data, proceed directly to Step 2.
 
-Once the solution name is known, read all three index files simultaneously in a single parallel batch:
+**Index file fallback** — if plugin is unavailable, list subdirectories under `agent/context/`:
+
+- If one subfolder exists, use it automatically and read all three index files in parallel.
+- If multiple exist, ask the developer which solution, then read index files.
+- If none exist, fall back to OData.
+
+**Index files (read in parallel once solution name is known):**
 
 - `agent/context/{solution}/table_occurrences.index`
 - `agent/context/{solution}/relationships.index`
 - `agent/context/{solution}/fields.index`
-
-These files have **zero dependencies** between them. Never read them sequentially.
 
 **OData path:**
 

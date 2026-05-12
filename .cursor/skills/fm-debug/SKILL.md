@@ -53,10 +53,15 @@ Additionally, `Perform Script` resets `Get ( LastError )` to 0 when it successfu
 
 ### Building the instrumented script
 
-Look up the target script's ID from CONTEXT.json or the scripts index:
+Look up the target script's ID from the plugin (preferred) or index fallback:
 
 ```bash
-grep "ScriptName" "agent/context/{solution}/scripts.index"
+curl -s -H "Authorization: Bearer $(grep AGFM_PLUGIN_TOKEN /workspaces/agentic-fm/.env.local | cut -d= -f2)" \
+  $(grep AGFM_PLUGIN_URL /workspaces/agentic-fm/.env.local | cut -d= -f2)/api/context | python3 -c "
+import sys, json; d=json.load(sys.stdin)
+for n,i in d.get('scripts',{}).items(): print(f\"{i.get('id')}|{n}\")
+" | grep -i "ScriptName"
+# Fallback: grep "ScriptName" "agent/context/{solution}/scripts.index"
 ```
 
 Read the human-readable source from `agent/xml_parsed/scripts_sanitized/` to understand the logic. Identify where to insert debug capture points — typically immediately after steps that might fail or at decision points.

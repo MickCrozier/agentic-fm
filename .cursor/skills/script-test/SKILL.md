@@ -139,13 +139,18 @@ Use these comparison patterns depending on what's being tested:
 | Error code | `JSONGetElement ( $errData ; "lastError" ) = 0` |
 | Contains | `Position ( $actual ; "substring" ; 1 ; 1 ) > 0` |
 
-### Look up the Agentic-fm Debug script ID
+### Look up script IDs
+
+Use the plugin to resolve the Agentic-fm Debug script ID and the target script ID in one call (preferred):
 
 ```bash
-grep "Agentic-fm Debug" "agent/context/{solution}/scripts.index"
+curl -s -H "Authorization: Bearer $(grep AGFM_PLUGIN_TOKEN /workspaces/agentic-fm/.env.local | cut -d= -f2)" \
+  $(grep AGFM_PLUGIN_URL /workspaces/agentic-fm/.env.local | cut -d= -f2)/api/context | python3 -c "
+import sys, json; d=json.load(sys.stdin)
+for n,i in d.get('scripts',{}).items(): print(f\"{i.get('id')}|{n}\")
+"
+# Fallback: grep "Agentic-fm Debug\|ScriptName" "agent/context/{solution}/scripts.index"
 ```
-
-Also look up the target script's ID for the `Perform Script` step reference.
 
 ### Validate
 
