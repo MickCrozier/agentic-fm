@@ -5,9 +5,10 @@ deploy.py - Pluggable deployment module for agentic-fm.
 Loads a validated fmxmlsnippet XML file to the FileMaker clipboard and
 optionally triggers an automated paste into the Script Workspace.
 
-Tier 1 (universal):  companion /clipboard → developer pastes manually
-Tier 2 (MBS):        companion /clipboard + /trigger → Agentic-fm Paste auto-pastes
-Tier 3 (MBS + AS):   companion /trigger creates placeholder → then Tier 2
+Tier 1 (universal):  plugin /api/clipboard/write → developer pastes manually
+Tier 2 (MBS):        plugin clipboard + /trigger → Agentic-fm Paste auto-pastes
+Tier 3 (MBS + AS):   /trigger creates placeholder → then Tier 2
+Tier 4 (plugin):     plugin navigate + insert + save — no AppleScript required
 
 Usage (CLI):
     python3 agent/scripts/deploy.py <xml_path> [target_script] [--tier N]
@@ -18,9 +19,9 @@ Usage (module):
 
 Result dict keys:
     success       — bool
-    tier_used     — int (1, 2, or 3; may differ from requested if fallback)
+    tier_used     — int (1–4; may differ from requested if fallback)
     instructions  — str (Tier 1 and fallback cases — present to developer)
-    message       — str (Tier 2/3 success — for logging)
+    message       — str (Tier 2/3/4 success — for logging)
     fallback_from — int (present when fell back from a higher tier)
     fallback_reason — str (why the fallback occurred)
     error         — str (present on failure)
@@ -42,8 +43,28 @@ DEFAULT_CONFIG = {
     "default_tier": 1,
     "auto_save": False,
     "fm_app_name": "FileMaker Pro",
-    "companion_url": "http://local.hub:8765",
+    "companion_url": "http://local.hub:8767",
+    "plugin_url": None,
+    "plugin_token": None,
 }
+
+ENV_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".env.local")
+
+
+def _load_plugin_auth() -> tuple[str | None, str | None]:
+    """Load plugin URL and bearer token from root .env.local."""
+    env: dict[str, str] = {}
+    try:
+        with open(ENV_FILE, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                env[key.strip()] = val.strip()
+    except OSError:
+        pass
+    return env.get("AGFM_PLUGIN_URL"), env.get("AGFM_PLUGIN_TOKEN")
 
 
 def _load_config() -> dict:
@@ -52,9 +73,18 @@ def _load_config() -> dict:
     try:
         with open(config_path, "r", encoding="utf-8") as f:
             cfg = json.load(f)
-            return {**DEFAULT_CONFIG, **cfg}
+            merged = {**DEFAULT_CONFIG, **cfg}
     except (OSError, ValueError):
-        return DEFAULT_CONFIG.copy()
+        merged = DEFAULT_CONFIG.copy()
+
+    # Overlay plugin auth from agent/auth/plugin.json (gitignored secrets file)
+    plugin_url, plugin_token = _load_plugin_auth()
+    if plugin_url and not merged.get("plugin_url"):
+        merged["plugin_url"] = plugin_url
+    if plugin_token and not merged.get("plugin_token"):
+        merged["plugin_token"] = plugin_token
+
+    return merged
 
 
 def _resolve_target_file(config: dict) -> str | None:
@@ -90,14 +120,30 @@ def _resolve_target_file(config: dict) -> str | None:
 # HTTP helper
 # ---------------------------------------------------------------------------
 
-def _post_json(url: str, payload: dict, timeout: int = 15) -> dict:
+def _post_json(url: str, payload: dict, timeout: int = 15, token: str | None = None) -> dict:
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    req = urllib.request.Request(
-        url,
-        data=body,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        raw = exc.read().decode("utf-8", errors="replace")
+        try:
+            return json.loads(raw)
+        except ValueError:
+            return {"success": False, "error": f"HTTP {exc.code}: {raw}"}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+def _get_json(url: str, timeout: int = 15, token: str | None = None) -> dict:
+    headers = {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    req = urllib.request.Request(url, headers=headers, method="GET")
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
@@ -172,14 +218,26 @@ def _switch_to_document(
 # Tier 1
 # ---------------------------------------------------------------------------
 
+def _write_clipboard(xml: str, plugin_url: str | None, plugin_token: str | None,
+                     companion_url: str) -> dict:
+    """Write XML to FM clipboard. Prefers plugin if available, falls back to companion."""
+    if plugin_url and plugin_token:
+        result = _post_json(f"{plugin_url}/api/clipboard/write", {"xml": xml}, token=plugin_token)
+        if result.get("success"):
+            return result
+    return _post_json(f"{companion_url}/clipboard", {"xml": xml})
+
+
 def _tier1(
     xml: str,
     companion_url: str,
     target_script: str | None,
     target_file: str | None = None,
+    plugin_url: str | None = None,
+    plugin_token: str | None = None,
 ) -> dict:
-    """Write XML to clipboard via companion, return paste instructions."""
-    result = _post_json(f"{companion_url}/clipboard", {"xml": xml})
+    """Write XML to clipboard, return paste instructions."""
+    result = _write_clipboard(xml, plugin_url, plugin_token, companion_url)
     if not result.get("success"):
         return {
             "success": False,
@@ -594,6 +652,101 @@ def _tier3(
 
 
 # ---------------------------------------------------------------------------
+# Tier 4 — direct plugin deploy (no AppleScript)
+# ---------------------------------------------------------------------------
+
+def _tier4(
+    xml: str,
+    plugin_url: str,
+    plugin_token: str,
+    target_script: str | None,
+    auto_save: bool = False,
+    select_all: bool = True,
+) -> dict:
+    """Deploy using the plugin's direct Script Workspace API.
+
+    1. Navigate to the target script via /api/ui/script/navigate
+    2. If select_all: delete all existing steps via /api/ui/script/delete
+    3. Insert steps via /api/ui/script/insert
+    4. Save via /api/ui/script/save
+
+    Falls back to Tier 1 clipboard-only if the plugin calls fail.
+    """
+    if not target_script:
+        result = _post_json(
+            f"{plugin_url}/api/clipboard/write", {"xml": xml}, token=plugin_token
+        )
+        if not result.get("success"):
+            return {"success": False, "tier_used": 4, "error": result.get("error", "Clipboard write failed")}
+        return {
+            "success": True,
+            "tier_used": 4,
+            "instructions": "Script loaded to clipboard. No target script specified — paste manually (⌘V).",
+        }
+
+    # Step 1: navigate to the script
+    nav = _post_json(
+        f"{plugin_url}/api/ui/script/navigate",
+        {"scriptName": target_script},
+        token=plugin_token,
+        timeout=35,
+    )
+    if not nav.get("success"):
+        return {
+            "success": False,
+            "tier_used": 4,
+            "error": nav.get("error", f"Could not navigate to '{target_script}'"),
+        }
+
+    # Step 2: delete existing steps if replacing
+    if select_all:
+        del_result = _post_json(
+            f"{plugin_url}/api/ui/script/delete",
+            {"all": True},
+            token=plugin_token,
+        )
+        if not del_result.get("success"):
+            return {
+                "success": False,
+                "tier_used": 4,
+                "error": del_result.get("error", "Failed to delete existing steps"),
+            }
+
+    # Step 3: insert new steps (afterIndex -1 = beginning / after all deletions)
+    insert_result = _post_json(
+        f"{plugin_url}/api/ui/script/insert",
+        {"xml": xml, "afterIndex": -1},
+        token=plugin_token,
+    )
+    if not insert_result.get("success"):
+        return {
+            "success": False,
+            "tier_used": 4,
+            "error": insert_result.get("error", "Failed to insert steps"),
+        }
+
+    # Step 4: save
+    save_result = _post_json(
+        f"{plugin_url}/api/ui/script/save",
+        {},
+        token=plugin_token,
+    )
+    if not save_result.get("success"):
+        return {
+            "success": False,
+            "tier_used": 4,
+            "error": save_result.get("error", "Failed to save script"),
+        }
+
+    mode = "replaced" if select_all else "appended to"
+    return {
+        "success": True,
+        "tier_used": 4,
+        "message": f"Script steps {mode} '{target_script}' via Tier 4 (plugin direct).",
+    }
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -625,8 +778,10 @@ def deploy(
     config = _load_config()
     effective_tier = tier if tier is not None else config.get("default_tier", 1)
     effective_auto_save = auto_save if auto_save is not None else bool(config.get("auto_save", False))
-    companion_url = config.get("companion_url", "http://local.hub:8765").rstrip("/")
+    companion_url = config.get("companion_url", "http://local.hub:8767").rstrip("/")
     fm_app_name = config.get("fm_app_name", "FileMaker Pro")
+    plugin_url = (config.get("plugin_url") or "").rstrip("/") or None
+    plugin_token = config.get("plugin_token") or None
 
     # Auto-resolve target file if not provided
     if target_file is None:
@@ -638,12 +793,20 @@ def deploy(
     except OSError as exc:
         return {"success": False, "error": f"Cannot read {xml_path}: {exc}"}
 
-    if effective_tier == 3:
+    if effective_tier == 4:
+        if plugin_url and plugin_token:
+            return _tier4(xml, plugin_url, plugin_token, target_script, effective_auto_save, select_all)
+        return {
+            "success": False,
+            "tier_used": 4,
+            "error": "Tier 4 requires plugin_url and plugin_token in agent/auth/plugin.json",
+        }
+    elif effective_tier == 3:
         return _tier3(xml, companion_url, fm_app_name, target_script, effective_auto_save, target_file)
     elif effective_tier == 2:
         return _tier2(xml, companion_url, fm_app_name, target_script, effective_auto_save, select_all, target_file)
     else:
-        return _tier1(xml, companion_url, target_script, target_file)
+        return _tier1(xml, companion_url, target_script, target_file, plugin_url, plugin_token)
 
 
 # ---------------------------------------------------------------------------
@@ -661,7 +824,7 @@ def main():
         "target_script", nargs="?", help="Script name to paste into (Tier 2/3)"
     )
     parser.add_argument(
-        "--tier", type=int, choices=[1, 2, 3], help="Override deployment tier"
+        "--tier", type=int, choices=[1, 2, 3, 4], help="Override deployment tier"
     )
     parser.add_argument(
         "--auto-save", action="store_true", default=None, dest="auto_save",
@@ -686,11 +849,11 @@ def main():
     )
     args = parser.parse_args()
 
-    # Tier 2 targeting an existing script is destructive — always confirm unless
-    # --replace or --append bypasses the prompt explicitly.
+    # Tiers 2 and 4 targeting an existing script are destructive — always confirm
+    # unless --replace or --append bypasses the prompt explicitly.
     select_all = True
     effective_tier = args.tier or _load_config().get("default_tier", 1)
-    if effective_tier == 2 and args.target_script:
+    if effective_tier in (2, 4) and args.target_script:
         if args.append:
             select_all = False
         elif not args.replace:
