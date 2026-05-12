@@ -204,6 +204,32 @@ The developer always works in **human-readable (HR) script format**. The agent's
 
 **Container and non-macOS environments**: `deploy.py` detects the runtime environment automatically. When running inside a Docker container or any non-macOS host, AppleScript execution is delegated to the companion server on the macOS host via `/trigger`. No special handling is needed — just call `deploy.py` the same way.
 
+**Auto-upgrade to Tier 4**: When `AGFM_PLUGIN_URL` and `AGFM_PLUGIN_TOKEN` are present in `.env.local`, `deploy.py` automatically uses Tier 4 (direct plugin) regardless of `default_tier` in `automation.json`, unless an explicit `--tier` flag is passed.
+
+**Patch mode** (surgical edits): Instead of replacing all steps, you can apply targeted step-level changes to an existing script using a JSON patch file:
+
+```bash
+python3 agent/scripts/deploy.py --patch agent/sandbox/mypatch.json
+```
+
+Patch file format:
+```json
+{
+  "script": "Script Name",
+  "changes": [
+    { "op": "insert", "afterIndex": 5, "xml": "<fmxmlsnippet>...</fmxmlsnippet>" },
+    { "op": "delete", "steps": [3, 4] },
+    { "op": "replace", "steps": [7], "xml": "<fmxmlsnippet>...</fmxmlsnippet>" }
+  ]
+}
+```
+
+- `insert` — inserts steps after the given 0-based index (`afterIndex: -1` prepends)
+- `delete` — deletes the listed step indices (apply highest-first to avoid drift; the function handles ordering automatically)
+- `replace` — deletes `steps`, then inserts `xml` at that position
+
+Patch mode requires the plugin (Tier 4) and will error if plugin creds are missing. Apply changes in highest-index-first order within the `changes` array to avoid index drift when making multiple edits.
+
 ## Lookup decision tree
 
 Two kinds of lookup are needed: **solution-specific references** (layout, field, script IDs) and **step structure** (XML elements and attributes).

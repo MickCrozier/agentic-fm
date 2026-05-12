@@ -676,7 +676,7 @@ def _tier4(
         result = _post_json(
             f"{plugin_url}/api/clipboard/write", {"xml": xml}, token=plugin_token
         )
-        if not result.get("success"):
+        if not (result.get("success") or result.get("ok")):
             return {"success": False, "tier_used": 4, "error": result.get("error", "Clipboard write failed")}
         return {
             "success": True,
@@ -691,26 +691,30 @@ def _tier4(
         token=plugin_token,
         timeout=35,
     )
-    if not nav.get("success"):
+    if not (nav.get("success") or nav.get("ok")):
         return {
             "success": False,
             "tier_used": 4,
             "error": nav.get("error", f"Could not navigate to '{target_script}'"),
         }
 
-    # Step 2: delete existing steps if replacing
+    # Step 2: delete existing steps if replacing — read step count first, then
+    # delete by explicit index list (the API does not support {"all": true})
     if select_all:
-        del_result = _post_json(
-            f"{plugin_url}/api/ui/script/delete",
-            {"all": True},
-            token=plugin_token,
-        )
-        if not del_result.get("success"):
-            return {
-                "success": False,
-                "tier_used": 4,
-                "error": del_result.get("error", "Failed to delete existing steps"),
-            }
+        script_state = _get_json(f"{plugin_url}/api/ui/script", token=plugin_token)
+        step_count = script_state.get("stepCount", 0)
+        if step_count > 0:
+            del_result = _post_json(
+                f"{plugin_url}/api/ui/script/delete",
+                {"steps": list(range(step_count))},
+                token=plugin_token,
+            )
+            if not (del_result.get("success") or del_result.get("ok")):
+                return {
+                    "success": False,
+                    "tier_used": 4,
+                    "error": del_result.get("error", "Failed to delete existing steps"),
+                }
 
     # Step 3: insert new steps (afterIndex -1 = beginning / after all deletions)
     insert_result = _post_json(
@@ -718,7 +722,7 @@ def _tier4(
         {"xml": xml, "afterIndex": -1},
         token=plugin_token,
     )
-    if not insert_result.get("success"):
+    if not (insert_result.get("success") or insert_result.get("ok")):
         return {
             "success": False,
             "tier_used": 4,
@@ -731,7 +735,7 @@ def _tier4(
         {},
         token=plugin_token,
     )
-    if not save_result.get("success"):
+    if not (save_result.get("success") or save_result.get("ok")):
         return {
             "success": False,
             "tier_used": 4,
@@ -747,8 +751,178 @@ def _tier4(
 
 
 # ---------------------------------------------------------------------------
+# Tier 4 — patch mode (surgical step edits via plugin)
+# ---------------------------------------------------------------------------
+
+def _tier4_patch(
+    patch: dict,
+    plugin_url: str,
+    plugin_token: str,
+) -> dict:
+    """Apply a structured list of surgical edits to a script via the plugin.
+
+    Patch payload schema:
+        {
+            "script": "Script Name",          # required
+            "changes": [                       # required, applied in order
+                {"op": "insert",  "afterIndex": N, "xml": "<fmxmlsnippet...>"},
+                {"op": "delete",  "steps": [N, ...]},
+                {"op": "replace", "steps": [N, ...], "xml": "<fmxmlsnippet...>"}
+            ]
+        }
+
+    Op semantics:
+        insert  — insert XML after step index N (-1 = before step 0)
+        delete  — delete the listed step indices
+        replace — delete listed indices, then insert XML at their vacated position
+                  (inserts after index steps[0]-1, i.e. where the first deleted step was)
+
+    IMPORTANT — index stability:
+        Step indices shift as changes are applied. Apply changes in reverse index
+        order (highest first) to keep earlier indices stable, matching the convention
+        used by text-editor diff tools.
+
+    Returns the standard result dict with success/tier_used/message/error.
+    """
+    script_name = patch.get("script")
+    changes = patch.get("changes")
+
+    if not script_name:
+        return {"success": False, "tier_used": 4, "error": "Patch payload missing 'script' field"}
+    if not isinstance(changes, list) or not changes:
+        return {"success": False, "tier_used": 4, "error": "Patch payload missing or empty 'changes' list"}
+
+    # Navigate to the script
+    nav = _post_json(
+        f"{plugin_url}/api/ui/script/navigate",
+        {"scriptName": script_name},
+        token=plugin_token,
+        timeout=35,
+    )
+    if not nav.get("success", nav.get("ok")):
+        return {
+            "success": False,
+            "tier_used": 4,
+            "error": nav.get("error", f"Could not navigate to '{script_name}'"),
+        }
+
+    # Apply each change in order
+    for i, change in enumerate(changes):
+        op = change.get("op")
+        prefix = f"Change {i+1} ({op})"
+
+        if op == "insert":
+            after = change.get("afterIndex", -1)
+            xml = change.get("xml", "")
+            if not xml:
+                return {"success": False, "tier_used": 4, "error": f"{prefix}: missing 'xml'"}
+            result = _post_json(
+                f"{plugin_url}/api/ui/script/insert",
+                {"xml": xml, "afterIndex": after},
+                token=plugin_token,
+            )
+            if not result.get("success", result.get("ok")):
+                return {"success": False, "tier_used": 4, "error": f"{prefix}: {result.get('error', 'insert failed')}"}
+
+        elif op == "delete":
+            steps = change.get("steps")
+            if not isinstance(steps, list) or not steps:
+                return {"success": False, "tier_used": 4, "error": f"{prefix}: missing 'steps' array"}
+            result = _post_json(
+                f"{plugin_url}/api/ui/script/delete",
+                {"steps": steps},
+                token=plugin_token,
+            )
+            if not result.get("success", result.get("ok")):
+                return {"success": False, "tier_used": 4, "error": f"{prefix}: {result.get('error', 'delete failed')}"}
+
+        elif op == "replace":
+            steps = change.get("steps")
+            xml = change.get("xml", "")
+            if not isinstance(steps, list) or not steps:
+                return {"success": False, "tier_used": 4, "error": f"{prefix}: missing 'steps' array"}
+            if not xml:
+                return {"success": False, "tier_used": 4, "error": f"{prefix}: missing 'xml'"}
+            # Delete the target steps first
+            del_result = _post_json(
+                f"{plugin_url}/api/ui/script/delete",
+                {"steps": steps},
+                token=plugin_token,
+            )
+            if not del_result.get("success", del_result.get("ok")):
+                return {"success": False, "tier_used": 4, "error": f"{prefix}: delete phase: {del_result.get('error', 'failed')}"}
+            # Insert at the vacated position (before where the first step was)
+            insert_after = steps[0] - 1
+            ins_result = _post_json(
+                f"{plugin_url}/api/ui/script/insert",
+                {"xml": xml, "afterIndex": insert_after},
+                token=plugin_token,
+            )
+            if not ins_result.get("success", ins_result.get("ok")):
+                return {"success": False, "tier_used": 4, "error": f"{prefix}: insert phase: {ins_result.get('error', 'failed')}"}
+
+        else:
+            return {"success": False, "tier_used": 4, "error": f"{prefix}: unknown op '{op}' (expected insert/delete/replace)"}
+
+    # Save
+    save = _post_json(f"{plugin_url}/api/ui/script/save", {}, token=plugin_token)
+    if not save.get("success", save.get("ok")):
+        return {"success": False, "tier_used": 4, "error": f"Save failed: {save.get('error', 'unknown')}"}
+
+    return {
+        "success": True,
+        "tier_used": 4,
+        "message": f"Applied {len(changes)} change(s) to '{script_name}' via patch.",
+    }
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
+def patch(
+    patch_path_or_dict: "str | dict",
+) -> dict:
+    """Apply a structured list of surgical step edits to a script via the plugin.
+
+    Args:
+        patch_path_or_dict: Path to a JSON patch file, or a dict with the patch payload.
+
+    Patch payload schema:
+        {
+            "script": "Script Name",
+            "changes": [
+                {"op": "insert",  "afterIndex": N, "xml": "<fmxmlsnippet...>"},
+                {"op": "delete",  "steps": [N, ...]},
+                {"op": "replace", "steps": [N, ...], "xml": "<fmxmlsnippet...>"}
+            ]
+        }
+
+    Returns:
+        Result dict with success/tier_used/message/error.
+    """
+    config = _load_config()
+    plugin_url = (config.get("plugin_url") or "").rstrip("/") or None
+    plugin_token = config.get("plugin_token") or None
+
+    if not plugin_url or not plugin_token:
+        return {
+            "success": False,
+            "tier_used": 4,
+            "error": "patch() requires plugin_url and plugin_token — plugin must be available",
+        }
+
+    if isinstance(patch_path_or_dict, dict):
+        payload = patch_path_or_dict
+    else:
+        try:
+            with open(patch_path_or_dict, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+        except (OSError, ValueError) as exc:
+            return {"success": False, "tier_used": 4, "error": f"Cannot read patch file: {exc}"}
+
+    return _tier4_patch(payload, plugin_url, plugin_token)
+
 
 def deploy(
     xml_path: str,
@@ -758,8 +932,7 @@ def deploy(
     select_all: bool = True,
     target_file: str | None = None,
 ) -> dict:
-    """
-    Deploy a validated fmxmlsnippet XML file to FileMaker.
+    """Deploy a validated fmxmlsnippet XML file to FileMaker.
 
     Args:
         xml_path:      Path to the fmxmlsnippet XML file.
@@ -776,12 +949,19 @@ def deploy(
         Tier 2/3 success: also contains 'message' for logging.
     """
     config = _load_config()
-    effective_tier = tier if tier is not None else config.get("default_tier", 1)
     effective_auto_save = auto_save if auto_save is not None else bool(config.get("auto_save", False))
     companion_url = config.get("companion_url", "http://local.hub:8767").rstrip("/")
     fm_app_name = config.get("fm_app_name", "FileMaker Pro")
     plugin_url = (config.get("plugin_url") or "").rstrip("/") or None
     plugin_token = config.get("plugin_token") or None
+
+    # Auto-upgrade to Tier 4 when plugin creds are present and no explicit tier was requested.
+    if tier is not None:
+        effective_tier = tier
+    elif plugin_url and plugin_token:
+        effective_tier = 4
+    else:
+        effective_tier = config.get("default_tier", 1)
 
     # Auto-resolve target file if not provided
     if target_file is None:
@@ -819,12 +999,17 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    parser.add_argument("xml_path", help="Path to the fmxmlsnippet XML file")
-    parser.add_argument(
-        "target_script", nargs="?", help="Script name to paste into (Tier 2/3)"
+    mode_group = parser.add_mutually_exclusive_group(required=True)
+    mode_group.add_argument("xml_path", nargs="?", help="Path to the fmxmlsnippet XML file")
+    mode_group.add_argument(
+        "--patch", metavar="PATCH_FILE",
+        help="Path to a JSON patch file describing surgical step edits (plugin required)",
     )
     parser.add_argument(
-        "--tier", type=int, choices=[1, 2, 3, 4], help="Override deployment tier"
+        "target_script", nargs="?", help="Script name to paste into (Tier 2/3/4, deploy mode only)"
+    )
+    parser.add_argument(
+        "--tier", type=int, choices=[1, 2, 3, 4], help="Override deployment tier (deploy mode only)"
     )
     parser.add_argument(
         "--auto-save", action="store_true", default=None, dest="auto_save",
@@ -841,18 +1026,36 @@ def main():
     paste_group = parser.add_mutually_exclusive_group()
     paste_group.add_argument(
         "--replace", action="store_true", default=False,
-        help="Replace all existing steps without prompting (Tier 2 only)"
+        help="Replace all existing steps without prompting (Tier 2/4 only)"
     )
     paste_group.add_argument(
         "--append", action="store_true", default=False,
-        help="Append after existing steps without prompting (Tier 2 only)"
+        help="Append after existing steps without prompting (Tier 2/4 only)"
     )
     args = parser.parse_args()
 
+    # --- Patch mode ---
+    if args.patch:
+        result = patch(args.patch)
+        if result.get("message"):
+            print(result["message"])
+        elif result.get("error"):
+            print(f"Error: {result['error']}", file=sys.stderr)
+        sys.exit(0 if result.get("success") else 1)
+
+    # --- Deploy mode ---
     # Tiers 2 and 4 targeting an existing script are destructive — always confirm
     # unless --replace or --append bypasses the prompt explicitly.
     select_all = True
-    effective_tier = args.tier or _load_config().get("default_tier", 1)
+    cfg = _load_config()
+    _pu = (cfg.get("plugin_url") or "").rstrip("/") or None
+    _pt = cfg.get("plugin_token") or None
+    if args.tier is not None:
+        effective_tier = args.tier
+    elif _pu and _pt:
+        effective_tier = 4
+    else:
+        effective_tier = cfg.get("default_tier", 1)
     if effective_tier in (2, 4) and args.target_script:
         if args.append:
             select_all = False
