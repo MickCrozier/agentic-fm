@@ -21,7 +21,7 @@ import tempfile
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 
-DEFAULT_PORT = 8766
+DEFAULT_PORT = 8767
 BIND_HOST = "0.0.0.0"
 
 logging.basicConfig(

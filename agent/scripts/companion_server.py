@@ -49,7 +49,7 @@ ALLOWED_IPS = os.environ.get(
 
 # When set, clipboard reads/writes are proxied to the host clipboard server
 # instead of invoking clipboard.py directly. Set this in devcontainer.json:
-#   "remoteEnv": { "CLIPBOARD_SERVER_URL": "http://host.docker.internal:8766" }
+#   "remoteEnv": { "CLIPBOARD_SERVER_URL": "http://host.docker.internal:8767" }
 CLIPBOARD_SERVER_URL = os.environ.get("CLIPBOARD_SERVER_URL", "").rstrip("/")
 
 def _ip_in_range(ip: str, cidr: str) -> bool:

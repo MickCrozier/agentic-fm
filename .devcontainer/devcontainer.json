@@ -51,6 +51,6 @@
   "remoteEnv": {
     "ANTHROPIC_API_KEY": "${localEnv:ANTHROPIC_API_KEY}",
     "PATH": "${containerEnv:PATH}:/home/vscode/bin",
-    "CLIPBOARD_SERVER_URL": "http://host.docker.internal:8766"
+    "CLIPBOARD_SERVER_URL": "http://host.docker.internal:8767"
   }
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Runs every time the dev container starts.
 
-CLIPBOARD_SERVER_URL="${CLIPBOARD_SERVER_URL:-http://host.docker.internal:8766}"
+CLIPBOARD_SERVER_URL="${CLIPBOARD_SERVER_URL:-http://host.docker.internal:8767}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # ---------------------------------------------------------------------------
