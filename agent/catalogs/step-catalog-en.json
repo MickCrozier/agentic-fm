@@ -3926,7 +3926,7 @@
         "type": "fieldOrVariable",
         "hrLabel": "Target",
         "required": false,
-        "notes": "Dual-format: <Field table=\"\" id=\"0\" name=\"\"/> for field, or <Text/><Field></Field> for variable. When omitted, uses active field."
+        "notes": "Dual-format: <Field table=\"\" id=\"0\" name=\"\"/> for field, or <Field>$variable</Field> for variable (no <Text/> sentinel required — FM identifies variables by $ prefix). When omitted, uses active field."
       },
       {
         "xmlElement": "Calculation",
@@ -3961,7 +3961,8 @@
         "notes": "Not shown in HR. False = auto-encode special chars. True = leave URL as-is."
       }
     ],
-    "hrSignature": "[ Select ; With dialog: On|Off ; Target: Table::Field| ; calc_url ; Verify SSL Certificates ; cURL options: calc ]",
+    "hrSignature": "[ Select: On ; With dialog: On|Off ; Target: Table::Field|$var ; calc_url ; Verify SSL Certificates: On|Off ; cURL options: calc ; On|Off ]",
+    "hrNotes": "CRITICAL: all positional slots must be explicitly stated for hr-to-xml to parse correctly. Omitting any slot (e.g. skipping 'Verify SSL Certificates: Off') causes the parser to misidentify subsequent params. The trailing On|Off is DontEncodeURL. Canonical form from xml-to-hr: [ Select: On ; With dialog: Off ; Target: $var ; \"url\" ; Verify SSL Certificates: Off ; cURL options: calc ; Off ]",
     "monacoSnippet": null,
     "blockPair": null,
     "status": "complete",

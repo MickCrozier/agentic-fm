@@ -63,7 +63,7 @@ If `PROJECT.md` exists at the project root, read it at session start. It contain
 
 # Overview
 
-This project is designed to create FileMaker objects — primarily scripts and calculations — in the clipboard-supported fmxmlsnippet format. Developers reference and use the HR (human-readable) format for scripts. The following folders are used.
+This project creates FileMaker objects — primarily scripts and calculations. Scripts are authored in **human-readable (HR) format** and converted to fmxmlsnippet XML by the plugin (`POST /api/hr-to-xml`). Developers read and write HR format; fmxmlsnippet is the deployment artifact. The following folders are used.
 
 - _sandbox/_ is where all newly created or in-progress work is stored.
 - _CONTEXT.json_ is the primary source of IDs, names, relationships, and other metadata for the current task. See **Context system** below.
@@ -140,42 +140,44 @@ The agentic-fm script collection and OData-based automation are documented in `a
 
 # Output format
 
-The developer always works in **human-readable (HR) script format**. The agent's final deliverable is **fmxmlsnippet XML** written to `agent/sandbox/`.
+Scripts are authored in **human-readable (HR) format** and converted to fmxmlsnippet XML by the plugin. This is the primary workflow when the plugin is reachable.
+
+## HR authoring (primary — plugin required)
+
+Write the script in HR format, save to `agent/sandbox/<name>.txt`, then convert via the plugin:
+
+```bash
+TOKEN=$(grep AGFM_PLUGIN_TOKEN /workspaces/agentic-fm/.env.local | cut -d= -f2)
+URL=$(grep AGFM_PLUGIN_URL /workspaces/agentic-fm/.env.local | cut -d= -f2)
+curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  --data-raw "{\"hr\": $(cat agent/sandbox/myscript.txt | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')}" \
+  $URL/api/hr-to-xml | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["xml"]) if d["ok"] else print("ERROR:", d)' \
+  > agent/sandbox/myscript.xml
+```
+
+The response includes `conversionWarnings` and `validation.diagnostics` — check these before deploying. The converted XML is standard fmxmlsnippet ready for `deploy.py`.
+
+## fmxmlsnippet authoring (fallback — plugin unavailable)
+
+When the plugin is not reachable, write fmxmlsnippet XML directly to `agent/sandbox/`:
 
 - Output should contain ONLY script steps within the `<fmxmlsnippet type="FMObjectList">` wrapper — **do NOT wrap in `<Script>` tags**.
 - Use the simplified fmxmlsnippet syntax from the step catalog, NOT the verbose XML format found in xml_parsed/scripts.
-- The `script-preview` skill generates an HR preview before XML generation — use it when the developer wants to review logic before committing to XML.
-- Line numbers always reference the human-readable script (`scripts_sanitized/`), never the raw XML.
-
-## fmxmlsnippet rules
+- The id attribute of most tags can be 0 — FileMaker auto-assigns on paste.
+- Certain steps require a matching partner (If/End If, Loop/End Loop, etc.). The catalog's `blockPair` field identifies these relationships and each step's role (`open`, `middle`, `close`).
+- The `selfClosing` flag in the catalog indicates `<Step ... />` vs `<Step ...>...</Step>`.
 
 > **CRITICAL — No XML comments in fmxmlsnippet output**
 >
 > XML comments (`<!-- -->`) are **silently discarded** when FileMaker reads fmxmlsnippet content from the clipboard. Never use XML comments to document script intent — use FileMaker script steps instead:
 >
 > - **Inline comment** → `# (comment)` step (`id="89"`)
->   ```xml
->   <Step enable="True" id="89" name="# (comment)">
->     <Text>This is an inline comment visible in the Script Workspace.</Text>
->   </Step>
->   ```
 > - **Blank line** → empty self-closing `# (comment)` with no `<Text>` element
->   ```xml
->   <Step enable="True" id="89" name="# (comment)"/>
->   ```
 > - **Doc block comment** → disabled `Insert Text` step targeting `$README`
->   ```xml
->   <Step enable="False" id="61" name="Insert Text">
->     <SelectAll state="False"/>
->     <Text>PARAMETER FORMAT:&#xD;  JSONSetElement ( "{}" ; ...</Text>
->     <Field>$README</Field>
->   </Step>
->   ```
 
-- The id attribute of most tags can be 0 — FileMaker auto-assigns on paste.
-- Certain steps require a matching partner (If/End If, Loop/End Loop, etc.). The catalog's `blockPair` field identifies these relationships and each step's role (`open`, `middle`, `close`).
-- The `selfClosing` flag in the catalog indicates `<Step ... />` vs `<Step ...>...</Step>`.
 - XML comments within snippet_examples are for reference only — never include them in output.
+
+- Line numbers always reference the human-readable script (`scripts_sanitized/`), never the raw XML.
 
 # Core workflow
 
@@ -193,8 +195,9 @@ The developer always works in **human-readable (HR) script format**. The agent's
 
 **MANDATORY: After writing or updating a file within agent/sandbox/:**
 
-6. Run `python3 -m agent.fmlint agent/sandbox/<filename>` to validate. Fix any ERROR-severity diagnostics before presenting to the user; review WARNING-severity.
-7. Deploy using `agent/scripts/deploy.py`. Use the tier appropriate for the situation (see `agent/config/automation.json`). When falling back to Tier 1 (manual paste), present instructions in this exact format:
+6. Convert HR to XML via `POST /api/hr-to-xml`. The response includes `validation.diagnostics` (the lint result) and `conversionWarnings` — fix any errors before proceeding. No separate lint step is needed.
+   **Fallback (plugin unavailable, XML authored directly):** run `python3 -m agent.fmlint agent/sandbox/<filename>` manually.
+7. Deploy the XML using `agent/scripts/deploy.py`. `deploy.py` does not run the linter. Use the tier appropriate for the situation (see `agent/config/automation.json`). When falling back to Tier 1 (manual paste), present instructions in this exact format:
 
 > The script is on your clipboard. To install it:
 >
