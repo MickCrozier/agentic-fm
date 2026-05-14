@@ -315,21 +315,25 @@ When you detect you are in a limited sandbox:
 > ```
 > Then switch to FileMaker's Script Workspace and press **Cmd+V**.
 >
-> Note: `clipboard.py` requires `osascript` and cannot run inside the container. Use `deploy.py` instead — it detects the container environment and POSTs to the companion automatically.
+> Note: `clipboard.py` requires `osascript` and cannot run inside the container. Use `deploy.py` instead — it detects the container environment and routes automatically.
+>
+> **Preferred path — agentic-fm plugin (Tier 4):** When `AGFM_PLUGIN_URL` and `AGFM_PLUGIN_TOKEN` are present in `.env.local`, `deploy.py` auto-upgrades to Tier 4 and uses the plugin at `http://host.docker.internal:8766` directly (navigate → insert → save, no AppleScript). This is the preferred deploy path from a container.
+>
+> **Fallback — companion server (Tiers 2/3):** If the plugin is unavailable, `deploy.py` falls back to the companion server at `http://host.docker.internal:8767` for AppleScript-based clipboard/paste operations.
 
 ---
 
 ## Companion server and network topology
 
-The companion server (`agent/scripts/companion_server.py`) is the HTTP bridge between FileMaker and the agent toolchain. Where it runs matters:
+The agentic-fm **plugin** (port 8766) is the primary integration point for deploy, clipboard, and context operations. The **companion server** (`agent/scripts/companion_server.py`, port 8767) is the fallback for AppleScript-based Tier 2/3 operations. Network topology:
 
-| Scenario | Where companion runs | How FM reaches it | How agent reaches it |
-|----------|---------------------|-------------------|---------------------|
-| **Native macOS** | Same machine as FM | `localhost:8765` | `localhost:8765` |
-| **Agent in Docker on macOS** | macOS host | `localhost:8765` (FM) | `host.docker.internal:8765` |
-| **FMS in Docker, agent on host** | macOS host | `host.docker.internal:8765` | `localhost:8765` |
-| **Full-access sandbox** | Started by agent on host | `localhost:8765` | `localhost:8765` |
-| **Restricted sandbox** | Developer starts on host | `localhost:8765` | Not reachable (use filesystem) |
+| Scenario | Plugin (8766) from agent | Companion (8767) from agent |
+|----------|--------------------------|-----------------------------|
+| **Native macOS** | `localhost:8766` | `localhost:8767` |
+| **Agent in Docker on macOS** | `host.docker.internal:8766` | `host.docker.internal:8767` |
+| **FMS in Docker, agent on host** | `localhost:8766` | `localhost:8767` |
+| **Full-access sandbox** | `localhost:8766` | `localhost:8767` |
+| **Restricted sandbox** | Not reachable (use filesystem) | Not reachable (use filesystem) |
 
 **Key environment variable:** `COMPANION_BIND_HOST` controls the bind address. Default is `127.0.0.1`. Can be set to `0.0.0.0` when the companion needs to accept connections from containers or VMs — but **only on private networks (RFC 1918) and only with explicit user confirmation**. See the security warning in §2c above.
 

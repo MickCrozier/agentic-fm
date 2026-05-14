@@ -193,6 +193,47 @@ Note that `pb.clearContents()` is required before writing — without it, stale 
 
 ---
 
+## Reading layout objects
+
+Layout XML is large and verbose (~1–2 MB for a complex layout). It contains all object definitions, button actions, styles, and conditional formatting.
+
+### How to copy a layout
+
+The agent cannot copy a layout autonomously — the user must do it in FileMaker:
+
+1. Switch to **Layout Mode** on the target layout
+2. **⌘A** — select all objects
+3. **⌘C** — copy
+
+This places the layout XML on the clipboard as class `XML2` (`LayoutObjectList`).
+
+### Reading the clipboard (sandboxed / dev container)
+
+In a sandboxed or containerised environment, `clipboard.py` is not available. Read the clipboard via the companion server:
+
+```bash
+curl -s http://host.docker.internal:8767/clipboard
+# Returns: {"success": true, "xml": "<fmxmlsnippet type=\"LayoutObjectList\">..."}
+```
+
+The plugin's `/api/clipboard` endpoint does **not** reliably decode layout XML — always use the companion server (port 8767) for layout reads.
+
+### Extracting button script actions
+
+Layout XML is too large to read in full. Grep or parse for `<Script>` elements and nearby `<Step name="Perform Script">` steps to extract button actions:
+
+```python
+import json, xml.etree.ElementTree as ET
+d = json.load(open(...))
+root = ET.fromstring(d['xml'])
+for step in root.findall('.//Step[@name="Perform Script"]'):
+    scr = step.find('Script')
+    param = step.find('.//Calculation')
+    print(scr.get('name'), param.text if param is not None else '')
+```
+
+---
+
 ## Reference
 
 The approach above is derived from [FmClipTools](https://github.com/DanShockley/FmClipTools) by Daniel A. Shockley and Erik Shagdar, which provides a complete AppleScript library for FileMaker clipboard operations including batch conversion, prettifying, and class detection.
