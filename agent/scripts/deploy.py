@@ -660,7 +660,6 @@ def _tier4(
     plugin_url: str,
     plugin_token: str,
     target_script: str | None,
-    auto_save: bool = False,
     select_all: bool = True,
 ) -> dict:
     """Deploy using the plugin's direct Script Workspace API.
@@ -879,6 +878,82 @@ def _tier4_patch(
 
 
 # ---------------------------------------------------------------------------
+# Schema modification via ModifySchema script
+# ---------------------------------------------------------------------------
+
+def modify_schema(sql: str) -> dict:
+    """Execute a DDL statement via the ModifySchema script through AGFM_Bridge.
+
+    Args:
+        sql: A DDL statement e.g. "CREATE TABLE Foo (id VARCHAR(255))"
+
+    Returns:
+        Result dict with success/message/error.
+    """
+    import time
+
+    config = _load_config()
+    plugin_url = (config.get("plugin_url") or "").rstrip("/") or None
+    plugin_token = config.get("plugin_token") or None
+
+    if not plugin_url or not plugin_token:
+        return {"success": False, "error": "modify_schema() requires plugin_url and plugin_token"}
+
+    result = _post_json(
+        f"{plugin_url}/api/performscript",
+        {
+            "scriptName": "AGFM_Bridge",
+            "parameter": {
+                "command": "performScript",
+                "scriptName": "ModifySchema",
+                "parameter": sql,
+            },
+        },
+        token=plugin_token,
+    )
+
+    eval_id = result.get("id")
+    if not eval_id:
+        return {"success": False, "error": result.get("error", "No eval ID returned")}
+
+    time.sleep(2)
+    eval_result = _get_json(f"{plugin_url}/api/eval/{eval_id}", token=plugin_token)
+
+    if not eval_result.get("complete"):
+        return {"success": False, "error": "ModifySchema did not complete in time"}
+
+    inner = eval_result.get("result", {})
+    script_error = inner.get("scriptError", -1)
+    script_result = inner.get("result", "")
+
+    # result "0" = success, non-zero = error
+    if script_error != 0 or script_result != "0":
+        return {
+            "success": False,
+            "error": f"ModifySchema failed — scriptError: {script_error}, result: {script_result!r}",
+        }
+
+    # Verify by querying FileMaker_Tables
+    verify = _post_json(
+        f"{plugin_url}/api/query",
+        {"sql": "SELECT TableName FROM FileMaker_Tables ORDER BY TableName"},
+        token=plugin_token,
+    )
+    verify_id = verify.get("id")
+    if verify_id:
+        time.sleep(2)
+        verify_result = _get_json(f"{plugin_url}/api/eval/{verify_id}", token=plugin_token)
+        tables = verify_result.get("result", {}).get("result", "")
+    else:
+        tables = "(could not verify)"
+
+    return {
+        "success": True,
+        "message": f"DDL executed successfully.\nCurrent tables:\n{tables}",
+    }
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -977,7 +1052,7 @@ def deploy(
 
     if effective_tier == 4:
         if plugin_url and plugin_token:
-            return _tier4(xml, plugin_url, plugin_token, target_script, effective_auto_save, select_all)
+            return _tier4(xml, plugin_url, plugin_token, target_script, select_all)
         return {
             "success": False,
             "tier_used": 4,
@@ -1007,6 +1082,14 @@ def main():
         "--patch", metavar="PATCH_FILE",
         help="Path to a JSON patch file describing surgical step edits (plugin required)",
     )
+    mode_group.add_argument(
+        "--install-scripts", action="store_true",
+        help="Deploy all bundled agentic-fm helper scripts (e.g. ModifySchema) into the current solution",
+    )
+    mode_group.add_argument(
+        "--ddl", metavar="SQL",
+        help="Execute a DDL statement via ModifySchema (plugin required). Verifies result after execution.",
+    )
     parser.add_argument(
         "target_script", nargs="?", help="Script name to paste into (Tier 2/3/4, deploy mode only)"
     )
@@ -1035,6 +1118,38 @@ def main():
         help="Append after existing steps without prompting (Tier 2/4 only)"
     )
     args = parser.parse_args()
+
+    # --- DDL mode ---
+    if args.ddl:
+        result = modify_schema(args.ddl)
+        if result.get("message"):
+            print(result["message"])
+        elif result.get("error"):
+            print(f"Error: {result['error']}", file=sys.stderr)
+        sys.exit(0 if result.get("success") else 1)
+
+    # --- Install scripts mode ---
+    if args.install_scripts:
+        here = os.path.dirname(os.path.abspath(__file__))
+        scripts_dir = os.path.join(here, "..", "filemaker")
+        bundled = [
+            ("ModifySchema.xml", "ModifySchema"),
+        ]
+        all_ok = True
+        for filename, script_name in bundled:
+            xml_path = os.path.join(scripts_dir, filename)
+            if not os.path.exists(xml_path):
+                print(f"  SKIP {script_name} — {xml_path} not found", file=sys.stderr)
+                continue
+            result = deploy(xml_path, target_script=script_name, tier=1)
+            if result.get("success"):
+                print(f"  {script_name} is on the clipboard.")
+                print(f"    1. Open Script Workspace in FileMaker")
+                print(f"    2. ⌘V — paste")
+            elif result.get("error"):
+                print(f"  {script_name}: ERROR — {result['error']}", file=sys.stderr)
+                all_ok = False
+        sys.exit(0 if all_ok else 1)
 
     # --- Patch mode ---
     if args.patch:

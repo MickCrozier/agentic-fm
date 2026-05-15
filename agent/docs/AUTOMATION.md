@@ -92,3 +92,69 @@ Response shape: `{ "scriptResult": { "code": 0, "resultParameter": "<script resu
 ```
 
 Add one entry per FM file. The key must match `Get(FileName)` exactly — this is what appears in `CONTEXT.json["solution"]`. `automation.json` is gitignored; credentials are safe to store there.
+
+---
+
+## Schema modification via plugin (ModifySchema script)
+
+> **Required** — this script must be installed in every solution where schema modification is needed.
+> The script is stored at `agent/filemaker/ModifySchema.xml`. Deploy it with:
+> ```bash
+> python3 agent/scripts/deploy.py agent/filemaker/ModifySchema.xml "ModifySchema"
+> ```
+
+Some solutions include a **ModifySchema** script that accepts a DDL SQL statement as its parameter and executes it against the FM schema. This enables the agent to create tables, drop tables, and drop columns without opening Manage Database manually.
+
+### How to call ModifySchema
+
+Use `POST /api/performscript` via the plugin, routing through `AGFM_Bridge`:
+
+```bash
+curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{
+    "scriptName": "AGFM_Bridge",
+    "parameter": {
+      "command": "performScript",
+      "scriptName": "ModifySchema",
+      "parameter": "<SQL statement>"
+    }
+  }' \
+  $PLUGIN_URL/api/performscript
+```
+
+Poll the returned eval ID after **2 seconds**:
+
+```bash
+curl -s -H "Authorization: Bearer $TOKEN" $PLUGIN_URL/api/eval/<eval-id>
+```
+
+### Result codes
+
+| `result` | Meaning |
+|----------|---------|
+| `"0"` | Success — no error |
+| `"1"` | Error |
+
+### Supported DDL statements
+
+| Statement | Supported |
+|-----------|-----------|
+| `CREATE TABLE name (col type, ...)` | ✓ |
+| `DROP TABLE name` | ✓ |
+| `ALTER TABLE name DROP COLUMN col` | ✓ |
+| `ALTER TABLE name ADD COLUMN col type` | ✗ (not supported by FM SQL) |
+
+### Important rules
+
+- **ModifySchema is write-only** — do not use it for SELECT queries. Use `POST /api/query` for all reads.
+- **Always verify after modifying** — after any CREATE/DROP, confirm the change by querying `FileMaker_Tables` or `FileMaker_Fields` via `POST /api/query`:
+
+```bash
+# Verify table exists
+curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"sql": "SELECT TableName FROM FileMaker_Tables ORDER BY TableName"}' \
+  $PLUGIN_URL/api/query
+# Poll result after 2 seconds
+```
+
+- **Direct `performscript` calls hang** — calling ModifySchema directly via `scriptName: "ModifySchema"` without routing through `AGFM_Bridge` causes the eval to never complete. Always use the bridge.
