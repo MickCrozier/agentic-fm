@@ -684,19 +684,21 @@ def _tier4(
             "instructions": "Script loaded to clipboard. No target script specified — paste manually (⌘V).",
         }
 
-    # Step 1: navigate to the script
-    nav = _post_json(
-        f"{plugin_url}/api/ui/script/navigate",
-        {"scriptName": target_script},
-        token=plugin_token,
-        timeout=35,
-    )
-    if not (nav.get("success") or nav.get("ok")):
-        return {
-            "success": False,
-            "tier_used": 4,
-            "error": nav.get("error", f"Could not navigate to '{target_script}'"),
-        }
+    # Step 1: navigate to the script — only if it isn't already open
+    current = _get_json(f"{plugin_url}/api/ui/script", token=plugin_token)
+    if current.get("scriptName") != target_script:
+        nav = _post_json(
+            f"{plugin_url}/api/ui/script/navigate",
+            {"scriptName": target_script},
+            token=plugin_token,
+            timeout=35,
+        )
+        if not (nav.get("success") or nav.get("ok")):
+            return {
+                "success": False,
+                "tier_used": 4,
+                "error": nav.get("error", f"Could not navigate to '{target_script}'"),
+            }
 
     # Step 2: delete existing steps if replacing — read step count first, then
     # delete by explicit index list (the API does not support {"all": true})
