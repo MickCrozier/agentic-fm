@@ -916,7 +916,7 @@ def modify_schema(sql: str) -> dict:
     if not eval_id:
         return {"success": False, "error": result.get("error", "No eval ID returned")}
 
-    time.sleep(2)
+    time.sleep(5)
     eval_result = _get_json(f"{plugin_url}/api/eval/{eval_id}", token=plugin_token)
 
     if not eval_result.get("complete"):

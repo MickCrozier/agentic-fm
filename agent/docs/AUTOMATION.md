@@ -97,6 +97,14 @@ Add one entry per FM file. The key must match `Get(FileName)` exactly — this i
 
 ## Schema modification via plugin (ModifySchema script)
 
+> **Preferred method for all schema changes** — always use `deploy.py --ddl` when the ModifySchema script is available. Only fall back to OData REST calls or manual Manage Database if the script is not installed.
+
+```bash
+python3 agent/scripts/deploy.py --ddl "CREATE TABLE MyTable (MyField VARCHAR(100))"
+python3 agent/scripts/deploy.py --ddl "ALTER TABLE MyTable ADD COLUMN AnotherField NUMERIC"
+python3 agent/scripts/deploy.py --ddl "DROP TABLE MyTable"
+```
+
 > **Required** — this script must be installed in every solution where schema modification is needed.
 > The script is stored at `agent/filemaker/ModifySchema.xml`. Deploy it with:
 > ```bash
@@ -143,6 +151,14 @@ curl -s -H "Authorization: Bearer $TOKEN" $PLUGIN_URL/api/eval/<eval-id>
 | `DROP TABLE name` | ✓ |
 | `ALTER TABLE name DROP COLUMN col` | ✓ |
 | `ALTER TABLE name ADD COLUMN col type` | ✗ (not supported by FM SQL) |
+
+### Error handling
+
+Timeout and other errors from `deploy.py --ddl` are most likely caused by a privilege issue or the ModifySchema script not being available in the target file — not a genuine timeout. When a DDL call returns an error:
+
+1. **Check whether it worked first** — query `FileMaker_Tables` or `FileMaker_Fields` via `POST /api/query` to see if the change was applied.
+2. If the change is present, treat it as a success and continue.
+3. If the change is absent, stop and advise the developer — do not retry blindly. Likely causes: the account lacks DDL privileges, or ModifySchema is not installed in the target file.
 
 ### Important rules
 
