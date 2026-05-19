@@ -235,8 +235,23 @@ def _tier1(
     target_file: str | None = None,
     plugin_url: str | None = None,
     plugin_token: str | None = None,
+    new_script: bool = False,
 ) -> dict:
     """Write XML to clipboard, return paste instructions."""
+    if new_script and target_script:
+        # Wrap steps in a full <Script> element so FM creates the script on paste
+        import re as _re
+        inner = _re.search(r'<fmxmlsnippet[^>]*>(.*)</fmxmlsnippet>', xml, _re.DOTALL)
+        steps = inner.group(1).strip() if inner else xml
+        script_name_escaped = target_script.replace('"', '&quot;')
+        xml = (
+            f'<fmxmlsnippet type="FMObjectList">'
+            f'<Script includeInMenu="False" SiriShortcutVisible="False" runFullAccess="False" id="0" name="{script_name_escaped}">'
+            f'{steps}'
+            f'</Script>'
+            f'</fmxmlsnippet>'
+        )
+
     result = _write_clipboard(xml, plugin_url, plugin_token, companion_url)
     if not result.get("success"):
         return {
@@ -246,7 +261,13 @@ def _tier1(
         }
 
     file_hint = f" in **{target_file}**" if target_file else ""
-    if target_script:
+    if target_script and new_script:
+        instructions = (
+            f"Script '{target_script}' is on your clipboard as a complete script object.\n"
+            f"  1. In FM Pro open Script Workspace{file_hint}\n"
+            f"  2. Paste (⌘V) — FileMaker will create the script automatically"
+        )
+    elif target_script:
         instructions = (
             f"Script loaded to clipboard.\n"
             f"  1. In FM Pro open '{target_script}'{file_hint} in Script Workspace\n"
@@ -716,6 +737,13 @@ def _tier4(
                     "tier_used": 4,
                     "error": del_result.get("error", "Failed to delete existing steps"),
                 }
+            # Wait for FM to finish deleting before inserting
+            import time
+            for _ in range(10):
+                time.sleep(0.3)
+                check = _get_json(f"{plugin_url}/api/ui/script", token=plugin_token)
+                if check.get("stepCount", step_count) == 0:
+                    break
 
     # Step 3: insert new steps (afterIndex -1 = beginning / after all deletions)
     insert_result = _post_json(
@@ -1008,6 +1036,7 @@ def deploy(
     auto_save: bool | None = None,
     select_all: bool = True,
     target_file: str | None = None,
+    new_script: bool = False,
 ) -> dict:
     """Deploy a validated fmxmlsnippet XML file to FileMaker.
 
@@ -1046,9 +1075,26 @@ def deploy(
 
     try:
         with open(xml_path, "r", encoding="utf-8") as f:
-            xml = f.read()
+            raw = f.read()
     except OSError as exc:
         return {"success": False, "error": f"Cannot read {xml_path}: {exc}"}
+
+    # Auto-convert HR (.fmscript) to fmxmlsnippet XML via plugin
+    if xml_path.endswith(".fmscript"):
+        if not (plugin_url and plugin_token):
+            return {"success": False, "error": "HR→XML conversion requires the plugin (AGFM_PLUGIN_URL / AGFM_PLUGIN_TOKEN)."}
+        conv = _post_json(f"{plugin_url}/api/hr-to-xml", {"hr": raw}, token=plugin_token)
+        if not conv.get("ok"):
+            return {"success": False, "error": f"HR→XML conversion failed: {conv}"}
+        if conv.get("conversionWarnings"):
+            for w in conv["conversionWarnings"]:
+                print(f"  [warn] {w}", file=sys.stderr)
+        xml = conv["xml"]
+    else:
+        xml = raw
+
+    if new_script:
+        return _tier1(xml, companion_url, target_script, target_file, plugin_url, plugin_token, new_script=True)
 
     if effective_tier == 4:
         if plugin_url and plugin_token:
@@ -1117,6 +1163,10 @@ def main():
         "--append", action="store_true", default=False,
         help="Append after existing steps without prompting (Tier 2/4 only)"
     )
+    parser.add_argument(
+        "--new", action="store_true", default=False,
+        help="Script does not exist yet — load to clipboard with instructions to create it first (always Tier 1)"
+    )
     args = parser.parse_args()
 
     # --- DDL mode ---
@@ -1173,7 +1223,7 @@ def main():
         effective_tier = 4
     else:
         effective_tier = cfg.get("default_tier", 1)
-    if effective_tier in (2, 4) and args.target_script:
+    if effective_tier in (2, 4) and args.target_script and not args.new:
         if args.append:
             select_all = False
         elif not args.replace:
@@ -1192,7 +1242,7 @@ def main():
             elif choice == "a":
                 select_all = False
 
-    result = deploy(args.xml_path, args.target_script, args.tier, args.auto_save, select_all, args.target_file)
+    result = deploy(args.xml_path, args.target_script, args.tier, args.auto_save, select_all, args.target_file, new_script=args.new)
 
     # Human-friendly output
     if result.get("instructions"):

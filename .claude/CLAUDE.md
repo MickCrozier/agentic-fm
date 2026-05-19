@@ -63,15 +63,19 @@ If `PROJECT.md` exists at the project root, read it at session start. It contain
 
 # Overview
 
-This project is designed to create FileMaker objects — primarily scripts and calculations — in the clipboard-supported fmxmlsnippet format. Developers reference and use the HR (human-readable) format for scripts. The following folders are used.
+This project is designed to create FileMaker objects — in the clipboard-supported fmxmlsnippet format. Developers reference and use the HR (human-readable) format for scripts. The following folders are used.
 
 - _sandbox/_ is where all newly created or in-progress work is stored.
-- _CONTEXT.json_ is the primary source of IDs, names, relationships, and other metadata for the current task. See **Context system** below.
-- _context/_ contains pre-extracted index files — a secondary lookup source. See **Context system** below.
 - _xml_parsed/_ is the XML output from the FileMaker solution. See **Context system** below.
 - _catalogs/_ contains the step catalog (`step-catalog-en.json`) — a structured index of all FileMaker script steps with parameter definitions, types, enums, and HR signatures. This is the primary reference for step XML structure.
 - _snippet_examples/_ is an **archival** reference folder. The step catalog is the single source of truth for step structure. Read snippet_examples only when the catalog's `notes` field is insufficient.
 - _fmlint/_ is the FMLint linter package. Run via `python3 -m agent.fmlint` to validate fmxmlsnippet XML or human-readable scripts.
+- Context is everything in FileMaker. Depending on the enviorment and available tools, there are different ways of deriving context. See **Context system** below.
+    1. Use the Plugin API
+    2. _CONTEXT.json_ is the primary source of IDs, names, relationships, and other metadata for the current task. 
+        - _context/_ contains pre-extracted index files — a secondary lookup source.
+
+
 
 # Context system
 
@@ -134,18 +138,28 @@ Only fall back to grepping `agent/xml_parsed/` if neither the plugin, CONTEXT.js
 - `custom_menus/` and `custom_menu_sets/` contain one XML file per custom menu/set
 - Do NOT read `xml_parsed/layouts/` unless analyzing layout objects — layout XML is extremely verbose and rarely needed; layout IDs and names are available via the plugin or `layouts.index`
 
-## Automation
+## Automation and Deployment
 
-The agentic-fm script collection and OData-based automation are documented in `agent/docs/AUTOMATION.md`. See that file when triggering FM scripts programmatically or working with `agent/config/automation.json`.
+The agentic-fm script collection and OData-based automation are documented in `agent/docs/AUTOMATION.md`. See that file for deplying changes to FileMaker and when working with `agent/config/automation.json`.
 
 # Output format
 
-The developer always works in **human-readable (HR) script format**. The agent's final deliverable is **fmxmlsnippet XML** written to `agent/sandbox/`.
+## Scripts
+The developer always works in **human-readable (HR) script format** and is written to `agent/sandbox/`. 
 
-- Output should contain ONLY script steps within the `<fmxmlsnippet type="FMObjectList">` wrapper — **do NOT wrap in `<Script>` tags**.
+- **Always use `.fmscript` as the file extension** — never `.txt`. The deploy script detects `.fmscript` to trigger automatic HR→XML conversion via the plugin.
 - Use the simplified fmxmlsnippet syntax from the step catalog, NOT the verbose XML format found in xml_parsed/scripts.
-- The `script-preview` skill generates an HR preview before XML generation — use it when the developer wants to review logic before committing to XML.
-- Line numbers always reference the human-readable script (`scripts_sanitized/`), never the raw XML.
+- Line numbers always reference the human-readable script, never the raw XML.
+- Scripts should be written in a testable way with clear inputs and outputs where possible
+
+## Calculations
+Calculations are text based. Written to `agent/sandbox/`. 
+- Use .fmfn as the type
+
+## Custom Functions
+Custom Functions are stored in the Custom Function space of FileMaker. Written to `agent/sandbox/`. 
+- Use .fmfn as the type
+- The comment header needs to be clear what the Custom Function Name is, and what are the required inputs. These will will be translated later when converting.
 
 ## fmxmlsnippet rules
 
@@ -179,27 +193,27 @@ The developer always works in **human-readable (HR) script format**. The agent's
 
 # Core workflow
 
-## Before writing
+## Before writing scripts, functions and calculations
 
 **MANDATORY: Before writing ANY script or function:**
 
-1. Read `agent/CONTEXT.json` for the task description and all reference IDs (when present)
+1. Read the CONTEXT for the task description and all reference IDs (when present)
 2. Read `agent/docs/CODING_CONVENTIONS.md` — all generated FileMaker code must follow these conventions
 3. Scan `agent/docs/knowledge/MANIFEST.md` for keyword matches against the current task — read and apply matching documents
 4. For scripts: grep the step catalog for each step type used (see **Step catalog** below)
-5. Substitute the specific IDs/names/values from CONTEXT.json
+5. Substitute the specific IDs/names/values from the CONTEXT
 
-## After writing
+## After writing scripts, functions and calculations
 
 **MANDATORY: After writing or updating a file within agent/sandbox/:**
 
-6. Run `python3 -m agent.fmlint agent/sandbox/<filename>` to validate. Fix any ERROR-severity diagnostics before presenting to the user; review WARNING-severity.
+6. Lint the script, either using the plugin "/api/lint/status" to check available, then "/api/lint" OR "Run `python3 -m agent.fmlint agent/sandbox/<filename>` to validate. Fix any ERROR-severity diagnostics before presenting to the user; review WARNING-severity.
 7. Deploy using `agent/scripts/deploy.py`. Use the tier appropriate for the situation (see `agent/config/automation.json`). When falling back to Tier 1 (manual paste), present instructions in this exact format:
 
 > The script is on your clipboard. To install it:
 >
-> 1. Open **Script Name** in Script Workspace
-> 2. **⌘A** — select all existing steps and delete
+> 1. Open **Script Name** in Script Workspace OR Open Script Workspace (if clipboard is a new scripts)
+> 2. **⌘A** — select all existing steps and delete (only if not a new script)
 > 3. **⌘V** — paste
 
 **Container and non-macOS environments**: `deploy.py` detects the runtime environment automatically. When running inside a Docker container or any non-macOS host, AppleScript execution is delegated to the companion server on the macOS host via `/trigger`. No special handling is needed — just call `deploy.py` the same way.
@@ -289,44 +303,70 @@ grep -A 60 '"name": "Step Name"' "agent/catalogs/step-catalog-en.json"
 
 # Clipboard
 
-FileMaker objects are transferred via the macOS clipboard using proprietary binary descriptor classes — **not** plain text. Never use `pbpaste` or `pbcopy`; they corrupt multi-byte UTF-8 characters.
+FileMaker objects are transferred via the macOS clipboard using proprietary binary descriptor classes — **not** plain text. Never use `pbpaste` or `pbcopy`; they corrupt multi-byte UTF-8 characters. Scripts must be converted from HR to XML before being written to the clipboard.
 
-## Native macOS
+Three methods are available, in priority order. Inside a dev container, replace `localhost` with `host.docker.internal` in all URLs.
 
-On native macOS, use `clipboard.py`:
+## 1. AGFM Plugin (preferred)
 
+When `AGFM_PLUGIN_URL` is set in `.env.local`, the plugin is the preferred method. `deploy.py` uses it automatically — call it directly only when needed.
+
+Base URL: `localhost:8766` (native) or `host.docker.internal:8766` (dev container).
+
+**Write XML to FM clipboard:**
 ```bash
-# Read FM objects from clipboard → save as XML
-python3 agent/scripts/clipboard.py read agent/sandbox/output.xml
-
-# Write XML file → clipboard (ready to paste into FileMaker)
-python3 agent/scripts/clipboard.py write agent/sandbox/myscript.xml
-```
-
-The write command auto-detects the correct clipboard class from the XML content. For full technical details, see `agent/docs/CLIPBOARD.md`.
-
-## Dev Container or Non-macOS Environment
-
-**`clipboard.py` does not work in containers** — it requires NSPasteboard or osascript, neither of which exist in a sandboxed environment.
-
-**The companion server must be running on the macOS host machine.** The container accesses clipboard operations via HTTP requests to the companion server's `/clipboard` endpoints using `host.docker.internal` (Docker) or the actual host IP.
-
-### Companion server clipboard endpoints
-
-The companion server exposes two clipboard endpoints:
-
-**Read from clipboard:**
-```bash
-curl -X GET http://host.docker.internal:8765/clipboard
-# Returns: {"success": true, "xml": "<fmxmlsnippet...>"}
-```
-
-**Write to clipboard:**
-```bash
-curl -X POST http://host.docker.internal:8765/clipboard \
+TOKEN=$(grep AGFM_PLUGIN_TOKEN /workspaces/agentic-fm/.env.local | cut -d= -f2)
+URL=$(grep AGFM_PLUGIN_URL /workspaces/agentic-fm/.env.local | cut -d= -f2)
+curl -s -X POST $URL/api/clipboard/write \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"xml": "<fmxmlsnippet...>"}'
 # Returns: {"success": true}
+```
+
+**Read FM objects from clipboard:**
+```bash
+TOKEN=$(grep AGFM_PLUGIN_TOKEN /workspaces/agentic-fm/.env.local | cut -d= -f2)
+URL=$(grep AGFM_PLUGIN_URL /workspaces/agentic-fm/.env.local | cut -d= -f2)
+curl -s -X POST $URL/api/clipboard/read \
+  -H "Authorization: Bearer $TOKEN"
+# Returns: {"success": true, "xml": "<fmxmlsnippet...>"}
+```
+
+## 2. Companion Server (plugin unavailable, native macOS)
+
+When the plugin is not available and running natively on macOS, use the companion server on port 8765.
+
+**Write XML to FM clipboard:**
+```bash
+curl -s -X POST http://localhost:8765/clipboard \
+  -H "Content-Type: application/json" \
+  -d '{"xml": "<fmxmlsnippet...>"}'
+# Returns: {"success": true}
+```
+
+**Read FM objects from clipboard:**
+```bash
+curl -s -X GET http://localhost:8765/clipboard
+# Returns: {"success": true, "xml": "<fmxmlsnippet...>"}
+```
+
+## 3. Clipboard Server (plugin unavailable, dev container)
+
+When the plugin is not available and running inside a dev container, use the Clipboard Server (`host_clipboard_server.py`) running on the macOS host. Reached via `host.docker.internal:8767`. `clipboard.py` cannot be used in containers.
+
+**Write XML to FM clipboard:**
+```bash
+curl -s -X POST http://host.docker.internal:8767/clipboard \
+  -H "Content-Type: application/json" \
+  -d '{"xml": "<fmxmlsnippet...>"}'
+# Returns: {"success": true}
+```
+
+**Read FM objects from clipboard:**
+```bash
+curl -s -X GET http://host.docker.internal:8767/clipboard
+# Returns: {"success": true, "xml": "<fmxmlsnippet...>"}
 ```
 
 
@@ -340,7 +380,7 @@ Custom functions fall into three categories:
 2. **Functional code** — general-purpose utility logic with no field references (e.g. `FormatPhone ( phoneNumber )`). Safe to call from any context.
 3. **Solution-specific code** — contain references to fields or table occurrences. Before using one, verify the script will be running on a layout whose base TO supports the referenced fields.
 
-When CONTEXT.json includes a `custom_functions` section, prefer it. Otherwise, check:
+When the CONTEXT includes a `custom_functions` section, prefer it. Otherwise, check:
 
 - `xml_parsed/custom_functions_sanitized/` — human-readable calculation text
 - `xml_parsed/custom_function_calcs/` — XML calculation definitions

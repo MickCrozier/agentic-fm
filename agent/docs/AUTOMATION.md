@@ -5,6 +5,55 @@ The agentic-fm script collection (`filemaker/agentic-fm.xml`) contains the FM-si
 - **Manually**: developer runs them from the Scripts menu in FM Pro
 - **Via OData** (when configured): agent calls FM scripts through `AGFMScriptBridge`
 
+## Plugin API discovery
+
+Always use `GET /api/discover` to find available plugin endpoints rather than guessing. This returns the full list of supported routes with descriptions.
+
+```bash
+TOKEN=$(grep AGFM_PLUGIN_TOKEN /workspaces/agentic-fm/.env.local | cut -d= -f2)
+URL=$(grep AGFM_PLUGIN_URL /workspaces/agentic-fm/.env.local | cut -d= -f2)
+curl -s -H "Authorization: Bearer $TOKEN" "$URL/api/discover"
+```
+
+### Key plugin endpoints
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/hr-to-xml` | POST | Convert human-readable `.fmscript` to fmxmlsnippet XML |
+| `/api/xml-to-hr` | POST | Convert fmxmlsnippet XML to human-readable format |
+| `/api/validate` | POST | Validate fmxmlsnippet XML |
+| `/api/validate-hr` | POST | Validate a human-readable script |
+| `/api/clipboard/write` | POST | Write fmxmlsnippet XML to the FM clipboard |
+| `/api/ui/script/navigate` | POST | Navigate Script Workspace to a named script |
+| `/api/ui/script/insert` | POST | Insert steps at a given index |
+| `/api/ui/script/save` | POST | Save the open script |
+
+**HR → XML is the required step before deploying any `.fmscript` file.** deploy.py handles this automatically — pass the `.fmscript` path directly and it calls `/api/hr-to-xml` before writing to the clipboard.
+
+## Deploying scripts with deploy.py
+
+```bash
+# Existing script — replace steps (Tier 4 auto-selected when plugin creds are present)
+python3 agent/scripts/deploy.py agent/sandbox/MyScript.fmscript "My Script" --replace
+
+# New script — loads to clipboard with instructions to create it first (always Tier 1)
+python3 agent/scripts/deploy.py agent/sandbox/MyScript.fmscript "My Script" --new
+```
+
+### Flags
+
+| Flag | Purpose |
+|------|---------|
+| `--new` | Script does not exist yet. Forces Tier 1 — writes to clipboard and prints instructions to create the script manually, then paste. |
+| `--replace` | Replace all existing steps without prompting (Tier 2/4). |
+| `--append` | Append after existing steps without prompting (Tier 2/4). |
+| `--tier N` | Override auto-selected tier (1–4). |
+| `--file NAME` | Target a specific FM file (multi-file solutions). |
+
+### HR script auto-conversion
+
+deploy.py detects `.fmscript` files and calls `POST /api/hr-to-xml` on the plugin before deploying. Conversion warnings (unresolved layouts, fields) are printed to stderr but do not block deployment — FileMaker resolves IDs by name on paste as long as the objects exist.
+
 ## Docker networking
 
 When FM Server runs in a Docker container and the companion server runs on the host, OData-triggered scripts execute server-side inside the container. In that case `localhost:8765` in the FM scripts will not reach the companion server — use `host.docker.internal:8765` instead.
