@@ -36,15 +36,20 @@ curl -s -H "Authorization: Bearer $TOKEN" "$URL/api/discover"
 # Existing script — replace steps (Tier 4 auto-selected when plugin creds are present)
 python3 agent/scripts/deploy.py agent/sandbox/MyScript.fmscript "My Script" --replace
 
-# New script — loads to clipboard with instructions to create it first (always Tier 1)
-python3 agent/scripts/deploy.py agent/sandbox/MyScript.fmscript "My Script" --new
+# New scripts — bundle one or more into a single clipboard paste (always Tier 1)
+# Script names are derived from filenames, or pass --names to set them explicitly
+python3 agent/scripts/deploy.py --bundle agent/sandbox/ScriptA.fmscript agent/sandbox/ScriptB.fmscript
+python3 agent/scripts/deploy.py --bundle agent/sandbox/A.fmscript agent/sandbox/B.fmscript --names "Script A" "Script B"
 ```
+
+`--bundle` writes a multi-script `fmxmlsnippet` to the clipboard. Open Script Workspace in FileMaker and **⌘V** — FM creates all scripts at once.
 
 ### Flags
 
 | Flag | Purpose |
 |------|---------|
-| `--new` | Script does not exist yet. Forces Tier 1 — writes to clipboard and prints instructions to create the script manually, then paste. |
+| `--bundle FILE [FILE ...]` | Bundle one or more scripts into a single clipboard paste (always Tier 1). |
+| `--names NAME [NAME ...]` | Script names for `--bundle` (one per file; derived from filename if omitted). |
 | `--replace` | Replace all existing steps without prompting (Tier 2/4). |
 | `--append` | Append after existing steps without prompting (Tier 2/4). |
 | `--tier N` | Override auto-selected tier (1–4). |

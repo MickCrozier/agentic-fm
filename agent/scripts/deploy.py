@@ -39,6 +39,11 @@ import urllib.request
 # Config
 # ---------------------------------------------------------------------------
 
+# Temporary: force all clipboard writes through the host clipboard server
+# (host.docker.internal:8767) instead of the plugin endpoint.
+# Set to False to restore the default behaviour (plugin preferred).
+FORCE_HOST_CLIPBOARD = True
+
 DEFAULT_CONFIG = {
     "default_tier": 1,
     "auto_save": False,
@@ -114,6 +119,76 @@ def _resolve_target_file(config: dict) -> str | None:
         return next(iter(solutions))
 
     return None
+
+
+# ---------------------------------------------------------------------------
+# Post-conversion XML patcher
+# ---------------------------------------------------------------------------
+
+def _extract_js_params(hr_source: str) -> list:
+    """Return ordered list of parameter lists for each Perform JavaScript step in hr_source.
+
+    Each entry is a list of FM expressions (strings). Steps with no Parameters clause
+    get an empty list.
+    """
+    import re
+    results = []
+    # Match the bracketed body of each Perform JavaScript step
+    for m in re.finditer(
+        r'Perform JavaScript in Web Viewer\s*\[([^\]]+)\]',
+        hr_source,
+    ):
+        body = m.group(1)
+        # Find the Parameters: clause — everything after "Parameters:" up to end of body
+        params_match = re.search(r';\s*Parameters:\s*(.+)$', body.strip())
+        if params_match:
+            raw = params_match.group(1).strip()
+            # Multiple params are separated by " ; " in HR format
+            params = [p.strip() for p in re.split(r'\s*;\s*', raw)]
+        else:
+            params = []
+        results.append(params)
+    return results
+
+
+def _patch_converted_xml(xml: str, hr_source: str | None = None) -> str:
+    """Fix known HR→XML conversion bugs that the plugin's hr-to-xml endpoint gets wrong.
+
+    1. Perform JavaScript in Web Viewer: plugin emits <WebViewerObjectName> but
+       FileMaker requires <ObjectName>. Replace the wrapper element name.
+    2. Perform JavaScript in Web Viewer: Parameters element is dropped entirely.
+       Reconstruct from hr_source (when provided) and inject into each step.
+    """
+    import re
+
+    xml = xml.replace("<WebViewerObjectName>", "<ObjectName>")
+    xml = xml.replace("</WebViewerObjectName>", "</ObjectName>")
+
+    if hr_source:
+        js_params = _extract_js_params(hr_source)
+        if js_params:
+            step_iter = iter(js_params)
+            def _inject(m):
+                try:
+                    params = next(step_iter)
+                except StopIteration:
+                    return m.group(0)
+                step_xml = m.group(0)
+                if not params or '<Parameters' in step_xml:
+                    return step_xml
+                params_xml = f'<Parameters Count="{len(params)}">' + ''.join(
+                    f'<P><Calculation><![CDATA[{p}]]></Calculation></P>'
+                    for p in params
+                ) + '</Parameters>'
+                return step_xml.replace('</Step>', params_xml + '</Step>')
+            xml = re.sub(
+                r'<Step[^>]*id="175"[^>]*>.*?</Step>',
+                _inject,
+                xml,
+                flags=re.DOTALL,
+            )
+
+    return xml
 
 
 # ---------------------------------------------------------------------------
@@ -221,9 +296,9 @@ def _switch_to_document(
 def _write_clipboard(xml: str, plugin_url: str | None, plugin_token: str | None,
                      companion_url: str) -> dict:
     """Write XML to FM clipboard. Prefers plugin if available, falls back to companion."""
-    if plugin_url and plugin_token:
-        result = _post_json(f"{plugin_url}/api/clipboard/write", {"xml": xml}, token=plugin_token)
-        if result.get("success"):
+    if not FORCE_HOST_CLIPBOARD and plugin_url and plugin_token:
+        result = _post_json(f"{plugin_url}/api/clipboard/write", {"xml": xml, "type": "XMSS"}, token=plugin_token)
+        if result.get("success") or result.get("ok"):
             return result
     return _post_json(f"{companion_url}/clipboard", {"xml": xml})
 
@@ -235,23 +310,8 @@ def _tier1(
     target_file: str | None = None,
     plugin_url: str | None = None,
     plugin_token: str | None = None,
-    new_script: bool = False,
 ) -> dict:
     """Write XML to clipboard, return paste instructions."""
-    if new_script and target_script:
-        # Wrap steps in a full <Script> element so FM creates the script on paste
-        import re as _re
-        inner = _re.search(r'<fmxmlsnippet[^>]*>(.*)</fmxmlsnippet>', xml, _re.DOTALL)
-        steps = inner.group(1).strip() if inner else xml
-        script_name_escaped = target_script.replace('"', '&quot;')
-        xml = (
-            f'<fmxmlsnippet type="FMObjectList">'
-            f'<Script includeInMenu="False" SiriShortcutVisible="False" runFullAccess="False" id="0" name="{script_name_escaped}">'
-            f'{steps}'
-            f'</Script>'
-            f'</fmxmlsnippet>'
-        )
-
     result = _write_clipboard(xml, plugin_url, plugin_token, companion_url)
     if not result.get("success"):
         return {
@@ -261,13 +321,7 @@ def _tier1(
         }
 
     file_hint = f" in **{target_file}**" if target_file else ""
-    if target_script and new_script:
-        instructions = (
-            f"Script '{target_script}' is on your clipboard as a complete script object.\n"
-            f"  1. In FM Pro open Script Workspace{file_hint}\n"
-            f"  2. Paste (⌘V) — FileMaker will create the script automatically"
-        )
-    elif target_script:
+    if target_script:
         instructions = (
             f"Script loaded to clipboard.\n"
             f"  1. In FM Pro open '{target_script}'{file_hint} in Script Workspace\n"
@@ -693,9 +747,9 @@ def _tier4(
     Falls back to Tier 1 clipboard-only if the plugin calls fail.
     """
     if not target_script:
-        result = _post_json(
-            f"{plugin_url}/api/clipboard/write", {"xml": xml}, token=plugin_token
-        )
+        config = _load_config()
+        companion_url = config.get("companion_url", "http://local.hub:8767").rstrip("/")
+        result = _write_clipboard(xml, plugin_url, plugin_token, companion_url)
         if not (result.get("success") or result.get("ok")):
             return {"success": False, "tier_used": 4, "error": result.get("error", "Clipboard write failed")}
         return {
@@ -745,10 +799,11 @@ def _tier4(
                 if check.get("stepCount", step_count) == 0:
                     break
 
-    # Step 3: insert new steps (afterIndex -1 = beginning / after all deletions)
+    # Step 3: write to clipboard with explicit XMSS type, then insert
+    _post_json(f"{plugin_url}/api/clipboard/write", {"xml": xml, "type": "XMSS"}, token=plugin_token)
     insert_result = _post_json(
         f"{plugin_url}/api/ui/script/insert",
-        {"xml": xml, "afterIndex": -1},
+        {"xml": xml, "afterIndex": -1, "type": "XMSS"},
         token=plugin_token,
     )
     if not (insert_result.get("success") or insert_result.get("ok")):
@@ -982,8 +1037,111 @@ def modify_schema(sql: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Bundle helpers — multi-script clipboard assembly
+# ---------------------------------------------------------------------------
+
+def _bundle_to_xml(
+    files: list,
+    names: list,
+    plugin_url: "str | None",
+    plugin_token: "str | None",
+) -> "tuple[str | None, str | None]":
+    """Convert multiple script files into a single multi-script fmxmlsnippet.
+
+    Returns (xml, error) — one will be None.
+    """
+    import re as _re
+
+    scripts_xml = []
+    for path, name in zip(files, names):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                raw = f.read()
+        except OSError as exc:
+            return None, f"Cannot read {path}: {exc}"
+
+        if path.endswith(".fmscript"):
+            if not (plugin_url and plugin_token):
+                return None, f"HR→XML conversion requires the plugin ({path})"
+            conv = _post_json(f"{plugin_url}/api/hr-to-xml", {"hr": raw}, token=plugin_token)
+            if not conv.get("ok"):
+                return None, f"HR→XML conversion failed for {path}: {conv}"
+            for w in conv.get("conversionWarnings", []):
+                print(f"  [warn] {path}: {w}", file=sys.stderr)
+            xml = _patch_converted_xml(conv["xml"], hr_source=raw)
+        else:
+            xml = raw
+
+        inner = _re.search(r'<fmxmlsnippet[^>]*>(.*)</fmxmlsnippet>', xml, _re.DOTALL)
+        steps = inner.group(1).strip() if inner else xml
+
+        if not name:
+            name = os.path.splitext(os.path.basename(path))[0]
+
+        name_esc = name.replace('"', '&quot;')
+        scripts_xml.append(
+            f'<Script includeInMenu="False" SiriShortcutVisible="False" runFullAccess="False" id="0" name="{name_esc}">'
+            f'{steps}'
+            f'</Script>'
+        )
+
+    combined = (
+        '<fmxmlsnippet type="FMObjectList">'
+        + ''.join(scripts_xml)
+        + '</fmxmlsnippet>'
+    )
+    return combined, None
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
+def bundle(
+    files: list,
+    names: "list | None" = None,
+) -> dict:
+    """Bundle multiple scripts into a single clipboard paste.
+
+    Args:
+        files: List of paths to .fmscript or .xml files.
+        names: Optional list of script names (one per file).
+               Derived from filename if None or shorter than files.
+
+    Returns:
+        Result dict with success/tier_used/instructions/error.
+    """
+    config = _load_config()
+    plugin_url = (config.get("plugin_url") or "").rstrip("/") or None
+    plugin_token = config.get("plugin_token") or None
+    companion_url = config.get("companion_url", "http://local.hub:8767").rstrip("/")
+    target_file = _resolve_target_file(config)
+
+    effective_names = list(names or [])
+    if len(effective_names) < len(files):
+        effective_names += [None] * (len(files) - len(effective_names))
+
+    xml, error = _bundle_to_xml(files, effective_names, plugin_url, plugin_token)
+    if error:
+        return {"success": False, "error": error}
+
+    result = _write_clipboard(xml, plugin_url, plugin_token, companion_url)
+    if not result.get("success"):
+        return {"success": False, "tier_used": 1, "error": result.get("error", "Clipboard write failed")}
+
+    resolved_names = [
+        effective_names[i] or os.path.splitext(os.path.basename(f))[0]
+        for i, f in enumerate(files)
+    ]
+    file_hint = f" in **{target_file}**" if target_file else ""
+    script_list = ", ".join(f"'{n}'" for n in resolved_names)
+    instructions = (
+        f"{len(files)} script(s) bundled to clipboard: {script_list}\n"
+        f"  1. Open Script Workspace{file_hint}\n"
+        f"  2. Paste (⌘V) — FileMaker will create all scripts automatically"
+    )
+    return {"success": True, "tier_used": 1, "instructions": instructions}
+
 
 def patch(
     patch_path_or_dict: "str | dict",
@@ -1036,23 +1194,22 @@ def deploy(
     auto_save: bool | None = None,
     select_all: bool = True,
     target_file: str | None = None,
-    new_script: bool = False,
 ) -> dict:
     """Deploy a validated fmxmlsnippet XML file to FileMaker.
 
     Args:
         xml_path:      Path to the fmxmlsnippet XML file.
-        target_script: Name of the script to paste into (Tier 2/3).
-        tier:          Override the configured default tier (1, 2, or 3).
+        target_script: Name of the script to paste into (Tier 2/3/4).
+        tier:          Override the configured default tier (1–4).
         auto_save:     Override the configured auto_save setting.
-        select_all:    Replace (True) or append (False) existing steps (Tier 2).
+        select_all:    Replace (True) or append (False) existing steps (Tier 2/4).
         target_file:   FM file name to target (for multi-file solutions).
                        Auto-resolved from CONTEXT.json or automation.json if None.
 
     Returns:
         Result dict — always contains 'success' and 'tier_used'.
         Tier 1 / fallback: also contains 'instructions' to show the developer.
-        Tier 2/3 success: also contains 'message' for logging.
+        Tier 2/3/4 success: also contains 'message' for logging.
     """
     config = _load_config()
     effective_auto_save = auto_save if auto_save is not None else bool(config.get("auto_save", False))
@@ -1089,12 +1246,9 @@ def deploy(
         if conv.get("conversionWarnings"):
             for w in conv["conversionWarnings"]:
                 print(f"  [warn] {w}", file=sys.stderr)
-        xml = conv["xml"]
+        xml = _patch_converted_xml(conv["xml"], hr_source=raw)
     else:
         xml = raw
-
-    if new_script:
-        return _tier1(xml, companion_url, target_script, target_file, plugin_url, plugin_token, new_script=True)
 
     if effective_tier == 4:
         if plugin_url and plugin_token:
@@ -1136,6 +1290,14 @@ def main():
         "--ddl", metavar="SQL",
         help="Execute a DDL statement via ModifySchema (plugin required). Verifies result after execution.",
     )
+    mode_group.add_argument(
+        "--bundle", metavar="FILE", nargs="+",
+        help="Bundle multiple .fmscript/.xml files into one clipboard paste (always Tier 1 — paste into Script Workspace)",
+    )
+    parser.add_argument(
+        "--names", nargs="+", metavar="NAME",
+        help="Script names for --bundle (one per file; derived from filename if omitted)",
+    )
     parser.add_argument(
         "target_script", nargs="?", help="Script name to paste into (Tier 2/3/4, deploy mode only)"
     )
@@ -1162,10 +1324,6 @@ def main():
     paste_group.add_argument(
         "--append", action="store_true", default=False,
         help="Append after existing steps without prompting (Tier 2/4 only)"
-    )
-    parser.add_argument(
-        "--new", action="store_true", default=False,
-        help="Script does not exist yet — load to clipboard with instructions to create it first (always Tier 1)"
     )
     args = parser.parse_args()
 
@@ -1201,6 +1359,15 @@ def main():
                 all_ok = False
         sys.exit(0 if all_ok else 1)
 
+    # --- Bundle mode ---
+    if args.bundle:
+        result = bundle(args.bundle, args.names)
+        if result.get("instructions"):
+            print(result["instructions"])
+        elif result.get("error"):
+            print(f"Error: {result['error']}", file=sys.stderr)
+        sys.exit(0 if result.get("success") else 1)
+
     # --- Patch mode ---
     if args.patch:
         result = patch(args.patch)
@@ -1223,7 +1390,7 @@ def main():
         effective_tier = 4
     else:
         effective_tier = cfg.get("default_tier", 1)
-    if effective_tier in (2, 4) and args.target_script and not args.new:
+    if effective_tier in (2, 4) and args.target_script:
         if args.append:
             select_all = False
         elif not args.replace:
@@ -1242,7 +1409,7 @@ def main():
             elif choice == "a":
                 select_all = False
 
-    result = deploy(args.xml_path, args.target_script, args.tier, args.auto_save, select_all, args.target_file, new_script=args.new)
+    result = deploy(args.xml_path, args.target_script, args.tier, args.auto_save, select_all, args.target_file)
 
     # Human-friendly output
     if result.get("instructions"):
