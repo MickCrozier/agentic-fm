@@ -1,0 +1,26 @@
+{
+  "name": "fmscript-syntax",
+  "displayName": "FileMaker Script Syntax",
+  "description": "Syntax highlighting for .fmscript human-readable FileMaker script files",
+  "version": "0.0.1",
+  "publisher": "agentic-fm",
+  "engines": { "vscode": "^1.60.0" },
+  "categories": ["Programming Languages"],
+  "contributes": {
+    "languages": [
+      {
+        "id": "fmscript",
+        "aliases": ["FileMaker Script", "fmscript"],
+        "extensions": [".fmscript"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "fmscript",
+        "scopeName": "source.fmscript",
+        "path": "./syntaxes/fmscript.tmLanguage.json"
+      }
+    ]
+  }
+}
