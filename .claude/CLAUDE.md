@@ -65,7 +65,7 @@ If `PROJECT.md` exists at the project root, read it at session start. It contain
 
 This project is designed to create FileMaker objects — in the clipboard-supported fmxmlsnippet format. Developers reference and use the HR (human-readable) format for scripts. The following folders are used.
 
-- _sandbox/_ is where all newly created or in-progress work is stored.
+- _sandbox/_ is where all newly created or in-progress work is stored. **Always organise sandbox files into a subfolder named after the solution** — e.g. `agent/sandbox/MySolution/MyScript.fmscript`. The solution name comes from `CONTEXT.json["solution"]` or the plugin `/api/context`. Never write files directly into the sandbox root.
 - _xml_parsed/_ is the XML output from the FileMaker solution. See **Context system** below.
 - _catalogs/_ contains the step catalog (`step-catalog-en.json`) — a structured index of all FileMaker script steps with parameter definitions, types, enums, and HR signatures. This is the primary reference for step XML structure.
 - _snippet_examples/_ is an **archival** reference folder. The step catalog is the single source of truth for step structure. Read snippet_examples only when the catalog's `notes` field is insufficient.
@@ -145,9 +145,15 @@ The agentic-fm script collection and OData-based automation are documented in `a
 # Output format
 
 ## Scripts
-The developer always works in **human-readable (HR) script format** and is written to `agent/sandbox/`. 
 
-- **Always use `.fmscript` as the file extension** — never `.txt`. The deploy script detects `.fmscript` to trigger automatic HR→XML conversion via the plugin.
+**Script format depends on plugin availability:**
+
+- **Plugin available** — always write scripts as human-readable (`.fmscript`). This is the preferred format: readable, diffable, and auto-converted to XML by `deploy.py` via `/api/hr-to-xml` before deployment or bundling.
+- **Plugin unavailable** — write scripts directly as fmxmlsnippet XML (`.xml`). HR→XML conversion requires the plugin; there is no other converter. This is less readable but the only option without the plugin.
+
+Check plugin availability before starting: `GET $AGFM_PLUGIN_URL/api/context` (see `.env.local`). If the plugin is reachable, use `.fmscript`. If not, use `.xml`.
+
+- **Always use `.fmscript` or `.xml` as the file extension** — never `.txt`. The deploy script detects `.fmscript` to trigger automatic HR→XML conversion.
 - Use the simplified fmxmlsnippet syntax from the step catalog, NOT the verbose XML format found in xml_parsed/scripts.
 - Line numbers always reference the human-readable script, never the raw XML.
 - Scripts should be written in a testable way with clear inputs and outputs where possible
@@ -208,13 +214,26 @@ Custom Functions are stored in the Custom Function space of FileMaker. Written t
 **MANDATORY: After writing or updating a file within agent/sandbox/:**
 
 6. Lint the script, either using the plugin "/api/lint/status" to check available, then "/api/lint" OR "Run `python3 -m agent.fmlint agent/sandbox/<filename>` to validate. Fix any ERROR-severity diagnostics before presenting to the user; review WARNING-severity.
-7. Deploy using `agent/scripts/deploy.py`. Use the tier appropriate for the situation (see `agent/config/automation.json`). When falling back to Tier 1 (manual paste), present instructions in this exact format:
+7. Deploy using `agent/scripts/deploy.py`. Use the tier appropriate for the situation (see `agent/config/automation.json`). When falling back to Tier 1 (manual paste into an existing script), present instructions in this exact format:
 
 > The script is on your clipboard. To install it:
 >
-> 1. Open **Script Name** in Script Workspace OR Open Script Workspace (if clipboard is a new scripts)
-> 2. **⌘A** — select all existing steps and delete (only if not a new script)
+> 1. Open **Script Name** in Script Workspace
+> 2. **⌘A** — select all existing steps and delete
 > 3. **⌘V** — paste
+
+For new scripts that don't exist yet, use `--bundle` instead of deploying directly — this writes a complete `<Script>` object to the clipboard so FileMaker creates the script on paste:
+
+```bash
+python3 agent/scripts/deploy.py --bundle agent/sandbox/MyScript.fmscript --names "My Script Name"
+```
+
+> The script is on your clipboard as a new script object. To install it:
+>
+> 1. Open Script Workspace
+> 2. **⌘V** — FileMaker will create the script automatically
+
+**If deploy fails, stop and ask the developer.** Do not retry with different flags, tiers, or clipboard workarounds. The developer can almost always unblock it (e.g. open Script Workspace, navigate to the script, ensure FileMaker is in the foreground). Ask what they see and wait for their guidance before trying again.
 
 **Container and non-macOS environments**: `deploy.py` detects the runtime environment automatically. When running inside a Docker container or any non-macOS host, AppleScript execution is delegated to the companion server on the macOS host via `/trigger`. No special handling is needed — just call `deploy.py` the same way.
 
