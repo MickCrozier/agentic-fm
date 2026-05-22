@@ -4869,7 +4869,7 @@
         "required": false
       }
     ],
-    "hrSignature": "[ Indefinitely | Duration (seconds): <n> ]",
+    "hrSignature": "[ Indefinitely | ForDuration ; <n> ]",
     "monacoSnippet": null,
     "blockPair": null,
     "status": "complete",
