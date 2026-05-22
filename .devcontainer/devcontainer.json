@@ -29,23 +29,63 @@
     "8081": { "label": "agentic-fm layout editor" }
   },
 
-  "customizations": {
-    "vscode": {
-      "extensions": [
-        "ms-python.python",
-        "ms-python.pylint",
-        "anthropic.claude-code",
-        "jwillinghalpern.filemaker-vscode"
-      ],
-      "settings": {
-        "python.defaultInterpreterPath": "/usr/local/bin/python3",
-        "terminal.integrated.defaultProfile.linux": "bash",
-        "claudeCode.allowDangerouslySkipPermissions": true,
-        "claudeCode.initialPermissionMode": "bypassPermissions"
-            
+"customizations": {
+
+  "vscode": {
+
+    "extensions": [
+
+      "ms-python.python",
+
+      "ms-python.pylint",
+
+      "anthropic.claude-code",
+
+      "jwillinghalpern.filemaker-vscode"
+
+    ],
+
+    "settings": {
+
+      "python.defaultInterpreterPath": "/usr/local/bin/python3",
+
+      "terminal.integrated.defaultProfile.linux": "bash",
+
+      "claudeCode.allowDangerouslySkipPermissions": true,
+
+      "claudeCode.initialPermissionMode": "bypassPermissions",
+
+      "files.watcherExclude": {
+
+        "**/.git/objects/**": true,
+
+        "**/.git/subtree-cache/**": true,
+
+        "**/__pycache__/**": true,
+
+        "**/.pytest_cache/**": true,
+
+        "**/.mypy_cache/**": true,
+
+        "**/.ruff_cache/**": true,
+
+        "**/venv/**": true,
+
+        "**/.venv/**": true,
+
+        "**/node_modules/**": true,
+
+        "**/dist/**": true,
+
+        "**/build/**": true
+
       }
+
     }
-  },
+
+  }
+
+},
 
 
   "remoteEnv": {
