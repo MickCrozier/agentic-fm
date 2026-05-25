@@ -146,14 +146,11 @@ The agentic-fm script collection and OData-based automation are documented in `a
 
 ## Scripts
 
-**Script format depends on plugin availability:**
+**Always write scripts as human-readable (`.fmscript`).** This is the required format regardless of plugin availability — readable, diffable, and auto-converted to XML by `deploy.py` via `/api/hr-to-xml` before deployment or bundling.
 
-- **Plugin available** — always write scripts as human-readable (`.fmscript`). This is the preferred format: readable, diffable, and auto-converted to XML by `deploy.py` via `/api/hr-to-xml` before deployment or bundling.
-- **Plugin unavailable** — write scripts directly as fmxmlsnippet XML (`.xml`). HR→XML conversion requires the plugin; there is no other converter. This is less readable but the only option without the plugin.
+Note: HR→XML conversion requires the plugin. If the plugin is unavailable at deploy time, the `.fmscript` file is still the correct output — hold deployment until the plugin is reachable.
 
-Check plugin availability before starting: `GET $AGFM_PLUGIN_URL/api/context` (see `.env.local`). If the plugin is reachable, use `.fmscript`. If not, use `.xml`.
-
-- **Always use `.fmscript` or `.xml` as the file extension** — never `.txt`. The deploy script detects `.fmscript` to trigger automatic HR→XML conversion.
+- **Always use `.fmscript` as the file extension** — never `.xml` or `.txt`. The deploy script detects `.fmscript` to trigger automatic HR→XML conversion.
 - Use the simplified fmxmlsnippet syntax from the step catalog, NOT the verbose XML format found in xml_parsed/scripts.
 - Line numbers always reference the human-readable script, never the raw XML.
 - Scripts should be written in a testable way with clear inputs and outputs where possible
@@ -174,28 +171,12 @@ Custom Functions are stored in the Custom Function space of FileMaker. Written t
 > XML comments (`<!-- -->`) are **silently discarded** when FileMaker reads fmxmlsnippet content from the clipboard. Never use XML comments to document script intent — use FileMaker script steps instead:
 >
 > - **Inline comment** → `# (comment)` step (`id="89"`)
->   ```xml
->   <Step enable="True" id="89" name="# (comment)">
->     <Text>This is an inline comment visible in the Script Workspace.</Text>
->   </Step>
->   ```
 > - **Blank line** → empty self-closing `# (comment)` with no `<Text>` element
->   ```xml
->   <Step enable="True" id="89" name="# (comment)"/>
->   ```
 > - **Doc block comment** → disabled `Insert Text` step targeting `$README`
->   ```xml
->   <Step enable="False" id="61" name="Insert Text">
->     <SelectAll state="False"/>
->     <Text>PARAMETER FORMAT:&#xD;  JSONSetElement ( "{}" ; ...</Text>
->     <Field>$README</Field>
->   </Step>
->   ```
 
-- The id attribute of most tags can be 0 — FileMaker auto-assigns on paste.
-- Certain steps require a matching partner (If/End If, Loop/End Loop, etc.). The catalog's `blockPair` field identifies these relationships and each step's role (`open`, `middle`, `close`).
-- The `selfClosing` flag in the catalog indicates `<Step ... />` vs `<Step ...>...</Step>`.
 - XML comments within snippet_examples are for reference only — never include them in output.
+
+- Line numbers always reference the human-readable script (`scripts_sanitized/`), never the raw XML.
 
 # Core workflow
 
@@ -214,7 +195,7 @@ Custom Functions are stored in the Custom Function space of FileMaker. Written t
 **MANDATORY: After writing or updating a file within agent/sandbox/:**
 
 6. Lint the script, either using the plugin "/api/lint/status" to check available, then "/api/lint" OR "Run `python3 -m agent.fmlint agent/sandbox/<filename>` to validate. Fix any ERROR-severity diagnostics before presenting to the user; review WARNING-severity.
-7. Deploy using `agent/scripts/deploy.py`. Use the tier appropriate for the situation (see `agent/config/automation.json`). When falling back to Tier 1 (manual paste into an existing script), present instructions in this exact format:
+7. Deploy using `agent/scripts/agfm_bridge.py deploy` when the plugin is available, or `agent/scripts/deploy.py` as fallback. Use the tier appropriate for the situation (see `agent/config/automation.json`). When falling back to Tier 1 (manual paste into an existing script), present instructions in this exact format:
 
 > The script is on your clipboard. To install it:
 >
