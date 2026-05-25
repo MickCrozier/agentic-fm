@@ -2,7 +2,7 @@
   "name": "fmscript-syntax",
   "displayName": "FileMaker Script Syntax",
   "description": "Syntax highlighting and step completions for .fmscript FileMaker script files",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "publisher": "agentic-fm",
   "engines": { "vscode": "^1.60.0" },
   "categories": ["Programming Languages"],
