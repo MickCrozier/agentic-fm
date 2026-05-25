@@ -140,7 +140,7 @@ Only fall back to grepping `agent/xml_parsed/` if neither the plugin, CONTEXT.js
 
 ## Automation and Deployment
 
-The agentic-fm script collection and OData-based automation are documented in `agent/docs/AUTOMATION.md`. See that file for deplying changes to FileMaker and when working with `agent/config/automation.json`.
+The agentic-fm plugin interface (`agfm_bridge.py`) and OData-based automation are documented in `agent/docs/PLUGIN.md`. See that file for deploying changes to FileMaker and when working with `agent/config/automation.json`.
 
 # Output format
 
@@ -194,8 +194,29 @@ Custom Functions are stored in the Custom Function space of FileMaker. Written t
 
 **MANDATORY: After writing or updating a file within agent/sandbox/:**
 
-6. Lint the script, either using the plugin "/api/lint/status" to check available, then "/api/lint" OR "Run `python3 -m agent.fmlint agent/sandbox/<filename>` to validate. Fix any ERROR-severity diagnostics before presenting to the user; review WARNING-severity.
-7. Deploy using `agent/scripts/agfm_bridge.py deploy` when the plugin is available, or `agent/scripts/deploy.py` as fallback. Use the tier appropriate for the situation (see `agent/config/automation.json`). When falling back to Tier 1 (manual paste into an existing script), present instructions in this exact format:
+6. Lint: `python3 agent/scripts/agfm_bridge.py lint agent/sandbox/<filename>` (falls back to local fmlint automatically). Fix any ERROR-severity diagnostics before presenting to the user; review WARNING-severity.
+7. Deploy — use the first available method:
+
+**Plugin available (primary):**
+```bash
+# Existing script — replace steps
+python3 agent/scripts/agfm_bridge.py deploy agent/sandbox/MyScript.fmscript "My Script"
+
+# New script — bundle to clipboard, then ⌘V in Script Workspace
+python3 agent/scripts/agfm_bridge.py bundle agent/sandbox/MyScript.fmscript --names "My Script"
+
+# Surgical edits
+python3 agent/scripts/agfm_bridge.py patch agent/sandbox/mypatch.json
+```
+
+**Plugin unavailable (fallback) — deploy.py, Tier 1 → 2 → 3:**
+```bash
+python3 agent/scripts/deploy.py agent/sandbox/MyScript.fmscript "My Script"
+# or for new scripts:
+python3 agent/scripts/deploy.py --bundle agent/sandbox/MyScript.fmscript --names "My Script"
+```
+
+When falling back to Tier 1 (manual paste into an existing script), present instructions in this exact format:
 
 > The script is on your clipboard. To install it:
 >
@@ -203,30 +224,16 @@ Custom Functions are stored in the Custom Function space of FileMaker. Written t
 > 2. **⌘A** — select all existing steps and delete
 > 3. **⌘V** — paste
 
-For new scripts that don't exist yet, use `--bundle` instead of deploying directly — this writes a complete `<Script>` object to the clipboard so FileMaker creates the script on paste:
-
-```bash
-python3 agent/scripts/deploy.py --bundle agent/sandbox/MyScript.fmscript --names "My Script Name"
-```
+For new scripts bundled to clipboard:
 
 > The script is on your clipboard as a new script object. To install it:
 >
 > 1. Open Script Workspace
 > 2. **⌘V** — FileMaker will create the script automatically
 
-**If deploy fails, stop and ask the developer.** Do not retry with different flags, tiers, or clipboard workarounds. The developer can almost always unblock it (e.g. open Script Workspace, navigate to the script, ensure FileMaker is in the foreground). Ask what they see and wait for their guidance before trying again.
+**If deploy fails, stop and ask the developer.** Do not retry with different flags, tiers, or clipboard workarounds. Ask what they see and wait for their guidance.
 
-**Container and non-macOS environments**: `deploy.py` detects the runtime environment automatically. When running inside a Docker container or any non-macOS host, AppleScript execution is delegated to the companion server on the macOS host via `/trigger`. No special handling is needed — just call `deploy.py` the same way.
-
-**Auto-upgrade to Tier 4**: When `AGFM_PLUGIN_URL` and `AGFM_PLUGIN_TOKEN` are present in `.env.local`, `deploy.py` automatically uses Tier 4 (direct plugin) regardless of `default_tier` in `automation.json`, unless an explicit `--tier` flag is passed.
-
-**Patch mode** (surgical edits): Instead of replacing all steps, you can apply targeted step-level changes to an existing script using a JSON patch file:
-
-```bash
-python3 agent/scripts/deploy.py --patch agent/sandbox/mypatch.json
-```
-
-Patch file format:
+**Patch file format** (for `agfm_bridge.py patch` or `deploy.py --patch`):
 ```json
 {
   "script": "Script Name",
@@ -237,12 +244,6 @@ Patch file format:
   ]
 }
 ```
-
-- `insert` — inserts steps after the given 0-based index (`afterIndex: -1` prepends)
-- `delete` — deletes the listed step indices (apply highest-first to avoid drift; the function handles ordering automatically)
-- `replace` — deletes `steps`, then inserts `xml` at that position
-
-Patch mode requires the plugin (Tier 4) and will error if plugin creds are missing. Apply changes in highest-index-first order within the `changes` array to avoid index drift when making multiple edits.
 
 ## Lookup decision tree
 
@@ -305,68 +306,38 @@ grep -A 60 '"name": "Step Name"' "agent/catalogs/step-catalog-en.json"
 
 FileMaker objects are transferred via the macOS clipboard using proprietary binary descriptor classes — **not** plain text. Never use `pbpaste` or `pbcopy`; they corrupt multi-byte UTF-8 characters. Scripts must be converted from HR to XML before being written to the clipboard.
 
-Three methods are available, in priority order. Inside a dev container, replace `localhost` with `host.docker.internal` in all URLs.
+## Priority order
 
-## 1. AGFM Plugin (preferred)
+Use the first available method:
 
-When `AGFM_PLUGIN_URL` is set in `.env.local`, the plugin is the preferred method. `deploy.py` uses it automatically — call it directly only when needed.
+1. **`agfm_bridge.py`** (plugin) — primary for all clipboard and deploy operations.
+2. **`deploy.py`** (Tier 2/3, companion server) — plugin unavailable, native macOS with AppleScript.
+3. **`deploy.py`** (Tier 1, host clipboard server) — plugin unavailable, dev container, no AppleScript.
 
-Base URL: `localhost:8766` (native) or `host.docker.internal:8766` (dev container).
+`agfm_bridge.py` handles the clipboard fallback to the host server internally — no manual switching needed.
 
-**Write XML to FM clipboard:**
+## 1. agfm_bridge.py (plugin — primary)
+
 ```bash
-TOKEN=$(grep AGFM_PLUGIN_TOKEN /workspaces/agentic-fm/.env.local | cut -d= -f2)
-URL=$(grep AGFM_PLUGIN_URL /workspaces/agentic-fm/.env.local | cut -d= -f2)
-curl -s -X POST $URL/api/clipboard/write \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"xml": "<fmxmlsnippet...>"}'
-# Returns: {"success": true}
+# Write XML file to FM clipboard
+python3 agent/scripts/agfm_bridge.py clipboard-write agent/sandbox/MyScript.xml
+
+# Read FM clipboard contents
+python3 agent/scripts/agfm_bridge.py clipboard-read
 ```
 
-**Read FM objects from clipboard:**
+`agfm_bridge.py` automatically falls back to `host.docker.internal:8767` if the plugin clipboard endpoint fails.
+
+## 2 & 3. deploy.py (plugin unavailable)
+
+`deploy.py` selects the correct tier automatically based on environment and `.env.local`:
+
+- **Tier 4** — plugin present (`AGFM_PLUGIN_URL` set): delegates to `agfm_bridge.py` behaviour
+- **Tier 2/3** — native macOS, no plugin: companion server + AppleScript
+- **Tier 1** — dev container, no plugin: host clipboard server (`host.docker.internal:8767`), manual paste
+
 ```bash
-TOKEN=$(grep AGFM_PLUGIN_TOKEN /workspaces/agentic-fm/.env.local | cut -d= -f2)
-URL=$(grep AGFM_PLUGIN_URL /workspaces/agentic-fm/.env.local | cut -d= -f2)
-curl -s -X POST $URL/api/clipboard/read \
-  -H "Authorization: Bearer $TOKEN"
-# Returns: {"success": true, "xml": "<fmxmlsnippet...>"}
-```
-
-## 2. Companion Server (plugin unavailable, native macOS)
-
-When the plugin is not available and running natively on macOS, use the companion server on port 8765.
-
-**Write XML to FM clipboard:**
-```bash
-curl -s -X POST http://localhost:8765/clipboard \
-  -H "Content-Type: application/json" \
-  -d '{"xml": "<fmxmlsnippet...>"}'
-# Returns: {"success": true}
-```
-
-**Read FM objects from clipboard:**
-```bash
-curl -s -X GET http://localhost:8765/clipboard
-# Returns: {"success": true, "xml": "<fmxmlsnippet...>"}
-```
-
-## 3. Clipboard Server (plugin unavailable, dev container)
-
-When the plugin is not available and running inside a dev container, use the Clipboard Server (`host_clipboard_server.py`) running on the macOS host. Reached via `host.docker.internal:8767`. `clipboard.py` cannot be used in containers.
-
-**Write XML to FM clipboard:**
-```bash
-curl -s -X POST http://host.docker.internal:8767/clipboard \
-  -H "Content-Type: application/json" \
-  -d '{"xml": "<fmxmlsnippet...>"}'
-# Returns: {"success": true}
-```
-
-**Read FM objects from clipboard:**
-```bash
-curl -s -X GET http://host.docker.internal:8767/clipboard
-# Returns: {"success": true, "xml": "<fmxmlsnippet...>"}
+python3 agent/scripts/deploy.py agent/sandbox/MyScript.fmscript "Script Name"
 ```
 
 
