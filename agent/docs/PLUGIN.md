@@ -89,6 +89,21 @@ Fallback order when plugin is unavailable: `CONTEXT.json` → index files → `x
 | `POST` | `/api/ui/script/save` | Save the open script (⌘S) — required after insert/delete |
 | `POST` | `/api/ui/script/select` | Select steps by 0-based index: `{"steps": [0, 1, 2]}` |
 
+#### Reading / copying an existing script
+
+`GET /api/ui/script` is the primary way to read a script's content — use it whenever you need to copy, reference, or review an existing script.
+
+> **Note:** `/api/ui/script/navigate` is broken — ask the user to open the script in Script Workspace manually before reading.
+
+```bash
+curl -s -H "Authorization: Bearer $TOKEN" "$URL/api/ui/script" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+for i, s in enumerate(d.get('steps', [])):
+    print(f'{i:3d}  {s}')
+"
+```
+
 #### Reading scripts longer than 200 steps
 
 `GET /api/ui/script` returns a 200-step window that follows the selected step. To read a script with more than 200 steps:

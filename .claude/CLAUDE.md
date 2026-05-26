@@ -128,6 +128,35 @@ curl -s -H "Authorization: Bearer $TOKEN" -X POST $URL/api/query \
 
 Search with grep: `grep "Invoices Details" "agent/context/SolutionApp/layouts.index"`
 
+## Reading existing script content
+
+When asked to copy, reference, or modify an existing script, use the first available method:
+
+**Plugin available (primary):**
+
+The `/api/ui/script` endpoint reads whatever script is currently open in Script Workspace. Since `/api/ui/script/navigate` is broken, ask the user to open the script manually first.
+
+```
+GET /api/ui/script        → returns steps[] array (up to 200 steps per window)
+```
+
+```bash
+TOKEN=$(grep AGFM_PLUGIN_TOKEN /workspaces/agentic-fm/.env.local | cut -d= -f2)
+URL=$(grep AGFM_PLUGIN_URL /workspaces/agentic-fm/.env.local | cut -d= -f2)
+curl -s -H "Authorization: Bearer $TOKEN" "$URL/api/ui/script" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+for i, s in enumerate(d.get('steps', [])):
+    print(f'{i:3d}  {s}')
+"
+```
+
+For scripts longer than 200 steps, see the pagination instructions in `agent/docs/PLUGIN.md`.
+
+**Plugin unavailable (fallback):**
+
+`agent/xml_parsed/scripts_sanitized/{SolutionName}/` contains human-readable script files — but only for solutions that have been exported. If the folder doesn't exist for the current solution, there is no local copy; ask the developer.
+
 ## xml_parsed (last resort)
 
 Only fall back to grepping `agent/xml_parsed/` if neither the plugin, CONTEXT.json, nor index files have the needed information.
