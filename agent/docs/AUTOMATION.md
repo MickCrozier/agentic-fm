@@ -160,9 +160,9 @@ python3 agent/scripts/deploy.py --ddl "DROP TABLE MyTable"
 ```
 
 > **Required** — this script must be installed in every solution where schema modification is needed.
-> The script is stored at `agent/filemaker/ModifySchema.xml`. Deploy it with:
+> The script is stored at `filemaker/ModifySchema.xml`. Deploy it with:
 > ```bash
-> python3 agent/scripts/agfm_bridge.py bundle agent/filemaker/ModifySchema.xml --names "ModifySchema"
+> python3 agent/scripts/agfm_bridge.py bundle filemaker/ModifySchema.xml --names "ModifySchema"
 > ```
 
 Some solutions include a **ModifySchema** script that accepts a DDL SQL statement as its parameter and executes it against the FM schema. This enables the agent to create tables, drop tables, and drop columns without opening Manage Database manually.
