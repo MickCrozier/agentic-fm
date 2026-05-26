@@ -72,6 +72,10 @@ pnpm-lock.yaml
 .env.production.local
 .env*.local
 
+# All local files
+*.local.*
+*.local
+
 # Build Output
 .astro/
 dist/
