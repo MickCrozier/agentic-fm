@@ -77,7 +77,7 @@ Fallback order when plugin is unavailable: `CONTEXT.json` → index files → `x
 | `GET` | `/api/clipboard` | Read current FM clipboard (class, xml, size) |
 | `POST` | `/api/clipboard/write` | Write fmxmlsnippet XML to FM clipboard |
 
-> **Layout XML**: The plugin cannot switch to Layout mode or copy layout objects. Ask the user to switch to Layout mode, select all (⌘A), copy (⌘C), then read via `GET /api/clipboard`. In a container, the companion server at port 8767 is more reliable for large layout reads.
+> **Layout XML**: The plugin cannot switch to Layout mode or copy layout objects. Ask the user to switch to Layout mode, select all (⌘A), copy (⌘C), then read via `GET /api/clipboard`.
 
 ### Script Workspace (Tier 4)
 | Method | Path | Description |
@@ -137,6 +137,8 @@ Before applying a patch, read the current step list via `GET /api/ui/script` to 
 | `POST` | `/api/xml-to-hr` | Convert fmxmlsnippet → human-readable |
 | `POST` | `/api/validate` | Validate fmxmlsnippet XML |
 | `POST` | `/api/lint` | Run full FMLint |
+
+> **HR→XML fallback**: When the plugin is unavailable, use `agent/scripts/hr_to_xml.py` as a local fallback converter. It produces correct fmxmlsnippet XML for all common step types but emits `id="0"` for field/layout/script references (FileMaker resolves by name on paste). Always prefer the plugin endpoint when available.
 
 ### UI automation
 | Method | Path | Description |

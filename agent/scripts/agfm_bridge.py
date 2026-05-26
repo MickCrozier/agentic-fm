@@ -50,8 +50,6 @@ _ENV_FILE = _PROJECT_ROOT / ".env.local"
 _CONTEXT_PATH = _PROJECT_ROOT / "agent" / "CONTEXT.json"
 _CONFIG_PATH = _PROJECT_ROOT / "agent" / "config" / "automation.json"
 
-# Host clipboard server (fallback for clipboard writes when plugin clipboard is broken)
-_HOST_CLIPBOARD_URL = "http://host.docker.internal:8767"
 
 # ---------------------------------------------------------------------------
 # HTTP helpers (no third-party deps)
@@ -256,28 +254,15 @@ class PluginClient:
     # ── Clipboard ─────────────────────────────────────────────────────────
 
     def clipboard_write(self, xml: str) -> bool:
-        """Write fmxmlsnippet XML to the FM clipboard.
-
-        Falls back to the host clipboard server if the plugin endpoint fails
-        (see project memory: plugin /api/clipboard/write is currently broken).
-
-        Returns True on success.
-        """
+        """Write fmxmlsnippet XML to the FM clipboard. Returns True on success."""
         r = self._post("/api/clipboard/write", {"xml": xml, "type": "XMSS"})
         if r.get("success") or r.get("ok"):
             return True
-        # Fallback to host clipboard server
-        fb = _post(f"{_HOST_CLIPBOARD_URL}/clipboard", {"xml": xml})
-        if fb.get("success"):
-            return True
-        raise RuntimeError(
-            f"clipboard_write failed via plugin ({r.get('error')}) "
-            f"and fallback ({fb.get('error')})"
-        )
+        raise RuntimeError(f"clipboard_write failed: {r.get('error', r)}")
 
     def clipboard_read(self) -> str:
         """Read fmxmlsnippet XML from the FM clipboard. Returns XML string."""
-        r = self._post("/api/clipboard/read", {})
+        r = self._get("/api/clipboard")
         if not (r.get("success") or r.get("ok")):
             raise RuntimeError(f"clipboard_read failed: {r.get('error', r)}")
         return r.get("xml", "")
