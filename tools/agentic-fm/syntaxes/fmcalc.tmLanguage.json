@@ -1,0 +1,103 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "FileMaker Calculation",
+  "scopeName": "source.fmcalc",
+  "fileTypes": ["fmfn"],
+  "patterns": [
+    { "include": "#comment_block" },
+    { "include": "#comment_line" },
+    { "include": "#string" },
+    { "include": "#variable_global" },
+    { "include": "#variable_local" },
+    { "include": "#field_ref" },
+    { "include": "#get_function" },
+    { "include": "#keyword_function" },
+    { "include": "#builtin_function" },
+    { "include": "#constant" },
+    { "include": "#number" },
+    { "include": "#operator" }
+  ],
+  "repository": {
+
+    "comment_block": {
+      "name": "comment.block.fmcalc",
+      "begin": "/\\*",
+      "end": "\\*/"
+    },
+
+    "comment_line": {
+      "name": "comment.line.double-slash.fmcalc",
+      "match": "//.*$"
+    },
+
+    "string": {
+      "name": "string.quoted.double.fmcalc",
+      "begin": "\"",
+      "end": "\""
+    },
+
+    "variable_global": {
+      "match": "\\$\\$[A-Za-z_][A-Za-z0-9_.]*",
+      "name": "variable.other.global.fmcalc"
+    },
+
+    "variable_local": {
+      "match": "\\$[A-Za-z_][A-Za-z0-9_.]*",
+      "name": "variable.other.local.fmcalc"
+    },
+
+    "field_ref": {
+      "match": "([A-Za-z_][A-Za-z0-9_ ]*)(::)([A-Za-z_][A-Za-z0-9_ ]*)",
+      "captures": {
+        "1": { "name": "entity.name.type.table.fmcalc" },
+        "2": { "name": "punctuation.separator.field.fmcalc" },
+        "3": { "name": "variable.other.member.fmcalc" }
+      }
+    },
+
+    "get_function": {
+      "begin": "\\b(Get)\\s*(\\()",
+      "end": "(\\))",
+      "beginCaptures": {
+        "1": { "name": "support.function.builtin.fmcalc" },
+        "2": { "name": "punctuation.definition.parameters.begin.fmcalc" }
+      },
+      "endCaptures": {
+        "1": { "name": "punctuation.definition.parameters.end.fmcalc" }
+      },
+      "patterns": [
+        { "match": "[A-Za-z][A-Za-z0-9]*", "name": "constant.language.get-parameter.fmcalc" }
+      ]
+    },
+
+    "keyword_function": {
+      "match": "\\b(Let|If|Case|Choose|Evaluate|EvaluationError|ExecuteSQL)(?=\\s*\\()",
+      "captures": {
+        "1": { "name": "keyword.control.fmcalc" }
+      }
+    },
+
+    "builtin_function": {
+      "match": "\\b([A-Z][A-Za-z0-9]*)(?=\\s*\\()",
+      "captures": {
+        "1": { "name": "support.function.builtin.fmcalc" }
+      }
+    },
+
+    "constant": {
+      "match": "\\b(True|False|JSONBoolean|JSONString|JSONNumber|JSONArray|JSONObject|JSONNull)\\b",
+      "name": "constant.language.fmcalc"
+    },
+
+    "number": {
+      "match": "(?<![A-Za-z_$])-?\\d+(\\.\\d+)?\\b",
+      "name": "constant.numeric.fmcalc"
+    },
+
+    "operator": {
+      "match": "(≠|≥|≤|>=|<=|<>|[=<>&+\\-*/^]|\\b(?:and|or|not|xor)\\b)",
+      "name": "keyword.operator.fmcalc"
+    }
+
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "name": "agentic-fm",
+  "displayName": "Agentic FM",
+  "description": "FileMaker script & calculation language support: syntax highlighting, step/function completions, live linting, and context sync via the agentic-fm plugin.",
+  "version": "0.1.0",
+  "publisher": "agentic-fm",
+  "engines": { "vscode": "^1.60.0" },
+  "categories": ["Programming Languages"],
+  "main": "./extension.js",
+  "activationEvents": [
+    "onLanguage:fmscript",
+    "onLanguage:fmcalc",
+    "workspaceContains:agent/scripts/agfm_bridge.py"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "fmscript",
+        "aliases": ["FileMaker Script", "fmscript"],
+        "extensions": [".fmscript"],
+        "configuration": "./language-configuration.json"
+      },
+      {
+        "id": "fmcalc",
+        "aliases": ["FileMaker Calculation", "fmcalc", "fmfn"],
+        "extensions": [".fmfn"],
+        "configuration": "./fmcalc-language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "fmscript",
+        "scopeName": "source.fmscript",
+        "path": "./syntaxes/fmscript.tmLanguage.json"
+      },
+      {
+        "language": "fmcalc",
+        "scopeName": "source.fmcalc",
+        "path": "./syntaxes/fmcalc.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "agenticfm.syncContext",
+        "title": "FileMaker: Sync Context from Plugin"
+      },
+      {
+        "command": "agenticfm.showContext",
+        "title": "FileMaker: Show Context Webview"
+      }
+    ]
+  }
+}
