@@ -2,15 +2,13 @@
   "name": "agentic-fm",
   "displayName": "Agentic FM",
   "description": "FileMaker script & calculation language support: syntax highlighting, step/function completions, live linting, and context sync via the agentic-fm plugin.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "agentic-fm",
   "engines": { "vscode": "^1.60.0" },
   "categories": ["Programming Languages"],
   "main": "./extension.js",
   "activationEvents": [
-    "onLanguage:fmscript",
-    "onLanguage:fmcalc",
-    "workspaceContains:agent/scripts/agfm_bridge.py"
+    "onStartupFinished"
   ],
   "contributes": {
     "languages": [
@@ -42,11 +40,11 @@
     "commands": [
       {
         "command": "agenticfm.syncContext",
-        "title": "FileMaker: Sync Context from Plugin"
+        "title": "Agentic-fm: Sync Context"
       },
       {
         "command": "agenticfm.showContext",
-        "title": "FileMaker: Show Context Webview"
+        "title": "Agentic-fm: Show Context"
       }
     ]
   }
