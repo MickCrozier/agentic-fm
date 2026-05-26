@@ -162,7 +162,7 @@ python3 agent/scripts/deploy.py --ddl "DROP TABLE MyTable"
 > **Required** — this script must be installed in every solution where schema modification is needed.
 > The script is stored at `agent/filemaker/ModifySchema.xml`. Deploy it with:
 > ```bash
-> python3 agent/scripts/deploy.py agent/filemaker/ModifySchema.xml "ModifySchema"
+> python3 agent/scripts/agfm_bridge.py bundle agent/filemaker/ModifySchema.xml --names "ModifySchema"
 > ```
 
 Some solutions include a **ModifySchema** script that accepts a DDL SQL statement as its parameter and executes it against the FM schema. This enables the agent to create tables, drop tables, and drop columns without opening Manage Database manually.
@@ -202,8 +202,8 @@ curl -s -H "Authorization: Bearer $TOKEN" $PLUGIN_URL/api/eval/<eval-id>
 | Statement | Supported |
 |-----------|-----------|
 | `CREATE TABLE name (col type, ...)` | ✓ |
-| `DROP TABLE name` | ✓ |
-| `ALTER TABLE name DROP COLUMN col` | ✓ |
+| `DROP TABLE name` | ✗ (blocked by ModifySchema — do this manually in Manage Database) |
+| `ALTER TABLE name DROP COLUMN col` | ✗ (blocked by ModifySchema — do this manually in Manage Database) |
 | `ALTER TABLE name ADD COLUMN col type` | ✗ (not supported by FM SQL) |
 
 ### Error handling

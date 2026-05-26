@@ -1,12 +1,12 @@
 ---
 name: schema-build
-description: Create and modify FileMaker database schema via OData REST calls against a live hosted solution. Three sub-modes — connect (OData setup walkthrough), build (execute table and field creation), relationships (produce a manual relationship specification checklist). Use when the developer says "build schema", "create tables", "create fields", "run schema", "set up OData", "connect OData", "configure OData", "OData walkthrough", "relationship spec", "specify relationships", "define relationships", or "relationship checklist".
-compatibility: Requires OData access to a hosted FileMaker Server solution.
+description: Create and modify FileMaker database schema via the plugin (DDL) or OData REST calls. Three sub-modes — connect (OData setup walkthrough), build (execute table and field creation), relationships (produce a manual relationship specification checklist). Use when the developer says "build schema", "create tables", "create fields", "run schema", "set up OData", "connect OData", "configure OData", "OData walkthrough", "relationship spec", "specify relationships", "define relationships", or "relationship checklist".
+compatibility: Requires either the agentic-fm plugin (preferred) or OData access to a hosted FileMaker Server solution.
 ---
 
 # schema-build
 
-Create and modify a FileMaker database schema via OData REST calls. This skill covers the full schema creation workflow from OData connectivity through table/field creation to relationship specification.
+Create and modify a FileMaker database schema. Uses the plugin DDL path when available; falls back to OData REST calls otherwise.
 
 **Sub-modes**: `connect` | `build` | `relationships`
 
@@ -24,13 +24,26 @@ If ambiguous, ask the developer which sub-mode they need. If the developer says 
 
 ---
 
-## Step 2: Read configuration
+## Step 2: Determine the build method
 
-Read `agent/config/automation.json` to check for existing OData configuration.
+**Check for the plugin first** — it is always preferred over OData:
 
-- If the developer names a specific solution, look it up under `solutions.{name}.odata`
-- If `CONTEXT.json` exists, read `solution` to identify the active solution and look up its config
-- If no OData config exists for the target solution, route to the `connect` sub-mode first
+```bash
+python3 agent/scripts/agfm_bridge.py status
+```
+
+- **Plugin available** → use `agfm_bridge.py ddl` for CREATE TABLE operations. Skip the `connect` sub-mode entirely — no OData config is needed. Go directly to the `build` sub-mode.
+- **Plugin unavailable** → check `agent/config/automation.json` for OData config under `solutions.{name}.odata`. If found, use OData REST calls. If not found, run the `connect` sub-mode first.
+
+### Plugin DDL syntax
+
+```bash
+python3 agent/scripts/agfm_bridge.py ddl "CREATE TABLE TableName (Field1 VARCHAR(100), Field2 NUMERIC)"
+```
+
+> **ModifySchema blocks DROP and ALTER DROP** — dropping tables or fields must be done manually in FileMaker's Manage Database. `ALTER TABLE ... ADD COLUMN` is also unsupported by FM SQL. All fields for a new table must be included in the original `CREATE TABLE` statement.
+
+After each DDL call, verify success by querying `FileMaker_Tables` or `FileMaker_Fields` via `POST /api/query`. See `agent/docs/AUTOMATION.md` for error-handling rules.
 
 ---
 
@@ -104,7 +117,7 @@ Confirm to the developer that the OData connection is configured and ready.
 
 ## Sub-mode: build
 
-Execute table and field creation via OData REST calls against a live hosted solution.
+Execute table and field creation via the plugin DDL (preferred) or OData REST calls (fallback). The method was determined in Step 2 — follow the appropriate path below.
 
 ### Step 1: Locate the FM model
 
@@ -284,7 +297,9 @@ After the build completes, tell the developer:
 
 ### Destructive operations
 
-The OData API supports deleting tables and fields:
+Dropping tables and fields is **not available via the plugin DDL path** — ModifySchema blocks DROP statements. These must be done manually in FileMaker's **Manage Database**.
+
+When using OData (fallback path only), deleting is possible but requires explicit developer confirmation:
 
 - `DELETE {base_url}/{database}/FileMaker_Tables/{table}` — permanently removes the table and all its data
 - `DELETE {base_url}/{database}/FileMaker_Tables/{table}/{field}` — permanently removes a field and its data
