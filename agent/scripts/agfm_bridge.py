@@ -317,7 +317,7 @@ class PluginClient:
             state = self._get("/api/ui/script")
             count = state.get("stepCount", 0)
             if count > 0:
-                dr = self._post("/api/ui/script/delete", {"steps": list(range(count))})
+                dr = self._post("/api/ui/script/delete", {"steps": list(range(1, count + 1))})
                 if not (dr.get("success") or dr.get("ok")):
                     return {"success": False, "error": dr.get("error", "Delete existing steps failed")}
                 # Wait for FM to complete deletion

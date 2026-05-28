@@ -224,7 +224,8 @@ Custom Functions are stored in the Custom Function space of FileMaker. Written t
 **MANDATORY: After writing or updating a file within agent/sandbox/:**
 
 6. Lint: `python3 agent/scripts/agfm_bridge.py lint agent/sandbox/<filename>` (falls back to local fmlint automatically). Fix any ERROR-severity diagnostics before presenting to the user; review WARNING-severity.
-7. Deploy — use the first available method:
+7. **Deploy confirmation** — after lint passes, state what command will run and wait for the developer to confirm before executing. Example: `"Ready to deploy MyScript → FileMaker. y/g to proceed."` Accepted responses: `y`, `yes`, `g`, `go` (case-insensitive). Anything else cancels. Do NOT use AskUserQuestion — just wait for a chat reply.
+8. Deploy — use the first available method:
 
 **Plugin available (primary):**
 ```bash
