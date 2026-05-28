@@ -355,55 +355,60 @@ async function openScriptFile(root, solution, scriptName) {
   vscode.window.showInformationMessage(`Saved: ${path.relative(root, targetPath)}`);
 }
 
-// ─── Context webview ──────────────────────────────────────────────────────────
+// ─── Context sidebar view ─────────────────────────────────────────────────────
 
-function showContextWebview(root, context) {
-  const panel = vscode.window.createWebviewPanel(
-    'agenticfmContext',
-    'FM Context',
-    vscode.ViewColumn.One,
-    { enableScripts: true, retainContextWhenHidden: true }
+function registerContextView(root, context) {
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(
+      'agenticfm.contextView',
+      {
+        resolveWebviewView(webviewView) {
+          webviewView.webview.options = { enableScripts: true };
+
+          let currentCtx = null;
+
+          function refresh() {
+            if (!root) { webviewView.webview.html = buildWebviewHtml(null); return; }
+            const ctxPath = path.join(root, 'agent', 'CONTEXT.json');
+            if (!fs.existsSync(ctxPath)) { webviewView.webview.html = buildWebviewHtml(null); return; }
+            try {
+              currentCtx = JSON.parse(fs.readFileSync(ctxPath, 'utf8'));
+              webviewView.webview.html = buildWebviewHtml(currentCtx);
+            } catch (e) {
+              webviewView.webview.html = `<body style="padding:20px;font-family:sans-serif">Error: ${e.message}</body>`;
+            }
+          }
+
+          if (root) {
+            const w = vscode.workspace.createFileSystemWatcher(
+              new vscode.RelativePattern(path.join(root, 'agent'), 'CONTEXT.json')
+            );
+            w.onDidChange(() => refresh());
+            w.onDidCreate(() => refresh());
+            webviewView.onDidDispose(() => w.dispose());
+          }
+
+          refresh();
+
+          webviewView.webview.onDidReceiveMessage(async msg => {
+            switch (msg.command) {
+              case 'refresh':
+                execFile(
+                  'python3', ['agent/scripts/agfm_bridge.py', 'context', '--refresh'],
+                  { cwd: root },
+                  () => refresh()
+                );
+                break;
+              case 'openScript':
+                await openScriptFile(root, currentCtx?.solution, msg.name);
+                break;
+            }
+          });
+        }
+      },
+      { webviewOptions: { retainContextWhenHidden: true } }
+    )
   );
-
-  let currentCtx = null;
-
-  function refresh() {
-    if (!root) { panel.webview.html = buildWebviewHtml(null); return; }
-    const ctxPath = path.join(root, 'agent', 'CONTEXT.json');
-    if (!fs.existsSync(ctxPath)) { panel.webview.html = buildWebviewHtml(null); return; }
-    try {
-      currentCtx = JSON.parse(fs.readFileSync(ctxPath, 'utf8'));
-      panel.webview.html = buildWebviewHtml(currentCtx);
-    } catch (e) {
-      panel.webview.html = `<body style="padding:20px;font-family:sans-serif">Error reading CONTEXT.json: ${e.message}</body>`;
-    }
-  }
-
-  if (root) {
-    const w = vscode.workspace.createFileSystemWatcher(
-      new vscode.RelativePattern(path.join(root, 'agent'), 'CONTEXT.json')
-    );
-    w.onDidChange(() => refresh());
-    w.onDidCreate(() => refresh());
-    context.subscriptions.push(w);
-  }
-
-  refresh();
-
-  panel.webview.onDidReceiveMessage(async msg => {
-    switch (msg.command) {
-      case 'refresh':
-        execFile(
-          'python3', ['agent/scripts/agfm_bridge.py', 'context', '--refresh'],
-          { cwd: root },
-          () => refresh()
-        );
-        break;
-      case 'openScript':
-        await openScriptFile(root, currentCtx?.solution, msg.name);
-        break;
-    }
-  }, undefined, context.subscriptions);
 }
 
 function buildWebviewHtml(ctx) {
@@ -1023,6 +1028,9 @@ function activate(context) {
     })
   );
 
+  // ── Context sidebar view ──
+  registerContextView(root, context);
+
   // ── Status bar context button ──
   const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
   statusBar.text = '$(database) FM Context';
@@ -1033,8 +1041,7 @@ function activate(context) {
 
   // ── Commands ──
   context.subscriptions.push(
-    vscode.commands.registerCommand('agenticfm.syncContext', () => syncContext(root, statusBar)),
-    vscode.commands.registerCommand('agenticfm.showContext', () => showContextWebview(root, context))
+    vscode.commands.registerCommand('agenticfm.syncContext', () => syncContext(root, statusBar))
   );
 }
 
