@@ -383,6 +383,21 @@ function registerContextView(root, context) {
 
           refresh();
 
+          // Push current script name into the webview whenever the active editor changes
+          let currentScriptPath = null;
+          function pushActiveScript(editor) {
+            if (editor?.document.languageId === 'fmscript') {
+              currentScriptPath = editor.document.uri.fsPath;
+              webviewView.webview.postMessage({ command: 'setCurrentScript', name: path.basename(currentScriptPath, '.fmscript') });
+            } else {
+              currentScriptPath = null;
+              webviewView.webview.postMessage({ command: 'setCurrentScript', name: null });
+            }
+          }
+          pushActiveScript(vscode.window.activeTextEditor);
+          const editorWatcher = vscode.window.onDidChangeActiveTextEditor(pushActiveScript);
+          webviewView.onDidDispose(() => editorWatcher.dispose());
+
           webviewView.webview.onDidReceiveMessage(async msg => {
             switch (msg.command) {
               case 'refresh':
@@ -394,6 +409,12 @@ function registerContextView(root, context) {
                 break;
               case 'openScript':
                 await openScriptFile(root, currentCtx?.solution, msg.name);
+                break;
+              case 'deploy':
+                if (currentScriptPath) await deployCurrentScript(vscode.Uri.file(currentScriptPath));
+                break;
+              case 'fetch':
+                if (currentScriptPath) await fetchCurrentScript(vscode.Uri.file(currentScriptPath));
                 break;
             }
           });
@@ -444,6 +465,30 @@ body {
   border-radius: 2px;
   line-height: 1.4;
 }
+
+/* ── Active script strip ── */
+.active-script {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--vscode-widget-border);
+  background: var(--vscode-editor-inactiveSelectionBackground);
+  flex-shrink: 0;
+}
+.active-script.visible { display: flex; }
+.active-script-name {
+  flex: 1; min-width: 0;
+  font-size: 12px; font-weight: 500;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.btn-icon {
+  padding: 3px 6px;
+  background: var(--vscode-button-secondaryBackground, var(--vscode-button-background));
+  color: var(--vscode-button-secondaryForeground, var(--vscode-button-foreground));
+  border: none; border-radius: 3px; cursor: pointer; font-size: 13px; line-height: 1;
+}
+.btn-icon:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-button-hoverBackground)); }
 
 /* ── Search + Refresh row ── */
 .toolbar {
@@ -574,6 +619,12 @@ details[open] > summary .arrow { transform: rotate(90deg); }
 <div class="header" id="hdr">
   <h1>FM Context</h1>
   <div class="meta">No context — click Refresh to sync from plugin.</div>
+</div>
+
+<div class="active-script" id="active-script">
+  <span class="active-script-name" id="active-script-name"></span>
+  <button class="btn-icon" onclick="vscode.postMessage({command:'deploy'})" title="Deploy to FileMaker">&#8593;</button>
+  <button class="btn-icon" onclick="vscode.postMessage({command:'fetch'})"  title="Fetch from FileMaker">&#8595;</button>
 </div>
 
 <div class="toolbar">
@@ -812,6 +863,19 @@ function doRefresh() {
 }
 
 render();
+
+window.addEventListener('message', event => {
+  const msg = event.data;
+  if (msg.command === 'setCurrentScript') {
+    const strip = document.getElementById('active-script');
+    if (msg.name) {
+      document.getElementById('active-script-name').textContent = msg.name;
+      strip.classList.add('visible');
+    } else {
+      strip.classList.remove('visible');
+    }
+  }
+});
 </script>
 </body>
 </html>`;
