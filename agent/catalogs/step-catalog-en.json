@@ -2078,7 +2078,8 @@
         "xmlElement": "UniversalPathList",
         "type": "text",
         "hrLabel": null,
-        "required": false
+        "required": false,
+        "notes": "Write the path unquoted in HR format — variable references ($path) and literal paths must not be wrapped in quotes. XML emits the value directly in the element with no CDATA wrapper."
       },
       {
         "xmlElement": "AutoOpen",
