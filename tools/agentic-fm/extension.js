@@ -302,13 +302,6 @@ async function openScriptFile(root, solution, scriptName) {
     return;
   }
 
-  const choice = await vscode.window.showInformationMessage(
-    `"${scriptName}" not found locally. Fetch from plugin?`,
-    'Fetch from Plugin',
-    'Cancel'
-  );
-  if (choice !== 'Fetch from Plugin') return;
-
   const env = readEnvLocal(root);
   const pluginUrl = env['AGFM_PLUGIN_URL'];
   const token = env['AGFM_PLUGIN_TOKEN'];
@@ -348,7 +341,7 @@ async function openScriptFile(root, solution, scriptName) {
   const targetDir = path.join(root, 'agent', 'sandbox', solution || 'Unknown');
   if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
   const targetPath = path.join(targetDir, saveName + '.fmscript');
-  fs.writeFileSync(targetPath, body.steps.join('\n'), 'utf8');
+  fs.writeFileSync(targetPath, formatFmscript(body.steps.join('\n')), 'utf8');
 
   const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(targetPath));
   await vscode.window.showTextDocument(doc, { preview: false, viewColumn: vscode.ViewColumn.One });
@@ -509,7 +502,7 @@ summary {
 summary:hover { opacity: 1; background: var(--vscode-list-hoverBackground); }
 summary::-webkit-details-marker { display: none; }
 .arrow { display: inline-block; font-size: 9px; transition: transform 0.15s; margin-right: 2px; }
-details[open] .arrow { transform: rotate(90deg); }
+details[open] > summary .arrow { transform: rotate(90deg); }
 .count { font-weight: 400; opacity: 0.6; font-size: 11px; }
 
 .section-body { padding: 2px 0 6px; }
@@ -734,7 +727,14 @@ function buildLayoutsSection(layouts) {
 }
 
 function buildTablesSection(tables) {
-  const entries = Object.entries(tables).sort((a, b) => a[0].localeCompare(b[0]));
+  const currentBaseTo = CTX.current_layout?.base_to || '';
+  const relatedTOs = new Set(CTX._relatedTOs || []);
+
+  const entries = Object.entries(tables).sort((a, b) => {
+    const rank = name => name === currentBaseTo ? 2 : relatedTOs.has(name) ? 1 : 0;
+    const diff = rank(b[0]) - rank(a[0]);
+    return diff !== 0 ? diff : a[0].localeCompare(b[0]);
+  });
   const { det, body } = makeSection('tables', 'Table Occurrences', entries.length);
 
   for (const [toName, info] of entries) {
