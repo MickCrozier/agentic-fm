@@ -923,6 +923,64 @@ function buildStepDecorations(document) {
   return decorations;
 }
 
+// ─── Editor title commands (deploy / fetch) ───────────────────────────────────
+
+async function deployCurrentScript(uri) {
+  const filePath = uri?.fsPath || vscode.window.activeTextEditor?.document.uri.fsPath;
+  if (!filePath || !filePath.endsWith('.fmscript')) return;
+  const scriptName = path.basename(filePath, '.fmscript');
+  const root = findProjectRoot(vscode.Uri.file(filePath));
+  if (!root) { vscode.window.showErrorMessage('No agentic-fm workspace found'); return; }
+
+  await vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Notification, title: `Deploying "${scriptName}"…`, cancellable: false },
+    () => new Promise(resolve => {
+      execFile(
+        'python3', ['agent/scripts/agfm_bridge.py', 'deploy', filePath, scriptName],
+        { cwd: root },
+        (err, _stdout, stderr) => {
+          resolve();
+          if (err) vscode.window.showErrorMessage(`Deploy failed: ${(stderr || err.message).trim()}`);
+          else     vscode.window.showInformationMessage(`Deployed "${scriptName}" ✓`);
+        }
+      );
+    })
+  );
+}
+
+async function fetchCurrentScript(uri) {
+  const filePath = uri?.fsPath || vscode.window.activeTextEditor?.document.uri.fsPath;
+  if (!filePath || !filePath.endsWith('.fmscript')) return;
+  const scriptName = path.basename(filePath, '.fmscript');
+  const root = findProjectRoot(vscode.Uri.file(filePath));
+  if (!root) { vscode.window.showErrorMessage('No agentic-fm workspace found'); return; }
+
+  const env = readEnvLocal(root);
+  const pluginUrl = env['AGFM_PLUGIN_URL'];
+  const token = env['AGFM_PLUGIN_TOKEN'];
+  if (!pluginUrl || !token) { vscode.window.showErrorMessage('Plugin not configured in .env.local'); return; }
+
+  await vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Notification, title: `Fetching "${scriptName}"…`, cancellable: false },
+    async () => {
+      try { await httpPost(`${pluginUrl}/api/ui/script/navigate`, token, { scriptName }); } catch {}
+
+      let result;
+      try { result = await httpGet(`${pluginUrl}/api/ui/script`, token); }
+      catch (e) { vscode.window.showErrorMessage(`Fetch failed: ${e.message}`); return; }
+
+      const body = result.body;
+      if (result.status !== 200 || !body || !Array.isArray(body.steps)) {
+        vscode.window.showErrorMessage('Plugin returned no script — is it open in Script Workspace?');
+        return;
+      }
+
+      fs.writeFileSync(filePath, formatFmscript(body.steps.join('\n')), 'utf8');
+      vscode.window.showInformationMessage(`Fetched "${scriptName}" ✓`);
+    }
+  );
+}
+
 // ─── Activation ───────────────────────────────────────────────────────────────
 
 function activate(context) {
@@ -1041,7 +1099,9 @@ function activate(context) {
 
   // ── Commands ──
   context.subscriptions.push(
-    vscode.commands.registerCommand('agenticfm.syncContext', () => syncContext(root, statusBar))
+    vscode.commands.registerCommand('agenticfm.syncContext', () => syncContext(root, statusBar)),
+    vscode.commands.registerCommand('agenticfm.deployScript', uri => deployCurrentScript(uri)),
+    vscode.commands.registerCommand('agenticfm.fetchScript',  uri => fetchCurrentScript(uri))
   );
 }
 
