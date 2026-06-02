@@ -332,7 +332,7 @@ User Interface/
 
 - Use `Exit Script [ Result: ... ]` to return values, not global variables, wherever possible
 - Always `Commit Records/Requests` before navigating away from a record context if edits may have occurred
-- Error capture (`Set Error Capture [ On ]`) should be paired with explicit error checking immediately after the risky step
+- Enable `Set Error Capture [ On ]` once, near the top of the script (after parameter validation), and never turn it off. Do not toggle it around individual steps — that pattern is fragile and unnecessary. After any step that can fail, check `Get ( LastError )` directly and capture it into a variable before any subsequent step can overwrite it
 - Comment the expected script parameter format at the top of any script that accepts parameters
 
 ---
