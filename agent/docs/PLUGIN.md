@@ -150,6 +150,24 @@ Before applying a patch, read the current step list via `GET /api/ui/script` to 
 | `POST` | `/api/ui/press` | Press a UI element by role+description |
 | `POST` | `/api/ui/set` | Set value on a text field |
 
+### Schema modification (DDL)
+
+Use `agfm_bridge.py ddl` to create tables or add fields via the `ModifySchema` FileMaker script:
+
+```bash
+# Create a new table
+python3 agent/scripts/agfm_bridge.py ddl "CREATE TABLE \"CHECKLIST\" (__pkUUID varchar(255), Item varchar(255))"
+
+# Add a field to an existing table
+python3 agent/scripts/agfm_bridge.py ddl "ALTER TABLE \"INSPECTION\" ADD COLUMN \"_gIsActive\" int"
+```
+
+The DDL statement is passed as a string parameter to the `ModifySchema` script via `POST /api/performscript`. Standard FileMaker DDL syntax applies. Returns `{"success": true}` on success or `{"success": false, "error": "..."}` on failure.
+
+> **Prerequisite:** The `ModifySchema` script must be installed in the target FileMaker solution. If it is not present, `agfm_bridge.py ddl` will return success (script error = 0) but no schema change will occur — FileMaker silently swallows calls to missing scripts. In that case, create tables manually via **Manage Database**.
+
+---
+
 ### Discovery (cross-reference / impact analysis)
 | Method | Path | Description |
 |--------|------|-------------|
