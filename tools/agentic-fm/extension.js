@@ -926,6 +926,149 @@ function formatFmscript(text) {
   return out.join('\n');
 }
 
+// ─── fmcalc formatter ─────────────────────────────────────────────────────────
+
+function tokenizeFmcalc(src) {
+  const toks = [];
+  let i = 0;
+  const n = src.length;
+  while (i < n) {
+    const c = src[i];
+    if (c <= ' ') { i++; continue; }
+    if (c === '/' && src[i + 1] === '*') {
+      const end = src.indexOf('*/', i + 2);
+      const j = end === -1 ? n : end + 2;
+      toks.push({ t: 'comment', v: src.slice(i, j) }); i = j; continue;
+    }
+    if (c === '/' && src[i + 1] === '/') {
+      let j = src.indexOf('\n', i); if (j === -1) j = n;
+      toks.push({ t: 'comment', v: src.slice(i, j) }); i = j; continue;
+    }
+    if (c === '"') {
+      let j = i + 1;
+      while (j < n) {
+        if (src[j] === '"') { if (src[j + 1] === '"') { j += 2; continue; } j++; break; }
+        j++;
+      }
+      toks.push({ t: 'str', v: src.slice(i, j) }); i = j; continue;
+    }
+    if (c === ':' && src[i + 1] === ':') { toks.push({ t: '::' }); i += 2; continue; }
+    if (c === '(' || c === ')' || c === '[' || c === ']' || c === ';') {
+      toks.push({ t: c }); i++; continue;
+    }
+    const two = src.slice(i, i + 2);
+    if (two === '>=' || two === '<=' || two === '<>') {
+      toks.push({ t: 'op', v: two }); i += 2; continue;
+    }
+    if (c === '≠' || c === '≥' || c === '≤') { toks.push({ t: 'op', v: c }); i++; continue; }
+    if ('=<>&+-*/^'.includes(c)) { toks.push({ t: 'op', v: c }); i++; continue; }
+    const nm = src.slice(i).match(/^\d+(?:\.\d+)?/);
+    if (nm) { toks.push({ t: 'num', v: nm[0] }); i += nm[0].length; continue; }
+    const im = src.slice(i).match(/^(?:\$\$?|~)?[A-Za-z_][A-Za-z0-9_.~]*/);
+    if (im) { toks.push({ t: 'id', v: im[0] }); i += im[0].length; continue; }
+    toks.push({ t: 'other', v: c }); i++;
+  }
+  return toks;
+}
+
+function formatFmcalc(text) {
+  const src = text.trim();
+  if (!src) return text;
+
+  const toks = tokenizeFmcalc(src);
+  const TAB = '    ';
+  let pos = 0;
+
+  function peek(off) { return toks[pos + (off || 0)] || { t: 'eof' }; }
+  function eat() { return toks[pos++] || { t: 'eof' }; }
+
+  // Does the block starting at pos (immediately after '(' or '[') contain a ';' at depth 1?
+  function blockHasSemi() {
+    let d = 1;
+    for (let j = pos; j < toks.length; j++) {
+      const tt = toks[j].t;
+      if (tt === '(' || tt === '[') d++;
+      else if (tt === ')' || tt === ']') { d--; if (d === 0) return false; }
+      else if (tt === ';' && d === 1) return true;
+    }
+    return false;
+  }
+
+  // Format ';'-separated argument list. Stops before ')' or ']' without consuming it.
+  function fmtArgList(depth) {
+    const args = [];
+    while (pos < toks.length) {
+      const t = peek();
+      if (t.t === ')' || t.t === ']' || t.t === 'eof') break;
+      if (t.t === ';') { eat(); continue; }
+      args.push(fmtExpr(depth, true));
+    }
+    return args;
+  }
+
+  // Format a single expression. Stops before ';' when stopAtSemi, or at closing bracket.
+  function fmtExpr(depth, stopAtSemi) {
+    const parts = [];
+    while (pos < toks.length) {
+      const t = peek();
+      if (t.t === ')' || t.t === ']' || t.t === 'eof') break;
+      if (stopAtSemi && t.t === ';') break;
+      eat();
+
+      if (t.t === 'comment') {
+        parts.push(t.v + '\n' + TAB.repeat(depth));
+      } else if (t.t === 'str' || t.t === 'num' || t.t === 'op' || t.t === 'other') {
+        parts.push(t.v);
+      } else if (t.t === 'id') {
+        if (peek().t === '::') {
+          eat();
+          const fld = eat();
+          parts.push(`${t.v}::${fld.v || ''}`);
+        } else if (peek().t === '(') {
+          eat(); // (
+          const expand = blockHasSemi();
+          const args = fmtArgList(expand ? depth + 1 : depth);
+          if (peek().t === ')') eat();
+          if (args.length === 0) {
+            parts.push(`${t.v} ()`);
+          } else if (!expand) {
+            parts.push(`${t.v} ( ${args.join(' ; ')} )`);
+          } else {
+            const ind = TAB.repeat(depth + 1);
+            const close = TAB.repeat(depth);
+            parts.push(`${t.v} (\n${ind}${args.join(` ;\n${ind}`)}\n${close})`);
+          }
+        } else {
+          parts.push(t.v);
+        }
+      } else if (t.t === '[') {
+        const args = fmtArgList(depth + 1);
+        if (peek().t === ']') eat();
+        if (args.length <= 1 && !(args[0] || '').includes('\n')) {
+          parts.push(`[ ${args.join(' ; ')} ]`);
+        } else {
+          const ind = TAB.repeat(depth + 1);
+          const close = TAB.repeat(depth);
+          parts.push(`[\n${ind}${args.join(` ;\n${ind}`)}\n${close}]`);
+        }
+      } else if (t.t === '(') {
+        const inner = fmtExpr(depth, false);
+        if (peek().t === ')') eat();
+        parts.push(`( ${inner} )`);
+      }
+    }
+    let joined = '';
+    for (const p of parts) {
+      if (!joined) { joined = p; continue; }
+      joined += (/\n\s*$/.test(joined) ? '' : ' ') + p;
+    }
+    return joined;
+  }
+
+  const result = fmtExpr(0, false).trim();
+  return result + (text.endsWith('\n') ? '\n' : '');
+}
+
 // ─── fmscript folding ranges ─────────────────────────────────────────────────
 
 function buildFmscriptFoldingRanges(document) {
@@ -1059,6 +1202,24 @@ function activate(context) {
         provideDocumentFormattingEdits(document) {
           const text = document.getText();
           const formatted = formatFmscript(text);
+          if (formatted === text) return [];
+          return [vscode.TextEdit.replace(
+            new vscode.Range(document.positionAt(0), document.positionAt(text.length)),
+            formatted
+          )];
+        }
+      }
+    )
+  );
+
+  // ── fmcalc formatter ──
+  context.subscriptions.push(
+    vscode.languages.registerDocumentFormattingEditProvider(
+      { language: 'fmcalc' },
+      {
+        provideDocumentFormattingEdits(document) {
+          const text = document.getText();
+          const formatted = formatFmcalc(text);
           if (formatted === text) return [];
           return [vscode.TextEdit.replace(
             new vscode.Range(document.positionAt(0), document.positionAt(text.length)),
