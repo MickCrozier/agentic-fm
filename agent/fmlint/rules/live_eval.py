@@ -93,7 +93,7 @@ class LiveEvalError(LintRule):
     name = "live-eval-error"
     category = "calculations"
     default_severity = Severity.ERROR
-    formats = {"xml", "hr"}
+    formats = {"xml", "hr", "fmcalc"}
     tier = 3
     requires_confirmation = True
 
@@ -194,6 +194,13 @@ class LiveEvalError(LintRule):
         calcs = self._extract_calcs_hr(lines)
         return self._evaluate_calcs(calcs, context)
 
+    def check_fmcalc(self, content, catalog, context, config):
+        from .calculations import _strip_fmcalc_comments
+        text = _strip_fmcalc_comments(content).strip()
+        if not text:
+            return []
+        return self._evaluate_calcs([(1, text)], context)
+
 
 # ---------------------------------------------------------------------------
 # C005 — live-eval-warning (reserved for non-fatal eval issues)
@@ -212,7 +219,7 @@ class LiveEvalWarning(LintRule):
     name = "live-eval-warning"
     category = "calculations"
     default_severity = Severity.WARNING
-    formats = {"xml", "hr"}
+    formats = {"xml", "hr", "fmcalc"}
     tier = 3
     requires_confirmation = True
 
@@ -220,4 +227,7 @@ class LiveEvalWarning(LintRule):
         return []
 
     def check_hr(self, lines, catalog, context, config):
+        return []
+
+    def check_fmcalc(self, content, catalog, context, config):
         return []

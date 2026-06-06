@@ -9,6 +9,7 @@
     { "include": "#string" },
     { "include": "#variable_global" },
     { "include": "#variable_local" },
+    { "include": "#variable_let" },
     { "include": "#field_ref" },
     { "include": "#get_function" },
     { "include": "#keyword_function" },
@@ -44,6 +45,11 @@
     "variable_local": {
       "match": "\\$[A-Za-z_][A-Za-z0-9_.]*",
       "name": "variable.other.local.fmcalc"
+    },
+
+    "variable_let": {
+      "match": "~[A-Za-z_][A-Za-z0-9_.]*",
+      "name": "variable.other.let.fmcalc"
     },
 
     "field_ref": {
@@ -85,7 +91,7 @@
     },
 
     "constant": {
-      "match": "\\b(True|False|JSONBoolean|JSONString|JSONNumber|JSONArray|JSONObject|JSONNull)\\b",
+      "match": "\\b(True|False|On|Off|None|All|JSONBoolean|JSONString|JSONNumber|JSONArray|JSONObject|JSONNull)\\b",
       "name": "constant.language.fmcalc"
     },
 

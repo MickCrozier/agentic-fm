@@ -34,7 +34,7 @@ def _resolve_project_root():
 
 
 # File extensions recognized as lintable
-_LINTABLE_EXTENSIONS = {".xml", ".fmscript", ".hr", ".txt"}
+_LINTABLE_EXTENSIONS = {".xml", ".fmscript", ".hr", ".txt", ".fmfn"}
 
 
 def _collect_files(target: Path) -> list:
@@ -130,7 +130,7 @@ def main():
     )
     parser.add_argument(
         "--input-format",
-        choices=["xml", "hr"],
+        choices=["xml", "hr", "fmcalc"],
         default=None,
         help="Input format (default: auto-detect)",
     )
