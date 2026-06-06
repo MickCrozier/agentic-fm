@@ -69,7 +69,7 @@ This project is designed to create FileMaker objects — in the clipboard-suppor
 - _xml_parsed/_ is the XML output from the FileMaker solution. See **Context system** below.
 - _catalogs/_ contains the step catalog (`step-catalog-en.json`) — a structured index of all FileMaker script steps with parameter definitions, types, enums, and HR signatures. This is the primary reference for step XML structure.
 - _snippet_examples/_ is an **archival** reference folder. The step catalog is the single source of truth for step structure. Read snippet_examples only when the catalog's `notes` field is insufficient.
-- _fmlint/_ is the FMLint linter package. Run via `python3 -m agent.fmlint` to validate fmxmlsnippet XML or human-readable scripts.
+- _fmlint/_ is the FMLint linter package. Run via `python3 -m agent.fmlint` to validate fmxmlsnippet XML, human-readable scripts, or standalone calculation files (`.fmfn`).
 - Context is everything in FileMaker. Depending on the enviorment and available tools, there are different ways of deriving context. See **Context system** below.
     1. Use the Plugin API
     2. _CONTEXT.json_ is the primary source of IDs, names, relationships, and other metadata for the current task. 

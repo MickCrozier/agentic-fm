@@ -8,7 +8,7 @@ function names, and HTML/XML entities where literal operators belong.
 import re
 
 from ..engine import rule, LintRule
-from ..types import Diagnostic, Severity
+from ..types import Diagnostic, ParsedHRLine, Severity
 
 
 _STRIP_STRINGS_RE = re.compile(r'"[^"]*"')
@@ -37,6 +37,44 @@ def _is_calc_step(ln):
 # C001 — unclosed-string
 # ---------------------------------------------------------------------------
 
+def _iter_fmcalc_lines(text: str):
+    """Yield (original_line_number, line_content) for non-comment lines.
+
+    Strips # line comments, // line comments, trailing // inline comments,
+    and /* block */ comments (including multi-line).
+    """
+    text = re.sub(r'/\*.*?\*/', '', text, flags=re.DOTALL)
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or stripped.startswith("//"):
+            continue
+        cleaned = re.sub(r'\s*//.*$', '', line)
+        yield lineno, cleaned
+
+
+def _strip_fmcalc_comments(text: str) -> str:
+    """Return calculation text with all comment forms removed."""
+    return "\n".join(content for _, content in _iter_fmcalc_lines(text))
+
+
+def _fmcalc_as_hr_lines(content: str) -> list:
+    """Synthesize one ParsedHRLine per non-comment line of a .fmfn file.
+
+    Each line's text becomes its bracket_content so C001/C003/C006 check_hr
+    implementations run with real line numbers. C002 uses a separate
+    depth-tracking approach instead (strings don't span lines but parens do).
+    """
+    lines = []
+    for lineno, text in _iter_fmcalc_lines(content):
+        lines.append(ParsedHRLine(
+            raw=text, line_number=lineno,
+            bracket_content=text,
+            step_name="__fmcalc__",
+            params=[text],
+        ))
+    return lines
+
+
 @rule
 class UnclosedString(LintRule):
     """Detect unclosed string literals in calculations."""
@@ -45,7 +83,7 @@ class UnclosedString(LintRule):
     name = "unclosed-string"
     category = "calculations"
     default_severity = Severity.ERROR
-    formats = {"xml", "hr"}
+    formats = {"xml", "hr", "fmcalc"}
     tier = 1
 
     def _has_unclosed(self, text):
@@ -87,6 +125,9 @@ class UnclosedString(LintRule):
                 ))
         return diags
 
+    def check_fmcalc(self, content, catalog, context, config):
+        return self.check_hr(_fmcalc_as_hr_lines(content), catalog, context, config)
+
 
 # ---------------------------------------------------------------------------
 # C002 — unbalanced-parens
@@ -100,7 +141,7 @@ class UnbalancedParens(LintRule):
     name = "unbalanced-parens"
     category = "calculations"
     default_severity = Severity.ERROR
-    formats = {"xml", "hr"}
+    formats = {"xml", "hr", "fmcalc"}
     tier = 1
 
     def _check_parens(self, text):
@@ -153,6 +194,36 @@ class UnbalancedParens(LintRule):
                 ))
         return diags
 
+    def check_fmcalc(self, content, catalog, context, config):
+        # Parens span lines — check running depth across the whole file so we
+        # can report the first line where balance breaks rather than defaulting
+        # to line 1.
+        sev = self.severity(config)
+        depth = 0
+        first_negative_line = None
+        for lineno, line in _iter_fmcalc_lines(content):
+            stripped = _strip_strings(line)
+            for ch in stripped:
+                if ch == "(":
+                    depth += 1
+                elif ch == ")":
+                    depth -= 1
+                if depth < 0 and first_negative_line is None:
+                    first_negative_line = lineno
+        if first_negative_line is not None:
+            return [Diagnostic(
+                rule_id=self.rule_id, severity=sev,
+                message="Extra closing parenthesis ')' in calculation",
+                line=first_negative_line,
+            )]
+        if depth > 0:
+            return [Diagnostic(
+                rule_id=self.rule_id, severity=sev,
+                message=f"Unclosed parenthesis in calculation ({depth} unclosed)",
+                line=1,
+            )]
+        return []
+
 
 # ---------------------------------------------------------------------------
 # C003 — known-function
@@ -172,7 +243,7 @@ class KnownFunction(LintRule):
     name = "known-function"
     category = "calculations"
     default_severity = Severity.WARNING
-    formats = {"xml", "hr"}
+    formats = {"xml", "hr", "fmcalc"}
     tier = 1
 
     # Common FileMaker functions (subset for offline validation)
@@ -286,6 +357,9 @@ class KnownFunction(LintRule):
                     ))
         return diags
 
+    def check_fmcalc(self, content, catalog, context, config):
+        return self.check_hr(_fmcalc_as_hr_lines(content), catalog, context, config)
+
 
 # ---------------------------------------------------------------------------
 # C006 — html-entities-in-calc
@@ -328,7 +402,7 @@ class C006HtmlEntitiesInCalc(LintRule):
     name = "html-entities-in-calc"
     category = "calculations"
     default_severity = Severity.ERROR
-    formats = {"xml", "hr"}
+    formats = {"xml", "hr", "fmcalc"}
     tier = 1
 
     def _find_entities(self, text):
@@ -354,7 +428,10 @@ class C006HtmlEntitiesInCalc(LintRule):
                     diags.append(Diagnostic(
                         rule_id=self.rule_id,
                         severity=sev,
-                        message=f'HTML entity "{entity}" in calculation — use the literal operator "{replacement}" instead',
+                        message=(
+                            f'HTML entity "{entity}" in calculation'
+                            f' — use the literal operator "{replacement}" instead'
+                        ),
                         line=idx + 1,
                         fix_hint=f'Replace "{entity}" with "{replacement}"',
                     ))
@@ -370,8 +447,14 @@ class C006HtmlEntitiesInCalc(LintRule):
                 diags.append(Diagnostic(
                     rule_id=self.rule_id,
                     severity=sev,
-                    message=f'HTML entity "{entity}" in calculation — use the literal operator "{replacement}" instead',
+                    message=(
+                        f'HTML entity "{entity}" in calculation'
+                        f' — use the literal operator "{replacement}" instead'
+                    ),
                     line=ln.line_number,
                     fix_hint=f'Replace "{entity}" with "{replacement}"',
                 ))
         return diags
+
+    def check_fmcalc(self, content, catalog, context, config):
+        return self.check_hr(_fmcalc_as_hr_lines(content), catalog, context, config)
