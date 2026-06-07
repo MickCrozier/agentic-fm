@@ -134,7 +134,7 @@ When asked to copy, reference, or modify an existing script, use the first avail
 
 **Plugin available (primary):**
 
-The `/api/ui/script` endpoint reads whatever script is currently open in Script Workspace. Since `/api/ui/script/navigate` is broken, ask the user to open the script manually first.
+Use `POST /api/ui/script/navigate` to open a script by name, then `GET /api/ui/script` to read its steps.
 
 ```
 GET /api/ui/script        → returns steps[] array (up to 200 steps per window)
