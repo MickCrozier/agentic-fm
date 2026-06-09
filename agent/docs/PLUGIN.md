@@ -76,14 +76,21 @@ Fallback order when plugin is unavailable: `CONTEXT.json` → index files → `x
 |--------|------|-------------|
 | `GET` | `/api/clipboard` | Read current FM clipboard (class, xml, size) |
 | `POST` | `/api/clipboard/write` | Write fmxmlsnippet XML to FM clipboard |
+| `POST` | `/api/clipboard/digest` | Re-digest current clipboard; returns ClipboardDigest |
+| `GET` | `/api/clipboard/history` | List snapshot-store entries (active entry first) |
+| `DELETE` | `/api/clipboard/history/:clipId` | Remove a historical snapshot |
+| `POST` | `/api/clipboard/promote` | Promote a historical snapshot to active |
+| `POST` | `/api/clipboard/patch` | Mutate a snapshot by key (clone → patch → validate → write) |
+| `POST` | `/api/clipboard/inspect` | Read a sub-region of a snapshot; capped at 8 requests/turn |
 
 > **Layout XML**: The plugin cannot switch to Layout mode or copy layout objects. Ask the user to switch to Layout mode, select all (⌘A), copy (⌘C), then read via `GET /api/clipboard`.
 
-### Script Workspace (Tier 4)
+### Script Workspace
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/ui/script/navigate` | Open a script by name; body: `{"scriptId": N, "scriptName": "Name"}` |
+| `POST` | `/api/ui/script/navigate` | Open a script by name; body: `{"scriptName": "Name"}` |
 | `GET` | `/api/ui/script` | Read current Script Workspace content (up to 200 steps per window) |
+| `POST` | `/api/ui/script/create` | Create a new script in one round-trip (navigate + insert) |
 | `POST` | `/api/ui/script/insert` | Insert fmxmlsnippet steps at `afterIndex` |
 | `POST` | `/api/ui/script/delete` | Delete steps by index, or `{"all": true}` |
 | `POST` | `/api/ui/script/save` | Save the open script (⌘S) — required after insert/delete |
@@ -91,11 +98,12 @@ Fallback order when plugin is unavailable: `CONTEXT.json` → index files → `x
 
 #### Reading / copying an existing script
 
-`GET /api/ui/script` is the primary way to read a script's content — use it whenever you need to copy, reference, or review an existing script.
-
-> **Note:** `/api/ui/script/navigate` is broken — ask the user to open the script in Script Workspace manually before reading.
+Navigate first, then read all steps in one call:
 
 ```bash
+curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"scriptName": "My Script"}' "$URL/api/ui/script/navigate"
+
 curl -s -H "Authorization: Bearer $TOKEN" "$URL/api/ui/script" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
@@ -104,13 +112,7 @@ for i, s in enumerate(d.get('steps', [])):
 "
 ```
 
-#### Reading scripts longer than 200 steps
-
-`GET /api/ui/script` returns a 200-step window that follows the selected step. To read a script with more than 200 steps:
-
-1. Select step `0` → read window (`windowStart: 0, windowEnd: 200`)
-2. Select the last step → read window (shifts to cover the end)
-3. Merge: `window1_steps + window2_steps[200 - window2_windowStart:]`
+`GET /api/ui/script` returns all steps — no pagination required.
 
 #### Patch mode step indices
 
@@ -121,34 +123,61 @@ Before applying a patch, read the current step list via `GET /api/ui/script` to 
 |--------|------|-------------|
 | `GET` | `/api/context` | Cached solution context |
 | `POST` | `/api/context/refresh` | Trigger context regeneration on next FM idle |
-| `POST` | `/api/query` | Read-only SQL SELECT against FM schema (async) |
-| `GET` | `/api/eval/:id` | Poll async eval/query result |
+| `GET` | `/api/context/lock` | Get context lock state |
+| `POST` | `/api/context/lock` | Set or release context lock |
+| `POST` | `/api/context/hydrate-fields` | Hydrate fields for arbitrary TO names; body: `{"to_names": [...], "fileName": "..."}` |
+| `POST` | `/api/query` | Read-only SQL SELECT against FM schema (async — poll `/api/eval/:id`) |
+| `POST` | `/api/eval` | Submit a FileMaker calculation for evaluation (async) |
+| `GET` | `/api/eval/:id` | Poll async eval/query result until `complete: true` |
 
 ### Script execution
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/performscript` | Run a FileMaker script natively (FMX_StartScript) |
-| `POST` | `/api/eval` | Submit a FileMaker calculation for evaluation |
+| `POST` | `/api/performscript` | Run a FileMaker script by name (async — poll `/api/eval/:id`). **One at a time** — concurrent calls deadlock FM. |
+
+> For window-open, saveAsXml, webview, or file-open commands use `scriptName: "AGFM_Bridge"` with a sub-protocol parameter. See `GET /api/bridge/status` for the full command catalog.
 
 ### Conversion & validation
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/api/hr-to-xml` | Convert human-readable script → fmxmlsnippet |
 | `POST` | `/api/xml-to-hr` | Convert fmxmlsnippet → human-readable |
-| `POST` | `/api/validate` | Validate fmxmlsnippet XML |
-| `POST` | `/api/lint` | Run full FMLint |
+| `POST` | `/api/validate` | Validate fmxmlsnippet XML (structural + semantic) |
+| `POST` | `/api/validate-hr` | Validate a human-readable script (step and function names) |
+| `POST` | `/api/lint` | Run full FMLint (requires repoPath in preferences) |
+| `GET` | `/api/lint/status` | Check whether Python FMLint is available |
 
-> **HR→XML fallback**: When the plugin is unavailable, use `agent/scripts/hr_to_xml.py` as a local fallback converter. It produces correct fmxmlsnippet XML for all common step types but emits `id="0"` for field/layout/script references (FileMaker resolves by name on paste). Always prefer the plugin endpoint when available.
+> **HR→XML fallback**: When the plugin is unavailable, use `agent/scripts/hr_to_xml.py` as a local fallback. It emits `id="0"` for field/layout/script references (FileMaker resolves by name on paste). Always prefer the plugin endpoint when available.
+>
+> **Known bug**: The plugin's `/api/hr-to-xml` drops the `Parameter:` calculation in `Perform Script` when it spans multiple lines. The local `hr_to_xml.py` handles this correctly.
 
 ### UI automation
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/ui/environment` | All windows, types, frontmost, tool state |
+| `GET` | `/api/ui/environment` | All FM windows, types, frontmost, tool state |
 | `GET` | `/api/ui/layout` | Current Browse-mode layout name |
-| `GET` | `/api/ui/dataviewer` | Data Viewer variables and Watch expressions |
-| `POST` | `/api/ui/inspector` | Read/write/toggle/press Inspector properties |
-| `POST` | `/api/ui/press` | Press a UI element by role+description |
-| `POST` | `/api/ui/set` | Set value on a text field |
+| `GET` | `/api/ui/dataviewer` | Data Viewer: current variables and Watch expressions |
+| `POST` | `/api/ui/inspector` | Read/write/toggle/press/focus/list Inspector properties |
+| `POST` | `/api/ui/press` | Press a UI element (button, checkbox, tab) by role+description |
+| `POST` | `/api/ui/set` | Set value on a text field or writable control |
+
+### FM files
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/fm/open-files` | List open FM files with name, path, size |
+| `GET` | `/api/fm/open-instances` | Per-instance window enumeration (sees kiosk-style files, detects ambiguous windowNames) |
+| `GET` | `/api/fm/file-stat` | Server-side filesystem stat for a path (`{exists, size}`) |
+
+### Preview (Web Viewer rendering)
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/preview` | Create a preview entry; types: `html`, `mermaid`, `svg`, `visjs`, `diff` |
+| `GET` | `/api/preview/list` | JSON list of all stored previews (newest first) |
+| `GET` | `/api/preview/index` | HTML list of previews for display in the agfm Web Viewer |
+| `GET` | `/api/preview/:id` | Serve rendered preview page |
+| `GET` | `/api/preview/:id/source` | Raw stored source JSON |
+| `POST` | `/api/preview/:id/save` | Save preview to disk (opens native Save panel) |
+| `POST` | `/api/preview/exchange` | Mint a single-use ticket for Web Viewer navigation |
 
 ### Schema modification (DDL)
 
@@ -171,14 +200,60 @@ The DDL statement is passed as a string parameter to the `ModifySchema` script v
 ### Discovery (cross-reference / impact analysis)
 | Method | Path | Description |
 |--------|------|-------------|
+| `GET` | `/api/discovery/status` | Discovery data status, loaded files, memory usage |
+| `GET` | `/api/discovery/solution` | Solution definition (files, completeness, cross-file refs) |
+| `PUT` | `/api/discovery/solution` | Update solution definition (rename, set primary file) |
+| `GET` | `/api/discovery/schema` | Schema summary for a loaded file (tables, stats) |
 | `GET` | `/api/discovery/entity/:type/:name` | Entity detail (layout, script, table, etc.) |
 | `GET` | `/api/discovery/references/:type/:name` | All references to an entity |
 | `GET` | `/api/discovery/dependencies/:type/:name` | All dependencies of an entity |
-| `POST` | `/api/discovery/impact` | Blast-radius analysis with severity |
+| `POST` | `/api/discovery/impact` | Blast-radius analysis with severity classification |
 | `GET` | `/api/discovery/orphans` | Unreferenced fields, scripts, custom functions |
+| `POST` | `/api/discovery/navigate` | Deep-link navigation to an entity |
+| `POST` | `/api/discovery/load` | Load SaXML export for indexing |
+| `POST` | `/api/discovery/load-from-cache` | Hydrate from on-disk SQLite cache |
+| `POST` | `/api/discovery/refresh` | Refresh guidance; returns loaded files + bridge instructions |
+| `POST` | `/api/discovery/export-missing` | Generate bridge commands to export unloaded files |
+| `POST` | `/api/discovery/manifest` | Excluded files CRUD (`action: exclude|include|list`) |
+| `GET` | `/api/discovery/cache/stats` | Per-solution cache stats |
+| `GET` | `/api/discovery/cache/lookup` | Look up cached data for a solution by name |
+| `DELETE` | `/api/discovery/data` | Clear all loaded discovery data |
 
-### Server info
+#### Discovery queries
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/discover` | Full endpoint list |
+| `POST` | `/api/discovery/query` | Unified query dispatch |
+| `POST` | `/api/discovery/query/plugin_usage` | Where each plugin's functions are called |
+| `POST` | `/api/discovery/query/folder_analysis` | Script/CF folder coverage and density |
+| `POST` | `/api/discovery/query/spelling_drift` | Identifier-name drift across the solution |
+| `POST` | `/api/discovery/query/duplicates` | Scripts/CFs with identical bodies |
+| `POST` | `/api/discovery/query/file_access` | File-access authorisation per file |
+| `POST` | `/api/discovery/query/locals` | `$variable` declarations and use sites within scripts |
+| `POST` | `/api/discovery/query/rule_eval` | Run a `rules.json` rule pack against the solution |
+
+### Bridge
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/bridge/status` | Bridge detection status + full sub-protocol command catalog |
+| `POST` | `/api/bridge/invalidate` | Force bridge availability re-check on next idle cycle |
+| `POST` | `/api/bridge/copy` | Write AGFM_Bridge installer script to FM clipboard |
+| `POST` | `/api/bridge/upgrade` | Auto-upgrade AGFM_Bridge via AX automation |
+
+### Security
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/security/check` | Pre-flight a calculation expression against the live policy (no side effect) |
+| `GET` | `/api/security/policy` | Return `security-allow.json` and `security-deny.json` contents |
+| `POST` | `/api/security/reveal` | Open config or logs folder in Finder |
+
+### Server & agent bootstrap
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/discover` | Full endpoint list with descriptions |
 | `GET` | `/api/health` | Server alive check, FM version, bridge availability |
+| `GET` | `/api/server/info` | Bind address, port, remote-access state, URL |
+| `GET` | `/api/prompt/system` | System prompt + live capability matrix for remote agents |
+| `GET` | `/api/prompt/spec` | Layer 1 core spec (HR rules, fmxmlsnippet templates, guardrails) |
+| `GET` | `/api/prompt/capabilities` | Every capability with current policy (never/ask/always) |
+| `GET` | `/api/capability-gaps` | Operations the plugin cannot perform (for user-instruction fallback) |
+| `GET` | `/api/conventions` | Developer coding conventions from FileMaker |

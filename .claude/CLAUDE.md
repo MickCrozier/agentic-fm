@@ -134,10 +134,10 @@ When asked to copy, reference, or modify an existing script, use the first avail
 
 **Plugin available (primary):**
 
-The `/api/ui/script` endpoint reads whatever script is currently open in Script Workspace. Since `/api/ui/script/navigate` is broken, ask the user to open the script manually first.
+Use `POST /api/ui/script/navigate` to open a script by name, then `GET /api/ui/script` to read its steps.
 
 ```
-GET /api/ui/script        → returns steps[] array (up to 200 steps per window)
+GET /api/ui/script        → returns all steps[] (no pagination limit)
 ```
 
 ```bash
@@ -151,7 +151,6 @@ for i, s in enumerate(d.get('steps', [])):
 "
 ```
 
-For scripts longer than 200 steps, see the pagination instructions in `agent/docs/PLUGIN.md`.
 
 **Plugin unavailable (fallback):**
 
@@ -232,7 +231,7 @@ Custom Functions are stored in the Custom Function space of FileMaker. Written t
 # Existing script — replace steps
 python3 agent/scripts/agfm_bridge.py deploy agent/sandbox/MyScript.fmscript "My Script"
 
-# New script — bundle to clipboard, then ⌘V in Script Workspace
+# New script — create directly via plugin (no paste required)
 python3 agent/scripts/agfm_bridge.py bundle agent/sandbox/MyScript.fmscript --names "My Script"
 
 # Surgical edits
@@ -254,12 +253,7 @@ When falling back to Tier 1 (manual paste into an existing script), present inst
 > 2. **⌘A** — select all existing steps and delete
 > 3. **⌘V** — paste
 
-For new scripts bundled to clipboard:
-
-> The script is on your clipboard as a new script object. To install it:
->
-> 1. Open Script Workspace
-> 2. **⌘V** — FileMaker will create the script automatically
+For new scripts, `bundle` creates them directly via the plugin — no paste required. If the plugin is unavailable, fall back to `deploy.py --bundle` (clipboard + manual ⌘V).
 
 **If deploy fails, stop and ask the developer.** Do not retry with different flags, tiers, or clipboard workarounds. Ask what they see and wait for their guidance.
 
