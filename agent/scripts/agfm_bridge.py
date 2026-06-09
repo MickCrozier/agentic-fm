@@ -340,49 +340,47 @@ class PluginClient:
         return {"success": True, "message": f"'{script_name}' {mode} via plugin."}
 
     def bundle(self, files: list[str], names: list[str] | None = None) -> dict:
-        """Bundle multiple scripts into one clipboard paste (new script creation).
+        """Create new scripts directly via the plugin (no clipboard paste required).
+
+        Uses POST /api/ui/script/create for each file. Accepts multiple files,
+        creating each script in sequence.
 
         Args:
             files: List of paths to .fmscript or .xml files.
             names: Script names (derived from filename if omitted).
 
         Returns:
-            Result dict with success/instructions/error.
+            Result dict with success/created/error.
         """
         effective_names = list(names or [])
         while len(effective_names) < len(files):
             effective_names.append(None)
 
-        scripts_xml = []
-        for path, name in zip(files, effective_names):
-            with open(path, encoding="utf-8") as f:
-                raw = f.read()
-            xml = self.hr_to_xml(raw) if path.endswith(".fmscript") else raw
+        created = []
+        failed = []
 
-            inner = re.search(r'<fmxmlsnippet[^>]*>(.*)</fmxmlsnippet>', xml, re.DOTALL)
-            steps = inner.group(1).strip() if inner else xml
+        for path, name in zip(files, effective_names):
+            with open(path, encoding="utf-8") as fp:
+                raw = fp.read()
+            xml = self.hr_to_xml(raw) if path.endswith(".fmscript") else raw
 
             if not name:
                 name = os.path.splitext(os.path.basename(path))[0]
-            name_esc = name.replace('"', '&quot;')
-            scripts_xml.append(
-                f'<Script includeInMenu="False" SiriShortcutVisible="False" runFullAccess="False" id="0" name="{name_esc}">'
-                f'{steps}'
-                f'</Script>'
-            )
 
-        combined = '<fmxmlsnippet type="FMObjectList">' + ''.join(scripts_xml) + '</fmxmlsnippet>'
-        self.clipboard_write(combined)
+            r = self._post("/api/ui/script/create", {"scriptName": name, "xml": xml})
+            if r.get("ok") or r.get("success"):
+                created.append(name)
+            else:
+                failed.append((name, r.get("error", str(r))))
 
-        resolved = [effective_names[i] or os.path.splitext(os.path.basename(f))[0]
-                    for i, f in enumerate(files)]
+        if failed:
+            msgs = "; ".join(f"{n}: {e}" for n, e in failed)
+            return {"success": False, "created": created, "error": msgs}
+
         return {
             "success": True,
-            "instructions": (
-                f"{len(files)} script(s) bundled to clipboard: {', '.join(repr(n) for n in resolved)}\n"
-                f"  1. Open Script Workspace\n"
-                f"  2. Paste (⌘V) — FileMaker creates all scripts automatically"
-            ),
+            "created": created,
+            "message": f"Created {len(created)} script(s): {', '.join(repr(n) for n in created)}",
         }
 
     def patch(self, patch_data: str | dict) -> dict:

@@ -98,7 +98,7 @@ Fallback order when plugin is unavailable: `CONTEXT.json` → index files → `x
 
 #### Reading / copying an existing script
 
-Navigate first, then read:
+Navigate first, then read all steps in one call:
 
 ```bash
 curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
@@ -112,13 +112,7 @@ for i, s in enumerate(d.get('steps', [])):
 "
 ```
 
-#### Reading scripts longer than 200 steps
-
-`GET /api/ui/script` returns a 200-step window that follows the selected step. To read a script with more than 200 steps:
-
-1. Select step `0` → read window (`windowStart: 0, windowEnd: 200`)
-2. Select the last step → read window (shifts to cover the end)
-3. Merge: `window1_steps + window2_steps[200 - window2_windowStart:]`
+`GET /api/ui/script` returns all steps — no pagination required.
 
 #### Patch mode step indices
 
