@@ -971,7 +971,7 @@ function tokenizeFmcalc(src) {
   return toks;
 }
 
-function formatFmcalc(text) {
+function formatFmcalc(text, topLevelArgs = false) {
   const src = text.trim();
   if (!src) return text;
 
@@ -1044,8 +1044,9 @@ function formatFmcalc(text) {
       } else if (t.t === '[') {
         const args = fmtArgList(depth + 1);
         if (peek().t === ']') eat();
-        if (args.length <= 1 && !(args[0] || '').includes('\n')) {
-          parts.push(`[ ${args.join(' ; ')} ]`);
+        const single = `[ ${args.join(' ; ')} ]`;
+        if (!single.includes('\n') && single.length <= 72) {
+          parts.push(single);
         } else {
           const ind = TAB.repeat(depth + 1);
           const close = TAB.repeat(depth);
@@ -1060,13 +1061,99 @@ function formatFmcalc(text) {
     let joined = '';
     for (const p of parts) {
       if (!joined) { joined = p; continue; }
-      joined += (/\n\s*$/.test(joined) ? '' : ' ') + p;
+      const noSpc = /\n\s*$/.test(joined) || p === ':';
+      joined += (noSpc ? '' : ' ') + p;
     }
     return joined;
   }
 
-  const result = fmtExpr(0, false).trim();
+  // topLevelArgs: treat content as ';'-separated arg list (for fmscript bracket content)
+  const result = topLevelArgs
+    ? (() => { const a = fmtArgList(0); return a.length <= 1 ? (a[0] || '').trim() : a.join(' ;\n'); })()
+    : fmtExpr(0, false).trim();
   return result + (text.endsWith('\n') ? '\n' : '');
+}
+
+// ─── fmscript formatter ───────────────────────────────────────────────────────
+
+function formatFmscript(text) {
+  const lines = text.split('\n');
+  const out = [];
+  let i = 0;
+
+  function firstBracket(s) {
+    let inStr = false;
+    for (let k = 0; k < s.length; k++) {
+      const c = s[k];
+      if (c === '"') { inStr = !inStr; continue; }
+      if (!inStr && c === '[') return k;
+    }
+    return -1;
+  }
+
+  function depthChange(s) {
+    let d = 0, inStr = false;
+    for (let k = 0; k < s.length; k++) {
+      const c = s[k];
+      if (c === '"') { if (inStr && s[k + 1] === '"') { k++; continue; } inStr = !inStr; continue; }
+      if (inStr) continue;
+      if (c === '[') d++;
+      else if (c === ']') d--;
+    }
+    return d;
+  }
+
+  function findClose(s, openIdx) {
+    let depth = 0, inStr = false;
+    for (let k = openIdx; k < s.length; k++) {
+      const c = s[k];
+      if (c === '"') { if (inStr && s[k + 1] === '"') { k++; continue; } inStr = !inStr; continue; }
+      if (inStr) continue;
+      if (c === '[') depth++;
+      else if (c === ']') { depth--; if (depth === 0) return k; }
+    }
+    return -1;
+  }
+
+  while (i < lines.length) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    if (!trimmed || trimmed.startsWith('#')) { out.push(line); i++; continue; }
+
+    const bIdx = firstBracket(line);
+    if (bIdx === -1) { out.push(line); i++; continue; }
+
+    // Accumulate continuation lines until the top-level bracket closes
+    const leadingTab = line.match(/^(\t*)/)[1];
+    let raw = line;
+    let depth = depthChange(line);
+    i++;
+    while (depth > 0 && i < lines.length) {
+      raw += '\n' + lines[i];
+      depth += depthChange(lines[i]);
+      i++;
+    }
+
+    const closeIdx = findClose(raw, bIdx);
+    if (closeIdx === -1) { out.push(raw); continue; }
+
+    const prefix  = raw.slice(0, bIdx);
+    const content = raw.slice(bIdx + 1, closeIdx).trim();
+    const tail    = raw.slice(closeIdx + 1);
+
+    const formatted = formatFmcalc(content, true);
+
+    if (formatted.includes('\n')) {
+      const ind = leadingTab + '    ';
+      const indented = formatted.split('\n').map((l, j) => j === 0 ? l : ind + l).join('\n');
+      out.push(`${prefix}[\n${ind}${indented}\n${leadingTab}]${tail}`);
+    } else {
+      out.push(`${prefix}[ ${formatted} ]${tail}`);
+    }
+  }
+
+  return out.join('\n');
 }
 
 // ─── fmscript folding ranges ─────────────────────────────────────────────────
@@ -1193,6 +1280,24 @@ async function fetchCurrentScript(uri) {
 function activate(context) {
   const extPath = context.extensionPath;
   const root = findProjectRoot(null);
+
+  // ── fmscript formatter ──
+  context.subscriptions.push(
+    vscode.languages.registerDocumentFormattingEditProvider(
+      { language: 'fmscript' },
+      {
+        provideDocumentFormattingEdits(document) {
+          const text = document.getText();
+          const formatted = formatFmscript(text);
+          if (formatted === text) return [];
+          return [vscode.TextEdit.replace(
+            new vscode.Range(document.positionAt(0), document.positionAt(text.length)),
+            formatted
+          )];
+        }
+      }
+    )
+  );
 
   // ── fmscript formatter ──
   context.subscriptions.push(

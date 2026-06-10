@@ -2,7 +2,7 @@
   "name": "agentic-fm",
   "displayName": "Agentic FM",
   "description": "FileMaker script & calculation language support: syntax highlighting, step/function completions, live linting, and context sync via the agentic-fm plugin.",
-  "version": "0.1.29",
+  "version": "0.1.30",
   "publisher": "agentic-fm",
   "engines": { "vscode": "^1.60.0" },
   "categories": ["Programming Languages"],
