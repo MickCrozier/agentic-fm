@@ -350,7 +350,16 @@ async function openScriptFile(root, solution, scriptName) {
 
 // ─── Context sidebar view ─────────────────────────────────────────────────────
 
-function registerContextView(root, context) {
+function registerContextView(root, context, extPath) {
+  const stepsData = (() => {
+    try { return JSON.parse(fs.readFileSync(path.join(extPath, 'completions.json'), 'utf8')); }
+    catch { return []; }
+  })();
+  const fnsData = (() => {
+    try { return JSON.parse(fs.readFileSync(path.join(extPath, 'fm-functions.json'), 'utf8')); }
+    catch { return []; }
+  })();
+
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(
       'agenticfm.contextView',
@@ -361,12 +370,12 @@ function registerContextView(root, context) {
           let currentCtx = null;
 
           function refresh() {
-            if (!root) { webviewView.webview.html = buildWebviewHtml(null); return; }
+            if (!root) { webviewView.webview.html = buildWebviewHtml(null, stepsData, fnsData); return; }
             const ctxPath = path.join(root, 'agent', 'CONTEXT.json');
-            if (!fs.existsSync(ctxPath)) { webviewView.webview.html = buildWebviewHtml(null); return; }
+            if (!fs.existsSync(ctxPath)) { webviewView.webview.html = buildWebviewHtml(null, stepsData, fnsData); return; }
             try {
               currentCtx = JSON.parse(fs.readFileSync(ctxPath, 'utf8'));
-              webviewView.webview.html = buildWebviewHtml(currentCtx);
+              webviewView.webview.html = buildWebviewHtml(currentCtx, stepsData, fnsData);
             } catch (e) {
               webviewView.webview.html = `<body style="padding:20px;font-family:sans-serif">Error: ${e.message}</body>`;
             }
@@ -416,6 +425,21 @@ function registerContextView(root, context) {
               case 'fetch':
                 if (currentScriptPath) await fetchCurrentScript(vscode.Uri.file(currentScriptPath));
                 break;
+              case 'insertStep': {
+                const ed = vscode.window.activeTextEditor;
+                if (!ed) { vscode.window.showWarningMessage('No active editor'); break; }
+                const snippet = sigToSnippet(msg.name, msg.sig);
+                await ed.insertSnippet(new vscode.SnippetString(snippet));
+                break;
+              }
+              case 'insertFunction': {
+                const ed = vscode.window.activeTextEditor;
+                if (!ed) { vscode.window.showWarningMessage('No active editor'); break; }
+                const params = msg.params ? msg.params.split(';').map((p, i) => `\${${i+1}:${p.trim()}}`).join(' ; ') : '$1';
+                const snippet = msg.params ? `${msg.name} ( ${params} )` : `${msg.name} ( $1 )`;
+                await ed.insertSnippet(new vscode.SnippetString(snippet));
+                break;
+              }
             }
           });
         }
@@ -425,10 +449,10 @@ function registerContextView(root, context) {
   );
 }
 
-function buildWebviewHtml(ctx) {
-  const safeCtx = ctx
-    ? JSON.stringify(ctx).replace(/<\/script>/gi, '<\\/script>')
-    : 'null';
+function buildWebviewHtml(ctx, stepsData = [], fnsData = []) {
+  const safeCtx   = ctx        ? JSON.stringify(ctx).replace(/<\/script>/gi, '<\\/script>')       : 'null';
+  const safeSteps = stepsData  ? JSON.stringify(stepsData).replace(/<\/script>/gi, '<\\/script>') : '[]';
+  const safeFns   = fnsData    ? JSON.stringify(fnsData).replace(/<\/script>/gi, '<\\/script>')   : '[]';
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -612,6 +636,24 @@ details[open] > summary .arrow { transform: rotate(90deg); }
 /* ── No context state ── */
 .empty-state { padding: 32px 20px; text-align: center; opacity: 0.6; }
 .empty-state p { margin-top: 8px; font-size: 12px; }
+
+/* ── Section-local search ── */
+.section-search {
+  display: block;
+  width: calc(100% - 28px);
+  margin: 6px 14px 4px;
+  padding: 3px 7px;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border, var(--vscode-widget-border));
+  border-radius: 3px;
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+.section-search:focus { border-color: var(--vscode-focusBorder); }
+.section-search::placeholder { opacity: 0.5; }
+.item-sig { font-size: 11px; opacity: 0.45; flex-shrink: 0; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>
 </head>
 <body>
@@ -641,7 +683,9 @@ details[open] > summary .arrow { transform: rotate(90deg); }
 
 <script>
 const vscode = acquireVsCodeApi();
-const CTX = ${safeCtx};
+const CTX   = ${safeCtx};
+const STEPS = ${safeSteps};
+const FNS   = ${safeFns};
 
 // ── Utilities ────────────────────────────────────────────────────────────────
 
@@ -671,7 +715,13 @@ function txt(tag, cls, text) {
 // ── Render ───────────────────────────────────────────────────────────────────
 
 function render() {
-  if (!CTX) return;
+  const sections = document.getElementById('sections');
+
+  if (!CTX) {
+    sections.appendChild(buildStepsSection());
+    sections.appendChild(buildFnsSection());
+    return;
+  }
 
   // Header
   const hdr = document.getElementById('hdr');
@@ -689,8 +739,6 @@ function render() {
 
   // Hide empty state
   document.getElementById('empty').style.display = 'none';
-
-  const sections = document.getElementById('sections');
   sections.innerHTML = '';
 
   const scripts  = CTX.scripts  || {};
@@ -704,6 +752,9 @@ function render() {
   if (Object.keys(cfs).length > 0) {
     sections.appendChild(buildSimpleSection('Custom Functions', cfs, 'cfs'));
   }
+
+  sections.appendChild(buildStepsSection());
+  sections.appendChild(buildFnsSection());
 }
 
 // ── Section builders ─────────────────────────────────────────────────────────
@@ -831,6 +882,75 @@ function buildSimpleSection(title, items, id) {
   return det;
 }
 
+function buildStepsSection() {
+  const { det, body } = makeSection('steps', 'Script Steps', STEPS.length);
+
+  const search = document.createElement('input');
+  search.type = 'text';
+  search.className = 'section-search';
+  search.placeholder = 'Search steps…';
+  search.autocomplete = 'off';
+  search.spellcheck = false;
+  search.oninput = () => onSectionSearch('steps', search.value);
+  body.insertBefore(search, body.firstChild);
+
+  for (const step of STEPS) {
+    const btn = document.createElement('button');
+    btn.className = 'item clickable';
+    btn.dataset.search = step.name.toLowerCase();
+    btn.title = step.sig || step.name;
+    btn.appendChild(txt('span', 'item-name', step.name));
+    if (step.category) btn.appendChild(txt('span', 'item-sig', step.category));
+    btn.onclick = () => vscode.postMessage({ command: 'insertStep', name: step.name, sig: step.sig || null });
+    body.appendChild(btn);
+  }
+
+  return det;
+}
+
+function buildFnsSection() {
+  // Deduplicate by name (Get functions are listed multiple times)
+  const seen = new Set();
+  const unique = FNS.filter(f => { const k = f.name === 'Get' ? f.name + '.' + f.params : f.name; if (seen.has(k)) return false; seen.add(k); return true; });
+  const { det, body } = makeSection('fns', 'Calc Functions', unique.length);
+
+  const search = document.createElement('input');
+  search.type = 'text';
+  search.className = 'section-search';
+  search.placeholder = 'Search functions…';
+  search.autocomplete = 'off';
+  search.spellcheck = false;
+  search.oninput = () => onSectionSearch('fns', search.value);
+  body.insertBefore(search, body.firstChild);
+
+  for (const fn of unique) {
+    const label = fn.name === 'Get' ? 'Get ( ' + fn.params + ' )' : fn.name;
+    const btn = document.createElement('button');
+    btn.className = 'item clickable';
+    btn.dataset.search = label.toLowerCase();
+    btn.title = fn.params ? fn.name + ' ( ' + fn.params + ' )' : fn.name;
+    btn.appendChild(txt('span', 'item-name', label));
+    btn.onclick = () => vscode.postMessage({ command: 'insertFunction', name: fn.name === 'Get' ? 'Get ( ' + fn.params + ' )' : fn.name, params: fn.name === 'Get' ? null : fn.params });
+    body.appendChild(btn);
+  }
+
+  return det;
+}
+
+function onSectionSearch(sectionId, q) {
+  q = q.toLowerCase().trim();
+  const section = document.querySelector('[data-section="' + sectionId + '"]');
+  if (!section) return;
+  let visible = 0;
+  section.querySelectorAll('.item[data-search]').forEach(item => {
+    const match = !q || item.dataset.search.includes(q);
+    item.classList.toggle('hidden', !match);
+    if (match) visible++;
+  });
+  const noRes = section.querySelector('[data-noresults]');
+  if (noRes) noRes.classList.toggle('visible', visible === 0 && q.length > 0);
+}
+
 // ── Search ───────────────────────────────────────────────────────────────────
 
 function onSearch(q) {
@@ -898,32 +1018,6 @@ function stepKeyword(trimmed) {
   // General step: capital-letter word(s) followed by ' [' or end of line
   if (/^[A-Z][A-Za-z]*(?:\s[A-Za-z]+)*\s*(?:\[|$)/.test(trimmed)) return trimmed.split(' [')[0].trimEnd();
   return null;
-}
-
-function formatFmscript(text) {
-  const TAB = '\t';
-  const lines = text.split('\n');
-  let depth = 0;
-  let lastStepDepth = 0;
-  const out = [];
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) { out.push(''); continue; }
-
-    const kw = stepKeyword(trimmed);
-    if (kw !== null) {
-      if (BLOCK_CLOSE.has(kw) || BLOCK_MIDDLE.has(kw)) depth = Math.max(0, depth - 1);
-      out.push(TAB.repeat(depth) + trimmed);
-      lastStepDepth = depth;
-      if (BLOCK_OPEN.has(kw)) depth++;
-    } else {
-      // Continuation line (multi-line calc param) — one deeper than its step
-      out.push(TAB.repeat(lastStepDepth + 1) + trimmed);
-    }
-  }
-
-  return out.join('\n');
 }
 
 // ─── fmcalc formatter ─────────────────────────────────────────────────────────
@@ -1077,6 +1171,13 @@ function formatFmcalc(text, topLevelArgs = false) {
 // ─── fmscript formatter ───────────────────────────────────────────────────────
 
 function formatFmscript(text) {
+  // Known step-parameter labels that precede an FM calculation expression.
+  // Ordered longest-first to prevent prefix collisions.
+  const CALC_LABELS = [
+    'Verify SSL Certificates:', 'cURL options:', 'Text Result:',
+    'With dialog:', 'Parameter:', 'Condition:', 'Target:', 'Select:', 'Value:',
+  ];
+
   const lines = text.split('\n');
   const out = [];
   let i = 0;
@@ -1115,6 +1216,47 @@ function formatFmscript(text) {
     return -1;
   }
 
+  // Find the index immediately after the last known calc label (including trailing space).
+  // Returns 0 when no label found — treat entire content as the expression.
+  function findCalcStart(content) {
+    let best = -1;
+    for (const label of CALC_LABELS) {
+      let pos = 0;
+      while (true) {
+        const idx = content.indexOf(label, pos);
+        if (idx === -1) break;
+        // Only accept labels at top level (no unbalanced parens/brackets before them)
+        const before = content.slice(0, idx);
+        let d = 0, inS = false;
+        for (const c of before) {
+          if (c === '"') inS = !inS;
+          if (!inS) { if (c === '(' || c === '[') d++; else if (c === ')' || c === ']') d--; }
+        }
+        if (d === 0) {
+          let end = idx + label.length;
+          while (content[end] === ' ') end++; // include trailing space in preCalc
+          if (end > best) best = end;
+        }
+        pos = idx + 1;
+      }
+    }
+    return best === -1 ? 0 : best;
+  }
+
+  // Returns true if s has a ';' at the top level (not inside parens/brackets/strings).
+  function hasTopLevelSemi(s) {
+    let d = 0, inS = false;
+    for (let k = 0; k < s.length; k++) {
+      const c = s[k];
+      if (c === '"') { if (inS && s[k + 1] === '"') { k++; continue; } inS = !inS; continue; }
+      if (inS) continue;
+      if (c === '(' || c === '[') d++;
+      else if (c === ')' || c === ']') d--;
+      else if (c === ';' && d === 0) return true;
+    }
+    return false;
+  }
+
   while (i < lines.length) {
     const line = lines[i];
     const trimmed = line.trim();
@@ -1142,14 +1284,25 @@ function formatFmscript(text) {
     const content = raw.slice(bIdx + 1, closeIdx).trim();
     const tail    = raw.slice(closeIdx + 1);
 
-    const formatted = formatFmcalc(content, true);
+    const calcStart = findCalcStart(content);
+    const preCalc   = content.slice(0, calcStart);          // e.g. "$var ; Value: "
+    const calcExpr  = content.slice(calcStart).trim();
 
-    if (formatted.includes('\n')) {
+    // Skip formatting if the expression itself has top-level ';' (more step params follow)
+    if (!calcExpr || hasTopLevelSemi(calcExpr)) { out.push(raw); continue; }
+
+    const formatted = formatFmcalc(calcExpr, false);
+    const oneLiner  = `${prefix}[ ${preCalc}${formatted} ]${tail}`;
+
+    if (!formatted.includes('\n') && oneLiner.length <= 120) {
+      out.push(oneLiner);
+    } else if (formatted.includes('\n')) {
       const ind = leadingTab + '    ';
       const indented = formatted.split('\n').map((l, j) => j === 0 ? l : ind + l).join('\n');
-      out.push(`${prefix}[\n${ind}${indented}\n${leadingTab}]${tail}`);
+      out.push(`${prefix}[ ${preCalc}${indented}\n${leadingTab}]${tail}`);
     } else {
-      out.push(`${prefix}[ ${formatted} ]${tail}`);
+      // Single-line calc but total too long — put ] on its own line
+      out.push(`${prefix}[ ${preCalc}${formatted}\n${leadingTab}]${tail}`);
     }
   }
 
@@ -1254,9 +1407,27 @@ async function fetchCurrentScript(uri) {
   const token = env['AGFM_PLUGIN_TOKEN'];
   if (!pluginUrl || !token) { vscode.window.showErrorMessage('Plugin not configured in .env.local'); return; }
 
+  // Derive expected solution name from sandbox path: agent/sandbox/<SolutionName>/Script.fmscript
+  const sandboxDir = path.join(root, 'agent', 'sandbox');
+  const rel = path.relative(sandboxDir, filePath);
+  const expectedSolution = rel.split(path.sep)[0]; // first path component
+
   await vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: `Fetching "${scriptName}"…`, cancellable: false },
     async () => {
+      // Verify the frontmost FM file matches the script's solution folder
+      try {
+        const ctx = await httpGet(`${pluginUrl}/api/context`, token);
+        const frontmost = ctx.body && ctx.body.solution;
+        if (frontmost && expectedSolution &&
+            frontmost.toLowerCase() !== expectedSolution.toLowerCase()) {
+          vscode.window.showErrorMessage(
+            `Wrong file in FM — script is in "${expectedSolution}" but "${frontmost}" is frontmost. Switch files first.`
+          );
+          return;
+        }
+      } catch {}
+
       try { await httpPost(`${pluginUrl}/api/ui/script/navigate`, token, { scriptName }); } catch {}
 
       let result;
@@ -1280,24 +1451,6 @@ async function fetchCurrentScript(uri) {
 function activate(context) {
   const extPath = context.extensionPath;
   const root = findProjectRoot(null);
-
-  // ── fmscript formatter ──
-  context.subscriptions.push(
-    vscode.languages.registerDocumentFormattingEditProvider(
-      { language: 'fmscript' },
-      {
-        provideDocumentFormattingEdits(document) {
-          const text = document.getText();
-          const formatted = formatFmscript(text);
-          if (formatted === text) return [];
-          return [vscode.TextEdit.replace(
-            new vscode.Range(document.positionAt(0), document.positionAt(text.length)),
-            formatted
-          )];
-        }
-      }
-    )
-  );
 
   // ── fmscript formatter ──
   context.subscriptions.push(
@@ -1417,7 +1570,7 @@ function activate(context) {
   );
 
   // ── Context sidebar view ──
-  registerContextView(root, context);
+  registerContextView(root, context, extPath);
 
   // ── Status bar context button ──
   const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
