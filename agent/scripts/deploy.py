@@ -5,10 +5,9 @@ deploy.py - Pluggable deployment module for agentic-fm.
 Loads a validated fmxmlsnippet XML file to the FileMaker clipboard and
 optionally triggers an automated paste into the Script Workspace.
 
-Tier 1 (universal):  plugin /api/clipboard/write → developer pastes manually
-Tier 2 (MBS):        plugin clipboard + /trigger → Agentic-fm Paste auto-pastes
-Tier 3 (MBS + AS):   /trigger creates placeholder → then Tier 2
-Tier 4 (plugin):     plugin navigate + insert + save — no AppleScript required
+Tier 1 (universal):  companion /clipboard → developer pastes manually
+Tier 2 (MBS):        companion /clipboard + /trigger → Agentic-fm Paste auto-pastes
+Tier 3 (MBS + AS):   companion /trigger creates placeholder → then Tier 2
 
 Usage (CLI):
     python3 agent/scripts/deploy.py <xml_path> [target_script] [--tier N]
@@ -19,9 +18,9 @@ Usage (module):
 
 Result dict keys:
     success       — bool
-    tier_used     — int (1–4; may differ from requested if fallback)
+    tier_used     — int (1, 2, or 3; may differ from requested if fallback)
     instructions  — str (Tier 1 and fallback cases — present to developer)
-    message       — str (Tier 2/3/4 success — for logging)
+    message       — str (Tier 2/3 success — for logging)
     fallback_from — int (present when fell back from a higher tier)
     fallback_reason — str (why the fallback occurred)
     error         — str (present on failure)
@@ -39,37 +38,12 @@ import urllib.request
 # Config
 # ---------------------------------------------------------------------------
 
-# Temporary: force all clipboard writes through the host clipboard server
-# (host.docker.internal:8767) instead of the plugin endpoint.
-# Set to False to restore the default behaviour (plugin preferred).
-FORCE_HOST_CLIPBOARD = True
-
 DEFAULT_CONFIG = {
     "default_tier": 1,
     "auto_save": False,
     "fm_app_name": "FileMaker Pro",
-    "companion_url": "http://local.hub:8767",
-    "plugin_url": None,
-    "plugin_token": None,
+    "companion_url": "http://local.hub:8765",
 }
-
-ENV_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".env.local")
-
-
-def _load_plugin_auth() -> tuple[str | None, str | None]:
-    """Load plugin URL and bearer token from root .env.local."""
-    env: dict[str, str] = {}
-    try:
-        with open(ENV_FILE, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                key, _, val = line.partition("=")
-                env[key.strip()] = val.strip()
-    except OSError:
-        pass
-    return env.get("AGFM_PLUGIN_URL"), env.get("AGFM_PLUGIN_TOKEN")
 
 
 def _load_config() -> dict:
@@ -78,18 +52,9 @@ def _load_config() -> dict:
     try:
         with open(config_path, "r", encoding="utf-8") as f:
             cfg = json.load(f)
-            merged = {**DEFAULT_CONFIG, **cfg}
+            return {**DEFAULT_CONFIG, **cfg}
     except (OSError, ValueError):
-        merged = DEFAULT_CONFIG.copy()
-
-    # Overlay plugin auth from agent/auth/plugin.json (gitignored secrets file)
-    plugin_url, plugin_token = _load_plugin_auth()
-    if plugin_url and not merged.get("plugin_url"):
-        merged["plugin_url"] = plugin_url
-    if plugin_token and not merged.get("plugin_token"):
-        merged["plugin_token"] = plugin_token
-
-    return merged
+        return DEFAULT_CONFIG.copy()
 
 
 def _resolve_target_file(config: dict) -> str | None:
@@ -122,103 +87,17 @@ def _resolve_target_file(config: dict) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# Post-conversion XML patcher
-# ---------------------------------------------------------------------------
-
-def _extract_js_params(hr_source: str) -> list:
-    """Return ordered list of parameter lists for each Perform JavaScript step in hr_source.
-
-    Each entry is a list of FM expressions (strings). Steps with no Parameters clause
-    get an empty list.
-    """
-    import re
-    results = []
-    # Match the bracketed body of each Perform JavaScript step
-    for m in re.finditer(
-        r'Perform JavaScript in Web Viewer\s*\[([^\]]+)\]',
-        hr_source,
-    ):
-        body = m.group(1)
-        # Find the Parameters: clause — everything after "Parameters:" up to end of body
-        params_match = re.search(r';\s*Parameters:\s*(.+)$', body.strip())
-        if params_match:
-            raw = params_match.group(1).strip()
-            # Multiple params are separated by " ; " in HR format
-            params = [p.strip() for p in re.split(r'\s*;\s*', raw)]
-        else:
-            params = []
-        results.append(params)
-    return results
-
-
-def _patch_converted_xml(xml: str, hr_source: str | None = None) -> str:
-    """Fix known HR→XML conversion bugs that the plugin's hr-to-xml endpoint gets wrong.
-
-    1. Perform JavaScript in Web Viewer: plugin emits <WebViewerObjectName> but
-       FileMaker requires <ObjectName>. Replace the wrapper element name.
-    2. Perform JavaScript in Web Viewer: Parameters element is dropped entirely.
-       Reconstruct from hr_source (when provided) and inject into each step.
-    """
-    import re
-
-    xml = xml.replace("<WebViewerObjectName>", "<ObjectName>")
-    xml = xml.replace("</WebViewerObjectName>", "</ObjectName>")
-
-    if hr_source:
-        js_params = _extract_js_params(hr_source)
-        if js_params:
-            step_iter = iter(js_params)
-            def _inject(m):
-                try:
-                    params = next(step_iter)
-                except StopIteration:
-                    return m.group(0)
-                step_xml = m.group(0)
-                if not params or '<Parameters' in step_xml:
-                    return step_xml
-                params_xml = f'<Parameters Count="{len(params)}">' + ''.join(
-                    f'<P><Calculation><![CDATA[{p}]]></Calculation></P>'
-                    for p in params
-                ) + '</Parameters>'
-                return step_xml.replace('</Step>', params_xml + '</Step>')
-            xml = re.sub(
-                r'<Step[^>]*id="175"[^>]*>.*?</Step>',
-                _inject,
-                xml,
-                flags=re.DOTALL,
-            )
-
-    return xml
-
-
-# ---------------------------------------------------------------------------
 # HTTP helper
 # ---------------------------------------------------------------------------
 
-def _post_json(url: str, payload: dict, timeout: int = 15, token: str | None = None) -> dict:
+def _post_json(url: str, payload: dict, timeout: int = 15) -> dict:
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    headers = {"Content-Type": "application/json"}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    req = urllib.request.Request(url, data=body, headers=headers, method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        raw = exc.read().decode("utf-8", errors="replace")
-        try:
-            return json.loads(raw)
-        except ValueError:
-            return {"success": False, "error": f"HTTP {exc.code}: {raw}"}
-    except Exception as exc:
-        return {"success": False, "error": str(exc)}
-
-
-def _get_json(url: str, timeout: int = 15, token: str | None = None) -> dict:
-    headers = {}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    req = urllib.request.Request(url, headers=headers, method="GET")
+    req = urllib.request.Request(
+        url,
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
@@ -293,26 +172,14 @@ def _switch_to_document(
 # Tier 1
 # ---------------------------------------------------------------------------
 
-def _write_clipboard(xml: str, plugin_url: str | None, plugin_token: str | None,
-                     companion_url: str) -> dict:
-    """Write XML to FM clipboard. Prefers plugin if available, falls back to companion."""
-    if not FORCE_HOST_CLIPBOARD and plugin_url and plugin_token:
-        result = _post_json(f"{plugin_url}/api/clipboard/write", {"xml": xml, "type": "XMSS"}, token=plugin_token)
-        if result.get("success") or result.get("ok"):
-            return result
-    return _post_json(f"{companion_url}/clipboard", {"xml": xml})
-
-
 def _tier1(
     xml: str,
     companion_url: str,
     target_script: str | None,
     target_file: str | None = None,
-    plugin_url: str | None = None,
-    plugin_token: str | None = None,
 ) -> dict:
-    """Write XML to clipboard, return paste instructions."""
-    result = _write_clipboard(xml, plugin_url, plugin_token, companion_url)
+    """Write XML to clipboard via companion, return paste instructions."""
+    result = _post_json(f"{companion_url}/clipboard", {"xml": xml})
     if not result.get("success"):
         return {
             "success": False,
@@ -727,465 +594,8 @@ def _tier3(
 
 
 # ---------------------------------------------------------------------------
-# Tier 4 — direct plugin deploy (no AppleScript)
-# ---------------------------------------------------------------------------
-
-def _tier4(
-    xml: str,
-    plugin_url: str,
-    plugin_token: str,
-    target_script: str | None,
-    select_all: bool = True,
-) -> dict:
-    """Deploy using the plugin's direct Script Workspace API.
-
-    1. Navigate to the target script via /api/ui/script/navigate
-    2. If select_all: delete all existing steps via /api/ui/script/delete
-    3. Insert steps via /api/ui/script/insert
-    4. Save via /api/ui/script/save
-
-    Falls back to Tier 1 clipboard-only if the plugin calls fail.
-    """
-    if not target_script:
-        config = _load_config()
-        companion_url = config.get("companion_url", "http://local.hub:8767").rstrip("/")
-        result = _write_clipboard(xml, plugin_url, plugin_token, companion_url)
-        if not (result.get("success") or result.get("ok")):
-            return {"success": False, "tier_used": 4, "error": result.get("error", "Clipboard write failed")}
-        return {
-            "success": True,
-            "tier_used": 4,
-            "instructions": "Script loaded to clipboard. No target script specified — paste manually (⌘V).",
-        }
-
-    # Step 1: navigate to the script — only if it isn't already open
-    current = _get_json(f"{plugin_url}/api/ui/script", token=plugin_token)
-    if current.get("scriptName") != target_script:
-        nav = _post_json(
-            f"{plugin_url}/api/ui/script/navigate",
-            {"scriptName": target_script},
-            token=plugin_token,
-            timeout=35,
-        )
-        if not (nav.get("success") or nav.get("ok")):
-            return {
-                "success": False,
-                "tier_used": 4,
-                "error": nav.get("error", f"Could not navigate to '{target_script}'"),
-            }
-
-    # Step 2: delete existing steps if replacing — read step count first, then
-    # delete by explicit index list (the API does not support {"all": true})
-    if select_all:
-        script_state = _get_json(f"{plugin_url}/api/ui/script", token=plugin_token)
-        step_count = script_state.get("stepCount", 0)
-        if step_count > 0:
-            del_result = _post_json(
-                f"{plugin_url}/api/ui/script/delete",
-                {"steps": list(range(step_count))},
-                token=plugin_token,
-            )
-            if not (del_result.get("success") or del_result.get("ok")):
-                return {
-                    "success": False,
-                    "tier_used": 4,
-                    "error": del_result.get("error", "Failed to delete existing steps"),
-                }
-            # Wait for FM to finish deleting before inserting
-            import time
-            for _ in range(10):
-                time.sleep(0.3)
-                check = _get_json(f"{plugin_url}/api/ui/script", token=plugin_token)
-                if check.get("stepCount", step_count) == 0:
-                    break
-
-    # Step 3: write to clipboard with explicit XMSS type, then insert
-    _post_json(f"{plugin_url}/api/clipboard/write", {"xml": xml, "type": "XMSS"}, token=plugin_token)
-    insert_result = _post_json(
-        f"{plugin_url}/api/ui/script/insert",
-        {"xml": xml, "afterIndex": -1, "type": "XMSS"},
-        token=plugin_token,
-    )
-    if not (insert_result.get("success") or insert_result.get("ok")):
-        return {
-            "success": False,
-            "tier_used": 4,
-            "error": insert_result.get("error", "Failed to insert steps"),
-        }
-
-    # Step 4: save
-    save_result = _post_json(
-        f"{plugin_url}/api/ui/script/save",
-        {},
-        token=plugin_token,
-    )
-    if not (save_result.get("success") or save_result.get("ok")):
-        return {
-            "success": False,
-            "tier_used": 4,
-            "error": save_result.get("error", "Failed to save script"),
-        }
-
-    mode = "replaced" if select_all else "appended to"
-    return {
-        "success": True,
-        "tier_used": 4,
-        "message": f"Script steps {mode} '{target_script}' via Tier 4 (plugin direct).",
-    }
-
-
-# ---------------------------------------------------------------------------
-# Tier 4 — patch mode (surgical step edits via plugin)
-# ---------------------------------------------------------------------------
-
-def _tier4_patch(
-    patch: dict,
-    plugin_url: str,
-    plugin_token: str,
-) -> dict:
-    """Apply a structured list of surgical edits to a script via the plugin.
-
-    Patch payload schema:
-        {
-            "script": "Script Name",          # required
-            "changes": [                       # required, applied in order
-                {"op": "insert",  "afterIndex": N, "xml": "<fmxmlsnippet...>"},
-                {"op": "delete",  "steps": [N, ...]},
-                {"op": "replace", "steps": [N, ...], "xml": "<fmxmlsnippet...>"}
-            ]
-        }
-
-    Op semantics:
-        insert  — insert XML after step index N (-1 = before step 0)
-        delete  — delete the listed step indices
-        replace — delete listed indices, then insert XML at their vacated position
-                  (inserts after index steps[0]-1, i.e. where the first deleted step was)
-
-    IMPORTANT — index stability:
-        Step indices shift as changes are applied. Apply changes in reverse index
-        order (highest first) to keep earlier indices stable, matching the convention
-        used by text-editor diff tools.
-
-    Returns the standard result dict with success/tier_used/message/error.
-    """
-    script_name = patch.get("script")
-    changes = patch.get("changes")
-
-    if not script_name:
-        return {"success": False, "tier_used": 4, "error": "Patch payload missing 'script' field"}
-    if not isinstance(changes, list) or not changes:
-        return {"success": False, "tier_used": 4, "error": "Patch payload missing or empty 'changes' list"}
-
-    # Navigate to the script
-    nav = _post_json(
-        f"{plugin_url}/api/ui/script/navigate",
-        {"scriptName": script_name},
-        token=plugin_token,
-        timeout=35,
-    )
-    if not nav.get("success", nav.get("ok")):
-        return {
-            "success": False,
-            "tier_used": 4,
-            "error": nav.get("error", f"Could not navigate to '{script_name}'"),
-        }
-
-    # Apply each change in order
-    for i, change in enumerate(changes):
-        op = change.get("op")
-        prefix = f"Change {i+1} ({op})"
-
-        if op == "insert":
-            after = change.get("afterIndex", -1)
-            xml = change.get("xml", "")
-            if not xml:
-                return {"success": False, "tier_used": 4, "error": f"{prefix}: missing 'xml'"}
-            result = _post_json(
-                f"{plugin_url}/api/ui/script/insert",
-                {"xml": xml, "afterIndex": after},
-                token=plugin_token,
-            )
-            if not result.get("success", result.get("ok")):
-                return {"success": False, "tier_used": 4, "error": f"{prefix}: {result.get('error', 'insert failed')}"}
-
-        elif op == "delete":
-            steps = change.get("steps")
-            if not isinstance(steps, list) or not steps:
-                return {"success": False, "tier_used": 4, "error": f"{prefix}: missing 'steps' array"}
-            result = _post_json(
-                f"{plugin_url}/api/ui/script/delete",
-                {"steps": steps},
-                token=plugin_token,
-            )
-            if not result.get("success", result.get("ok")):
-                return {"success": False, "tier_used": 4, "error": f"{prefix}: {result.get('error', 'delete failed')}"}
-
-        elif op == "replace":
-            steps = change.get("steps")
-            xml = change.get("xml", "")
-            if not isinstance(steps, list) or not steps:
-                return {"success": False, "tier_used": 4, "error": f"{prefix}: missing 'steps' array"}
-            if not xml:
-                return {"success": False, "tier_used": 4, "error": f"{prefix}: missing 'xml'"}
-            # Delete the target steps first
-            del_result = _post_json(
-                f"{plugin_url}/api/ui/script/delete",
-                {"steps": steps},
-                token=plugin_token,
-            )
-            if not del_result.get("success", del_result.get("ok")):
-                return {"success": False, "tier_used": 4, "error": f"{prefix}: delete phase: {del_result.get('error', 'failed')}"}
-            # Insert at the vacated position (before where the first step was)
-            insert_after = steps[0] - 1
-            ins_result = _post_json(
-                f"{plugin_url}/api/ui/script/insert",
-                {"xml": xml, "afterIndex": insert_after},
-                token=plugin_token,
-            )
-            if not ins_result.get("success", ins_result.get("ok")):
-                return {"success": False, "tier_used": 4, "error": f"{prefix}: insert phase: {ins_result.get('error', 'failed')}"}
-
-        else:
-            return {"success": False, "tier_used": 4, "error": f"{prefix}: unknown op '{op}' (expected insert/delete/replace)"}
-
-    # Save
-    save = _post_json(f"{plugin_url}/api/ui/script/save", {}, token=plugin_token)
-    if not save.get("success", save.get("ok")):
-        return {"success": False, "tier_used": 4, "error": f"Save failed: {save.get('error', 'unknown')}"}
-
-    return {
-        "success": True,
-        "tier_used": 4,
-        "message": f"Applied {len(changes)} change(s) to '{script_name}' via patch.",
-    }
-
-
-# ---------------------------------------------------------------------------
-# Schema modification via ModifySchema script
-# ---------------------------------------------------------------------------
-
-def modify_schema(sql: str) -> dict:
-    """Execute a DDL statement via the ModifySchema script through AGFM_Bridge.
-
-    Args:
-        sql: A DDL statement e.g. "CREATE TABLE Foo (id VARCHAR(255))"
-
-    Returns:
-        Result dict with success/message/error.
-    """
-    import time
-
-    config = _load_config()
-    plugin_url = (config.get("plugin_url") or "").rstrip("/") or None
-    plugin_token = config.get("plugin_token") or None
-
-    if not plugin_url or not plugin_token:
-        return {"success": False, "error": "modify_schema() requires plugin_url and plugin_token"}
-
-    result = _post_json(
-        f"{plugin_url}/api/performscript",
-        {
-            "scriptName": "AGFM_Bridge",
-            "parameter": {
-                "command": "performScript",
-                "scriptName": "ModifySchema",
-                "parameter": sql,
-            },
-        },
-        token=plugin_token,
-    )
-
-    eval_id = result.get("id")
-    if not eval_id:
-        return {"success": False, "error": result.get("error", "No eval ID returned")}
-
-    time.sleep(5)
-    eval_result = _get_json(f"{plugin_url}/api/eval/{eval_id}", token=plugin_token)
-
-    if not eval_result.get("complete"):
-        return {"success": False, "error": "ModifySchema did not complete in time"}
-
-    inner = eval_result.get("result", {})
-    script_error = inner.get("scriptError", -1)
-    script_result = inner.get("result", "")
-
-    # result "0" = success, non-zero = error
-    if script_error != 0 or script_result != "0":
-        return {
-            "success": False,
-            "error": f"ModifySchema failed — scriptError: {script_error}, result: {script_result!r}",
-        }
-
-    # Verify by querying FileMaker_Tables
-    verify = _post_json(
-        f"{plugin_url}/api/query",
-        {"sql": "SELECT TableName FROM FileMaker_Tables ORDER BY TableName"},
-        token=plugin_token,
-    )
-    verify_id = verify.get("id")
-    if verify_id:
-        time.sleep(2)
-        verify_result = _get_json(f"{plugin_url}/api/eval/{verify_id}", token=plugin_token)
-        tables = verify_result.get("result", {}).get("result", "")
-    else:
-        tables = "(could not verify)"
-
-    return {
-        "success": True,
-        "message": f"DDL executed successfully.\nCurrent tables:\n{tables}",
-    }
-
-
-# ---------------------------------------------------------------------------
-# Bundle helpers — multi-script clipboard assembly
-# ---------------------------------------------------------------------------
-
-def _bundle_to_xml(
-    files: list,
-    names: list,
-    plugin_url: "str | None",
-    plugin_token: "str | None",
-) -> "tuple[str | None, str | None]":
-    """Convert multiple script files into a single multi-script fmxmlsnippet.
-
-    Returns (xml, error) — one will be None.
-    """
-    import re as _re
-
-    scripts_xml = []
-    for path, name in zip(files, names):
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                raw = f.read()
-        except OSError as exc:
-            return None, f"Cannot read {path}: {exc}"
-
-        if path.endswith(".fmscript"):
-            if not (plugin_url and plugin_token):
-                return None, f"HR→XML conversion requires the plugin ({path})"
-            conv = _post_json(f"{plugin_url}/api/hr-to-xml", {"hr": raw}, token=plugin_token)
-            if not conv.get("ok"):
-                return None, f"HR→XML conversion failed for {path}: {conv}"
-            for w in conv.get("conversionWarnings", []):
-                print(f"  [warn] {path}: {w}", file=sys.stderr)
-            xml = _patch_converted_xml(conv["xml"], hr_source=raw)
-        else:
-            xml = raw
-
-        inner = _re.search(r'<fmxmlsnippet[^>]*>(.*)</fmxmlsnippet>', xml, _re.DOTALL)
-        steps = inner.group(1).strip() if inner else xml
-
-        if not name:
-            name = os.path.splitext(os.path.basename(path))[0]
-
-        name_esc = name.replace('"', '&quot;')
-        scripts_xml.append(
-            f'<Script includeInMenu="False" SiriShortcutVisible="False" runFullAccess="False" id="0" name="{name_esc}">'
-            f'{steps}'
-            f'</Script>'
-        )
-
-    combined = (
-        '<fmxmlsnippet type="FMObjectList">'
-        + ''.join(scripts_xml)
-        + '</fmxmlsnippet>'
-    )
-    return combined, None
-
-
-# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
-
-def bundle(
-    files: list,
-    names: "list | None" = None,
-) -> dict:
-    """Bundle multiple scripts into a single clipboard paste.
-
-    Args:
-        files: List of paths to .fmscript or .xml files.
-        names: Optional list of script names (one per file).
-               Derived from filename if None or shorter than files.
-
-    Returns:
-        Result dict with success/tier_used/instructions/error.
-    """
-    config = _load_config()
-    plugin_url = (config.get("plugin_url") or "").rstrip("/") or None
-    plugin_token = config.get("plugin_token") or None
-    companion_url = config.get("companion_url", "http://local.hub:8767").rstrip("/")
-    target_file = _resolve_target_file(config)
-
-    effective_names = list(names or [])
-    if len(effective_names) < len(files):
-        effective_names += [None] * (len(files) - len(effective_names))
-
-    xml, error = _bundle_to_xml(files, effective_names, plugin_url, plugin_token)
-    if error:
-        return {"success": False, "error": error}
-
-    result = _write_clipboard(xml, plugin_url, plugin_token, companion_url)
-    if not result.get("success"):
-        return {"success": False, "tier_used": 1, "error": result.get("error", "Clipboard write failed")}
-
-    resolved_names = [
-        effective_names[i] or os.path.splitext(os.path.basename(f))[0]
-        for i, f in enumerate(files)
-    ]
-    file_hint = f" in **{target_file}**" if target_file else ""
-    script_list = ", ".join(f"'{n}'" for n in resolved_names)
-    instructions = (
-        f"{len(files)} script(s) bundled to clipboard: {script_list}\n"
-        f"  1. Open Script Workspace{file_hint}\n"
-        f"  2. Paste (⌘V) — FileMaker will create all scripts automatically"
-    )
-    return {"success": True, "tier_used": 1, "instructions": instructions}
-
-
-def patch(
-    patch_path_or_dict: "str | dict",
-) -> dict:
-    """Apply a structured list of surgical step edits to a script via the plugin.
-
-    Args:
-        patch_path_or_dict: Path to a JSON patch file, or a dict with the patch payload.
-
-    Patch payload schema:
-        {
-            "script": "Script Name",
-            "changes": [
-                {"op": "insert",  "afterIndex": N, "xml": "<fmxmlsnippet...>"},
-                {"op": "delete",  "steps": [N, ...]},
-                {"op": "replace", "steps": [N, ...], "xml": "<fmxmlsnippet...>"}
-            ]
-        }
-
-    Returns:
-        Result dict with success/tier_used/message/error.
-    """
-    config = _load_config()
-    plugin_url = (config.get("plugin_url") or "").rstrip("/") or None
-    plugin_token = config.get("plugin_token") or None
-
-    if not plugin_url or not plugin_token:
-        return {
-            "success": False,
-            "tier_used": 4,
-            "error": "patch() requires plugin_url and plugin_token — plugin must be available",
-        }
-
-    if isinstance(patch_path_or_dict, dict):
-        payload = patch_path_or_dict
-    else:
-        try:
-            with open(patch_path_or_dict, "r", encoding="utf-8") as f:
-                payload = json.load(f)
-        except (OSError, ValueError) as exc:
-            return {"success": False, "tier_used": 4, "error": f"Cannot read patch file: {exc}"}
-
-    return _tier4_patch(payload, plugin_url, plugin_token)
-
 
 def deploy(
     xml_path: str,
@@ -1195,36 +605,28 @@ def deploy(
     select_all: bool = True,
     target_file: str | None = None,
 ) -> dict:
-    """Deploy a validated fmxmlsnippet XML file to FileMaker.
+    """
+    Deploy a validated fmxmlsnippet XML file to FileMaker.
 
     Args:
         xml_path:      Path to the fmxmlsnippet XML file.
-        target_script: Name of the script to paste into (Tier 2/3/4).
-        tier:          Override the configured default tier (1–4).
+        target_script: Name of the script to paste into (Tier 2/3).
+        tier:          Override the configured default tier (1, 2, or 3).
         auto_save:     Override the configured auto_save setting.
-        select_all:    Replace (True) or append (False) existing steps (Tier 2/4).
+        select_all:    Replace (True) or append (False) existing steps (Tier 2).
         target_file:   FM file name to target (for multi-file solutions).
                        Auto-resolved from CONTEXT.json or automation.json if None.
 
     Returns:
         Result dict — always contains 'success' and 'tier_used'.
         Tier 1 / fallback: also contains 'instructions' to show the developer.
-        Tier 2/3/4 success: also contains 'message' for logging.
+        Tier 2/3 success: also contains 'message' for logging.
     """
     config = _load_config()
+    effective_tier = tier if tier is not None else config.get("default_tier", 1)
     effective_auto_save = auto_save if auto_save is not None else bool(config.get("auto_save", False))
-    companion_url = config.get("companion_url", "http://local.hub:8767").rstrip("/")
+    companion_url = config.get("companion_url", "http://local.hub:8765").rstrip("/")
     fm_app_name = config.get("fm_app_name", "FileMaker Pro")
-    plugin_url = (config.get("plugin_url") or "").rstrip("/") or None
-    plugin_token = config.get("plugin_token") or None
-
-    # Auto-upgrade to Tier 4 when plugin creds are present and no explicit tier was requested.
-    if tier is not None:
-        effective_tier = tier
-    elif plugin_url and plugin_token:
-        effective_tier = 4
-    else:
-        effective_tier = config.get("default_tier", 1)
 
     # Auto-resolve target file if not provided
     if target_file is None:
@@ -1232,38 +634,16 @@ def deploy(
 
     try:
         with open(xml_path, "r", encoding="utf-8") as f:
-            raw = f.read()
+            xml = f.read()
     except OSError as exc:
         return {"success": False, "error": f"Cannot read {xml_path}: {exc}"}
 
-    # Auto-convert HR (.fmscript) to fmxmlsnippet XML via plugin
-    if xml_path.endswith(".fmscript"):
-        if not (plugin_url and plugin_token):
-            return {"success": False, "error": "HR→XML conversion requires the plugin (AGFM_PLUGIN_URL / AGFM_PLUGIN_TOKEN)."}
-        conv = _post_json(f"{plugin_url}/api/hr-to-xml", {"hr": raw}, token=plugin_token)
-        if not conv.get("ok"):
-            return {"success": False, "error": f"HR→XML conversion failed: {conv}"}
-        if conv.get("conversionWarnings"):
-            for w in conv["conversionWarnings"]:
-                print(f"  [warn] {w}", file=sys.stderr)
-        xml = _patch_converted_xml(conv["xml"], hr_source=raw)
-    else:
-        xml = raw
-
-    if effective_tier == 4:
-        if plugin_url and plugin_token:
-            return _tier4(xml, plugin_url, plugin_token, target_script, select_all)
-        return {
-            "success": False,
-            "tier_used": 4,
-            "error": "Tier 4 requires plugin_url and plugin_token in agent/auth/plugin.json",
-        }
-    elif effective_tier == 3:
+    if effective_tier == 3:
         return _tier3(xml, companion_url, fm_app_name, target_script, effective_auto_save, target_file)
     elif effective_tier == 2:
         return _tier2(xml, companion_url, fm_app_name, target_script, effective_auto_save, select_all, target_file)
     else:
-        return _tier1(xml, companion_url, target_script, target_file, plugin_url, plugin_token)
+        return _tier1(xml, companion_url, target_script, target_file)
 
 
 # ---------------------------------------------------------------------------
@@ -1276,33 +656,12 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    mode_group = parser.add_mutually_exclusive_group(required=True)
-    mode_group.add_argument("xml_path", nargs="?", help="Path to the fmxmlsnippet XML file")
-    mode_group.add_argument(
-        "--patch", metavar="PATCH_FILE",
-        help="Path to a JSON patch file describing surgical step edits (plugin required)",
-    )
-    mode_group.add_argument(
-        "--install-scripts", action="store_true",
-        help="Deploy all bundled agentic-fm helper scripts (e.g. ModifySchema) into the current solution",
-    )
-    mode_group.add_argument(
-        "--ddl", metavar="SQL",
-        help="Execute a DDL statement via ModifySchema (plugin required). Verifies result after execution.",
-    )
-    mode_group.add_argument(
-        "--bundle", metavar="FILE", nargs="+",
-        help="Bundle multiple .fmscript/.xml files into one clipboard paste (always Tier 1 — paste into Script Workspace)",
+    parser.add_argument("xml_path", help="Path to the fmxmlsnippet XML file")
+    parser.add_argument(
+        "target_script", nargs="?", help="Script name to paste into (Tier 2/3)"
     )
     parser.add_argument(
-        "--names", nargs="+", metavar="NAME",
-        help="Script names for --bundle (one per file; derived from filename if omitted)",
-    )
-    parser.add_argument(
-        "target_script", nargs="?", help="Script name to paste into (Tier 2/3/4, deploy mode only)"
-    )
-    parser.add_argument(
-        "--tier", type=int, choices=[1, 2, 3, 4], help="Override deployment tier (deploy mode only)"
+        "--tier", type=int, choices=[1, 2, 3], help="Override deployment tier"
     )
     parser.add_argument(
         "--auto-save", action="store_true", default=None, dest="auto_save",
@@ -1319,78 +678,19 @@ def main():
     paste_group = parser.add_mutually_exclusive_group()
     paste_group.add_argument(
         "--replace", action="store_true", default=False,
-        help="Replace all existing steps without prompting (Tier 2/4 only)"
+        help="Replace all existing steps without prompting (Tier 2 only)"
     )
     paste_group.add_argument(
         "--append", action="store_true", default=False,
-        help="Append after existing steps without prompting (Tier 2/4 only)"
+        help="Append after existing steps without prompting (Tier 2 only)"
     )
     args = parser.parse_args()
 
-    # --- DDL mode ---
-    if args.ddl:
-        result = modify_schema(args.ddl)
-        if result.get("message"):
-            print(result["message"])
-        elif result.get("error"):
-            print(f"Error: {result['error']}", file=sys.stderr)
-        sys.exit(0 if result.get("success") else 1)
-
-    # --- Install scripts mode ---
-    if args.install_scripts:
-        here = os.path.dirname(os.path.abspath(__file__))
-        scripts_dir = os.path.join(here, "..", "filemaker")
-        bundled = [
-            ("ModifySchema.xml", "ModifySchema"),
-        ]
-        all_ok = True
-        for filename, script_name in bundled:
-            xml_path = os.path.join(scripts_dir, filename)
-            if not os.path.exists(xml_path):
-                print(f"  SKIP {script_name} — {xml_path} not found", file=sys.stderr)
-                continue
-            result = deploy(xml_path, target_script=script_name, tier=1)
-            if result.get("success"):
-                print(f"  {script_name} is on the clipboard.")
-                print(f"    1. Open Script Workspace in FileMaker")
-                print(f"    2. ⌘V — paste")
-            elif result.get("error"):
-                print(f"  {script_name}: ERROR — {result['error']}", file=sys.stderr)
-                all_ok = False
-        sys.exit(0 if all_ok else 1)
-
-    # --- Bundle mode ---
-    if args.bundle:
-        result = bundle(args.bundle, args.names)
-        if result.get("instructions"):
-            print(result["instructions"])
-        elif result.get("error"):
-            print(f"Error: {result['error']}", file=sys.stderr)
-        sys.exit(0 if result.get("success") else 1)
-
-    # --- Patch mode ---
-    if args.patch:
-        result = patch(args.patch)
-        if result.get("message"):
-            print(result["message"])
-        elif result.get("error"):
-            print(f"Error: {result['error']}", file=sys.stderr)
-        sys.exit(0 if result.get("success") else 1)
-
-    # --- Deploy mode ---
-    # Tiers 2 and 4 targeting an existing script are destructive — always confirm
-    # unless --replace or --append bypasses the prompt explicitly.
+    # Tier 2 targeting an existing script is destructive — always confirm unless
+    # --replace or --append bypasses the prompt explicitly.
     select_all = True
-    cfg = _load_config()
-    _pu = (cfg.get("plugin_url") or "").rstrip("/") or None
-    _pt = cfg.get("plugin_token") or None
-    if args.tier is not None:
-        effective_tier = args.tier
-    elif _pu and _pt:
-        effective_tier = 4
-    else:
-        effective_tier = cfg.get("default_tier", 1)
-    if effective_tier in (2, 4) and args.target_script:
+    effective_tier = args.tier or _load_config().get("default_tier", 1)
+    if effective_tier == 2 and args.target_script:
         if args.append:
             select_all = False
         elif not args.replace:

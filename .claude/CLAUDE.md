@@ -83,11 +83,12 @@ Multiple sources of context are available about the FileMaker solution. Always s
 
 ## Plugin API (primary)
 
-**When the agentic-fm plugin is reachable**, use it as the primary context source — it is always live and requires no Push Context step. URL and token are in `.env.local` at the project root as `AGFM_PLUGIN_URL` and `AGFM_PLUGIN_TOKEN`.
+**Use the plugin when `AGFM_PLUGIN_TOKEN` is set in `.env.local`** — it is always live and requires no Push Context step. The URL is resolved automatically by `agfm_bridge.py` from `AGFM_PLUGIN_PORT` (default 8766) or `AGFM_PLUGIN_URL` if set.
 
 ```bash
-TOKEN=$(grep AGFM_PLUGIN_TOKEN /workspaces/agentic-fm/.env.local | cut -d= -f2)
-URL=$(grep AGFM_PLUGIN_URL /workspaces/agentic-fm/.env.local | cut -d= -f2)
+TOKEN=$AGFM_PLUGIN_TOKEN
+PORT=${AGFM_PLUGIN_PORT:-8766}
+URL=http://localhost:${PORT}   # use host.docker.internal inside a container
 
 # Current layout context — TOs, fields, scripts, layouts, value_lists, task
 curl -s -H "Authorization: Bearer $TOKEN" $URL/api/context
@@ -132,7 +133,20 @@ Search with grep: `grep "Invoices Details" "agent/context/SolutionApp/layouts.in
 
 When asked to copy, reference, or modify an existing script, use the first available method:
 
-**Plugin available (primary):**
+**Discovery system loaded (fastest — no Script Workspace interaction):**
+
+Check `GET /api/discovery/status` first. If `hasData: true`, use `script_body` to pull any script by name without opening Script Workspace:
+
+```bash
+python3 agent/scripts/agfm_bridge.py discovery-query script_body --script "My Script"
+```
+
+If discovery is not loaded, load it first:
+```bash
+python3 agent/scripts/agfm_bridge.py save-as-xml --load
+```
+
+**Plugin available — navigate + read (fallback when discovery not loaded):**
 
 Use `POST /api/ui/script/navigate` to open a script by name, then `GET /api/ui/script` to read its steps.
 
@@ -141,8 +155,9 @@ GET /api/ui/script        → returns all steps[] (no pagination limit)
 ```
 
 ```bash
-TOKEN=$(grep AGFM_PLUGIN_TOKEN /workspaces/agentic-fm/.env.local | cut -d= -f2)
-URL=$(grep AGFM_PLUGIN_URL /workspaces/agentic-fm/.env.local | cut -d= -f2)
+TOKEN=$AGFM_PLUGIN_TOKEN
+PORT=${AGFM_PLUGIN_PORT:-8766}
+URL=http://localhost:${PORT}   # use host.docker.internal inside a container
 curl -s -H "Authorization: Bearer $TOKEN" "$URL/api/ui/script" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
@@ -165,6 +180,46 @@ Only fall back to grepping `agent/xml_parsed/` if neither the plugin, CONTEXT.js
 - `scripts/` contains Save As XML (SaXML) format — use `agent/scripts/fm_xml_to_snippet.py` to convert to fmxmlsnippet when needed
 - `custom_menus/` and `custom_menu_sets/` contain one XML file per custom menu/set
 - Do NOT read `xml_parsed/layouts/` unless analyzing layout objects — layout XML is extremely verbose and rarely needed; layout IDs and names are available via the plugin or `layouts.index`
+
+## Discovery system
+
+The discovery system indexes a full SaXML export and enables solution-wide queries without touching the Script Workspace. It requires a one-time load step per session.
+
+**Check if loaded:**
+```bash
+python3 agent/scripts/agfm_bridge.py status  # shows discovery state in health check
+```
+Or directly: `GET /api/discovery/status` — check `hasData: true`.
+
+**Load (exports SaXML then indexes it):**
+```bash
+python3 agent/scripts/agfm_bridge.py save-as-xml --load
+```
+
+**Key query types:**
+
+| Query type | What it returns | When to use |
+|---|---|---|
+| `script_body` | Full script content by name | Reading/modifying a named script (fastest path) |
+| `text_search` | All entities mentioning a term | Finding where a field/function is used |
+| `scripts` | Full script roster for a file | Getting all script names/IDs |
+| `references` | What calls a given entity | Impact analysis before rename |
+| `dependencies` | What a script/layout calls | Dependency graph |
+| `orphans` | Unused fields, scripts, CFs | Dead-code cleanup |
+| `health` | General solution health checks | Broad quality review |
+| `duplicates` | Scripts/CFs with identical bodies | De-duplication |
+| `locals` | $variable declarations + use sites | Variable audit |
+
+```bash
+# Pull a named script without opening Script Workspace
+python3 agent/scripts/agfm_bridge.py discovery-query script_body --script "My Script"
+
+# Find all scripts that reference a field
+python3 agent/scripts/agfm_bridge.py discovery-query text_search --text "Invoices::Amount"
+
+# Who calls "My Script"?
+python3 agent/scripts/agfm_bridge.py discovery-query references --script "My Script"
+```
 
 ## Automation and Deployment
 
@@ -223,10 +278,14 @@ Custom Functions are stored in the Custom Function space of FileMaker. Written t
 **MANDATORY: After writing or updating a file within agent/sandbox/:**
 
 6. Lint: `python3 agent/scripts/agfm_bridge.py lint agent/sandbox/<filename>` (falls back to local fmlint automatically). Fix any ERROR-severity diagnostics before presenting to the user; review WARNING-severity.
-7. **Deploy confirmation** — after lint passes, state what command will run and wait for the developer to confirm before executing. Example: `"Ready to deploy MyScript → FileMaker. y/g to proceed."` Accepted responses: `y`, `yes`, `g`, `go` (case-insensitive). Anything else cancels. Do NOT use AskUserQuestion — just wait for a chat reply.
-8. Deploy — use the first available method:
+7. **Deploy confirmation — ALWAYS pause and wait for the developer to signal readiness.** The developer may be actively using FileMaker while waiting for you to prepare work. Any FM-touching operation (script deploy, bridge upgrade, save-as-xml, AX automation) will interfere if they are not ready. After lint passes, output a clear pause message and wait:
 
-**Plugin available (primary):**
+   > Ready to deploy **MyScript** → FileMaker. Send **g** when you're ready.
+
+   Accepted responses: `g`, `go`, `y`, `yes` (case-insensitive). Anything else cancels. Do NOT use AskUserQuestion — just wait for a chat reply. This pause applies to ALL live-FM operations, not just script deploys.
+8. Deploy — check if `AGFM_PLUGIN_TOKEN` is set in `.env.local` to decide which path to use:
+
+**`AGFM_PLUGIN_TOKEN` present — use `agfm_bridge.py`:**
 ```bash
 # Existing script — replace steps
 python3 agent/scripts/agfm_bridge.py deploy agent/sandbox/MyScript.fmscript "My Script"
@@ -238,22 +297,20 @@ python3 agent/scripts/agfm_bridge.py bundle agent/sandbox/MyScript.fmscript --na
 python3 agent/scripts/agfm_bridge.py patch agent/sandbox/mypatch.json
 ```
 
-**Plugin unavailable (fallback) — deploy.py, Tier 1 → 2 → 3:**
+**`AGFM_PLUGIN_TOKEN` absent — use `deploy.py` (Tier 1 → 2 → 3):**
 ```bash
 python3 agent/scripts/deploy.py agent/sandbox/MyScript.fmscript "My Script"
 # or for new scripts:
 python3 agent/scripts/deploy.py --bundle agent/sandbox/MyScript.fmscript --names "My Script"
 ```
 
-When falling back to Tier 1 (manual paste into an existing script), present instructions in this exact format:
+When `deploy.py` falls back to Tier 1 (manual paste), present instructions in this exact format:
 
 > The script is on your clipboard. To install it:
 >
 > 1. Open **Script Name** in Script Workspace
 > 2. **⌘A** — select all existing steps and delete
 > 3. **⌘V** — paste
-
-For new scripts, `bundle` creates them directly via the plugin — no paste required. If the plugin is unavailable, fall back to `deploy.py --bundle` (clipboard + manual ⌘V).
 
 **If deploy fails, stop and ask the developer.** Do not retry with different flags, tiers, or clipboard workarounds. Ask what they see and wait for their guidance.
 
@@ -274,7 +331,10 @@ For new scripts, `bundle` creates them directly via the plugin — no paste requ
 Two kinds of lookup are needed: **solution-specific references** (layout, field, script IDs) and **step structure** (XML elements and attributes).
 
 1. Is it a step structure question? → Grep the step catalog. Done.
-2. Is the plugin reachable? → `GET /api/context` for current-layout scope; `POST /api/query` for full solution schema (all TOs, all fields). Done.
+2. Is the plugin reachable?
+   - For IDs/context: `GET /api/context` for current layout; `POST /api/query` for full schema.
+   - For script content: check `GET /api/discovery/status` — if `hasData: true`, use `discovery-query script_body` instead of navigate + read.
+   - For cross-solution analysis (impact, references, who-calls-what): discovery queries.
 3. Plugin unavailable? → Check `agent/CONTEXT.json` if present.
 4. Still missing? → Search the appropriate `agent/context/{solution}/*.index` file.
 5. Last resort → Grep `agent/xml_parsed/`. Never read entire files.
@@ -332,15 +392,12 @@ FileMaker objects are transferred via the macOS clipboard using proprietary bina
 
 ## Priority order
 
-Use the first available method:
+Check for `AGFM_PLUGIN_TOKEN` in `.env.local`:
 
-1. **`agfm_bridge.py`** (plugin) — primary for all clipboard and deploy operations.
-2. **`deploy.py`** (Tier 2/3, companion server) — plugin unavailable, native macOS with AppleScript.
-3. **`deploy.py`** (Tier 1, host clipboard server) — plugin unavailable, dev container, no AppleScript.
+- **Token present** → use `agfm_bridge.py` for all clipboard and deploy operations.
+- **Token absent** → use `deploy.py` (Tier 1 → 2 → 3 via companion server / AppleScript).
 
-`agfm_bridge.py` handles the clipboard fallback to the host server internally — no manual switching needed.
-
-## 1. agfm_bridge.py (plugin — primary)
+## agfm_bridge.py (token present)
 
 ```bash
 # Write XML file to FM clipboard
@@ -350,15 +407,12 @@ python3 agent/scripts/agfm_bridge.py clipboard-write agent/sandbox/MyScript.xml
 python3 agent/scripts/agfm_bridge.py clipboard-read
 ```
 
-`agfm_bridge.py` automatically falls back to `host.docker.internal:8767` if the plugin clipboard endpoint fails.
+## deploy.py (token absent)
 
-## 2 & 3. deploy.py (plugin unavailable)
+`deploy.py` selects the correct tier automatically:
 
-`deploy.py` selects the correct tier automatically based on environment and `.env.local`:
-
-- **Tier 4** — plugin present (`AGFM_PLUGIN_URL` set): delegates to `agfm_bridge.py` behaviour
-- **Tier 2/3** — native macOS, no plugin: companion server + AppleScript
-- **Tier 1** — dev container, no plugin: host clipboard server (`host.docker.internal:8767`), manual paste
+- **Tier 2/3** — native macOS: companion server + AppleScript
+- **Tier 1** — no AppleScript available: companion server, manual paste
 
 ```bash
 python3 agent/scripts/deploy.py agent/sandbox/MyScript.fmscript "Script Name"
@@ -405,6 +459,7 @@ The `agent/library` folder is a curated collection of reusable fmxmlsnippet code
 - **Schema guidance**: `agent/docs/SCHEMA_GUIDANCE.md` — complete param type → XML mapping reference
 - **Documentation conventions**: When writing docs, use generic placeholder names (`SolutionApp`, `SolutionData`) instead of real solution names. Exception: when the context is explicitly about a specific solution.
 - **Sandboxed environments**: `agent/docs/SANDBOXED_ENVIRONMENT.md` — setup and operation guide for agents running in sandboxed, containerized, or virtualized environments (Codex, Claude Code, Docker, etc.). Read this if you detect you are not running natively on macOS.
+- **Base Elements Plugin**: use the `be-plugin` skill when writing calculations or scripts that need plugin functions (file I/O, regex, crypto, SMTP, clipboard, shell, XML, PDF, zip, etc.). The skill is self-contained.
 
 # Constraints
 

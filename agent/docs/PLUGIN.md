@@ -4,28 +4,33 @@ The agentic-fm plugin runs on the macOS host and exposes a REST API for clipboar
 
 ## Connection
 
-- **Port**: 8766 (host machine)
-- **From dev container**: `http://host.docker.internal:8766`
-- **Auth**: Bearer token — stored in `.env.local` at the project root as `AGFM_PLUGIN_TOKEN`
-- **URL**: also in `.env.local` as `AGFM_PLUGIN_URL`
+- **Port**: configured via `AGFM_PLUGIN_PORT` in `.env.local` — defaults to **8766**
+- **From native macOS**: `http://localhost:{port}`
+- **From dev container**: `http://host.docker.internal:{port}`
+- **Auth**: Bearer token — stored in `.env.local` as `AGFM_PLUGIN_TOKEN`
 
 All requests require: `Authorization: Bearer <token>`
 
-The old companion server moves to port **8767** when the plugin is running.
+`agfm_bridge.py` resolves the URL automatically: reads `AGFM_PLUGIN_URL` if set, otherwise constructs the URL from `AGFM_PLUGIN_PORT` (default 8766) using the correct host for the current environment. Manually specify `AGFM_PLUGIN_URL` only when the default host/port construction is wrong for your setup.
+
+The companion server moves to port **8767** when the plugin is running.
 
 ```bash
-TOKEN=$(grep AGFM_PLUGIN_TOKEN /workspaces/agentic-fm/.env.local | cut -d= -f2)
-URL=$(grep AGFM_PLUGIN_URL /workspaces/agentic-fm/.env.local | cut -d= -f2)
-curl -s -H "Authorization: Bearer $TOKEN" $URL/api/context
+TOKEN=$(grep AGFM_PLUGIN_TOKEN .env.local | cut -d= -f2)
+PORT=$(grep AGFM_PLUGIN_PORT .env.local | cut -d= -f2); PORT=${PORT:-8766}
+
+# Native macOS
+curl -s -H "Authorization: Bearer $TOKEN" http://localhost:${PORT}/api/context
+
+# Dev container
+curl -s -H "Authorization: Bearer $TOKEN" http://host.docker.internal:${PORT}/api/context
 ```
 
 ---
 
-## Deploy tiers
+## Deployment
 
-`deploy.py` auto-upgrades to **Tier 4** when `AGFM_PLUGIN_URL` and `AGFM_PLUGIN_TOKEN` are present in `.env.local`. Tier 4 uses the plugin directly: navigate → delete all → insert → save. No AppleScript required.
-
-Pass `--tier` explicitly to override.
+Use `agfm_bridge.py` for all deploy operations when the plugin is reachable — it handles HR→XML conversion, navigation, insert, and save in one call. `deploy.py` is the fallback for Tier 1–3 (companion server / AppleScript) when the plugin is unavailable.
 
 ### New script fallback
 
@@ -53,6 +58,11 @@ Patch is preferred for small edits — it's safer and avoids the select-all reli
 **Always use the plugin as the primary context source** — it is always live and requires no Push Context step.
 
 ```bash
+# Set up TOKEN and URL once (or use: python3 agent/scripts/agfm_bridge.py context)
+TOKEN=$(grep AGFM_PLUGIN_TOKEN .env.local | cut -d= -f2)
+PORT=$(grep AGFM_PLUGIN_PORT .env.local | cut -d= -f2); PORT=${PORT:-8766}
+URL=http://localhost:${PORT}   # use host.docker.internal inside a container
+
 # Refresh context (trigger FM to regenerate on next idle)
 curl -s -X POST -H "Authorization: Bearer $TOKEN" $URL/api/context/refresh
 
@@ -220,16 +230,55 @@ The DDL statement is passed as a string parameter to the `ModifySchema` script v
 | `DELETE` | `/api/discovery/data` | Clear all loaded discovery data |
 
 #### Discovery queries
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/api/discovery/query` | Unified query dispatch |
-| `POST` | `/api/discovery/query/plugin_usage` | Where each plugin's functions are called |
-| `POST` | `/api/discovery/query/folder_analysis` | Script/CF folder coverage and density |
-| `POST` | `/api/discovery/query/spelling_drift` | Identifier-name drift across the solution |
-| `POST` | `/api/discovery/query/duplicates` | Scripts/CFs with identical bodies |
-| `POST` | `/api/discovery/query/file_access` | File-access authorisation per file |
-| `POST` | `/api/discovery/query/locals` | `$variable` declarations and use sites within scripts |
-| `POST` | `/api/discovery/query/rule_eval` | Run a `rules.json` rule pack against the solution |
+
+All queries accept the body form `POST /api/discovery/query {"query": "<type>", …}` or the path form `POST /api/discovery/query/<type>` — pick whichever is convenient. Use `agfm_bridge.py discovery-query <type> [--script NAME] [--text TEXT] [--file FILENAME]`.
+
+| Query type | Body params | Description |
+|------------|-------------|-------------|
+| `text_search` | `text` | Free-text search across all entity names and bodies |
+| `scripts` | `fileName?` | Full script roster for a file |
+| `script_body` | `scriptName` | Full content of a named script — **fastest script read path when discovery is loaded** |
+| `script_locate` | `scriptName` | Locate a script's file and folder path |
+| `references` | `scriptName` or entity | What calls / references this entity (reverse xref) |
+| `dependencies` | `scriptName` or entity | What this entity calls / depends on |
+| `detail` | `type`, `name` | Full entity detail (table, layout, CF, etc.) |
+| `impact` | `type`, `name` | Blast-radius analysis with severity classification |
+| `orphans` | — | Unreferenced fields, scripts, and custom functions |
+| `health` | — | General solution health checks |
+| `broken` | — | Broken references (missing scripts, fields, layouts) |
+| `security` | — | Security-related patterns (SQL injection, open auth, etc.) |
+| `performance` | — | Performance antipatterns (unstored calcs in finds, etc.) |
+| `variables` | — | `$variable` and `$$global` scope audit |
+| `duplicates` | — | Scripts/CFs with identical bodies (hash-match) |
+| `locals` | `scriptName?` | `$variable` declarations and use sites within scripts |
+| `triggers` | — | Layout and field trigger inventory |
+| `cross_file` | — | Cross-file references and external data source usage |
+| `layout_objects` | `layoutName?` | Layout object inventory and field placements |
+| `files` | — | All files in the loaded solution |
+| `layouts` | `fileName?` | All layouts with base TO and folder path |
+| `indirection` | — | Indirect script calls (ExecuteSQL, variable script names) |
+| `step_inspect` | `scriptName` | Step-by-step inspection of a named script |
+| `graph` | `type`, `name` | Dependency graph data for visualisation |
+| `refresh` | — | Refresh guidance and bridge dispatch instructions |
+| `plugin_usage` | — | Where each installed plugin's functions are called |
+| `folder_analysis` | — | Script/CF folder coverage and density |
+| `spelling_drift` | — | Identifier-name drift across the solution |
+| `file_access` | — | File-access authorisation per file |
+| `rule_eval` | `rules` | Run a `rules.json` rule pack against the solution |
+
+#### Loading the discovery system
+
+Discovery requires a one-time export + load step per session:
+
+```bash
+# Export SaXML and immediately load into discovery (recommended)
+python3 agent/scripts/agfm_bridge.py save-as-xml --load
+
+# Or load an existing SaXML directory manually
+python3 agent/scripts/agfm_bridge.py discovery-load /path/to/saxmlexport
+```
+
+Check status: `GET /api/discovery/status` — `hasData: true` means queries are ready.
 
 ### Bridge
 | Method | Path | Description |
@@ -238,6 +287,11 @@ The DDL statement is passed as a string parameter to the `ModifySchema` script v
 | `POST` | `/api/bridge/invalidate` | Force bridge availability re-check on next idle cycle |
 | `POST` | `/api/bridge/copy` | Write AGFM_Bridge installer script to FM clipboard |
 | `POST` | `/api/bridge/upgrade` | Auto-upgrade AGFM_Bridge via AX automation |
+
+```bash
+# Check bridge version and upgrade if needed
+python3 agent/scripts/agfm_bridge.py bridge-upgrade
+```
 
 ### Security
 | Method | Path | Description |

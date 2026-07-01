@@ -317,9 +317,9 @@ When you detect you are in a limited sandbox:
 >
 > Note: `clipboard.py` requires `osascript` and cannot run inside the container. Use `deploy.py` instead — it detects the container environment and routes automatically.
 >
-> **Preferred path — agentic-fm plugin (Tier 4):** When `AGFM_PLUGIN_URL` and `AGFM_PLUGIN_TOKEN` are present in `.env.local`, `deploy.py` auto-upgrades to Tier 4 and uses the plugin at `http://host.docker.internal:8766` directly (navigate → insert → save, no AppleScript). This is the preferred deploy path from a container.
+> **Preferred path — agentic-fm plugin:** When `AGFM_PLUGIN_TOKEN` is set in `.env.local`, use `agfm_bridge.py` for all deploy and clipboard operations (navigate → insert → save, no AppleScript). The URL is taken from `AGFM_PLUGIN_URL` if set; otherwise constructed from `AGFM_PLUGIN_PORT` (default 8766) using the appropriate host for the environment.
 >
-> **Fallback — companion server (Tiers 2/3):** If the plugin is unavailable, `deploy.py` falls back to the companion server at `http://host.docker.internal:8767` for AppleScript-based clipboard/paste operations.
+> **Fallback — companion server (Tiers 1–3):** If `AGFM_PLUGIN_TOKEN` is not set, use `deploy.py` — it falls back to the companion server for clipboard/paste operations.
 
 ---
 
@@ -453,3 +453,51 @@ User says "set this up"
                Generate code, write to agent/sandbox/
                Provide clipboard.py paste command
 ```
+
+---
+
+## Plugin mode (when available)
+
+If `AGFM_PLUGIN_TOKEN` is set in `.env.local`, the agentic-fm plugin can handle clipboard writes and deployment directly — without needing the companion server or AppleScript. See `agent/docs/PLUGIN.md` for details.
+
+### Port discovery
+
+The plugin port is configured via `.env.local`. `agfm_bridge.py` resolves the URL in this order:
+
+1. `AGFM_PLUGIN_URL` — full URL, used as-is if present (e.g. `http://localhost:8766`)
+2. `AGFM_PLUGIN_PORT` — port only; `agfm_bridge.py` constructs the URL:
+   - Native macOS → `http://localhost:{port}`
+   - Docker / non-Darwin → `http://host.docker.internal:{port}`
+3. Default port **8766** is used if `AGFM_PLUGIN_PORT` is also absent
+
+Minimal `.env.local` for plugin mode:
+
+```bash
+AGFM_PLUGIN_PORT=8766        # optional — defaults to 8766
+AGFM_PLUGIN_TOKEN=your-token
+```
+
+### Verify reachability
+
+Use `agfm_bridge.py` — it resolves the URL automatically from the environment:
+
+```bash
+python3 agent/scripts/agfm_bridge.py status
+```
+
+To probe manually, resolve the URL in the same order `agfm_bridge.py` uses:
+
+```bash
+TOKEN=${AGFM_PLUGIN_TOKEN}
+# AGFM_PLUGIN_URL takes precedence if set; otherwise build from port
+if [ -n "$AGFM_PLUGIN_URL" ]; then
+  URL=$AGFM_PLUGIN_URL
+else
+  PORT=${AGFM_PLUGIN_PORT:-8766}
+  # use host.docker.internal inside a container, localhost otherwise
+  URL=http://localhost:${PORT}
+fi
+curl -s -H "Authorization: Bearer $TOKEN" $URL/api/health
+```
+
+If the plugin is reachable, use `agfm_bridge.py` instead of `clipboard.py` / `deploy.py` for all deploy and clipboard operations.
