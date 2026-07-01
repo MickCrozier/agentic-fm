@@ -277,15 +277,11 @@ class PluginClient:
         return self._post("/api/validate-hr", {"hr": hr})
 
     def fetch_script(self, script_name: str) -> dict:
-        """Bind, navigate to script_name, poll until open, return HR steps.
+        """Navigate to script_name in Script Workspace and return HR steps.
 
         Returns {"success": True, "scriptName": ..., "hr": ..., "stepCount": ...}
         or {"success": False, "error": ...}.
         """
-        bind = self._post("/api/env/bind", {})
-        if not bind.get("ok"):
-            return {"success": False, "error": f"Bind failed: {bind.get('error', bind)}"}
-
         nav = self._post("/api/ui/script/navigate", {"scriptName": script_name}, timeout=35)
         if not (nav.get("ok") or nav.get("success")):
             return {"success": False, "error": nav.get("message", nav.get("error", f"Cannot navigate to '{script_name}'"))}
@@ -293,9 +289,11 @@ class PluginClient:
         for _ in range(12):
             time.sleep(0.5)
             r = self._get("/api/ui/script")
-            if r.get("scriptWorkspaceOpen") and r.get("scriptName", "").lower() == script_name.lower():
-                hr = "\n".join(r.get("steps", []))
-                return {"success": True, "scriptName": r["scriptName"], "hr": hr, "stepCount": r.get("stepCount", 0)}
+            steps = r.get("steps", [])
+            if isinstance(steps, list) and steps:
+                hr = "\n".join(steps)
+                name = r.get("scriptName") or script_name
+                return {"success": True, "scriptName": name, "hr": hr, "stepCount": len(steps)}
 
         return {"success": False, "error": f"Timed out waiting for '{script_name}' in Script Workspace"}
 
