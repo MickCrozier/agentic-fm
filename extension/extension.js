@@ -225,6 +225,12 @@ function readEnvLocal(root) {
   return env;
 }
 
+function resolvePluginUrl(env) {
+  if (env['AGFM_PLUGIN_URL']) return env['AGFM_PLUGIN_URL'];
+  const port = env['AGFM_PLUGIN_PORT'] || '8766';
+  return `http://localhost:${port}`;
+}
+
 function _httpRequest(method, url, token, body) {
   return new Promise((resolve, reject) => {
     const mod = url.startsWith('https') ? require('https') : require('http');
@@ -256,6 +262,22 @@ function _httpRequest(method, url, token, body) {
 
 function httpGet(url, token)        { return _httpRequest('GET',  url, token, null); }
 function httpPost(url, token, body) { return _httpRequest('POST', url, token, body); }
+
+function activateVSCode() {
+  execFile('osascript', ['-e', `tell application "${vscode.env.appName}" to activate`]);
+}
+
+async function navigateAndFetchScript(pluginUrl, token, scriptName) {
+  try { await httpPost(`${pluginUrl}/api/ui/script/navigate`, token, { scriptName }); } catch {}
+  for (let attempt = 0; attempt < 6; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, 400));
+    try {
+      const result = await httpGet(`${pluginUrl}/api/ui/script`, token);
+      if (result.status === 200 && result.body && Array.isArray(result.body.steps)) return result;
+    } catch {}
+  }
+  return null;
+}
 
 function findFileRecursive(dir, filename, depth = 4) {
   if (depth === 0 || !fs.existsSync(dir)) return null;
@@ -295,57 +317,34 @@ function findScriptFile(root, solution, scriptName) {
 
 
 async function openScriptFile(root, solution, scriptName) {
-  const localPath = findScriptFile(root, solution, scriptName);
-  if (localPath) {
-    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(localPath));
-    await vscode.window.showTextDocument(doc, { preview: false, viewColumn: vscode.ViewColumn.One });
-    return;
-  }
-
-  const env = readEnvLocal(root);
-  const pluginUrl = env['AGFM_PLUGIN_URL'];
-  const token = env['AGFM_PLUGIN_TOKEN'];
-  if (!pluginUrl || !token) {
-    vscode.window.showErrorMessage('AGFM_PLUGIN_URL / AGFM_PLUGIN_TOKEN not found in .env.local');
-    return;
-  }
-
-  try {
-    await httpPost(`${pluginUrl}/api/ui/script/navigate`, token, { scriptName });
-  } catch { /* best-effort */ }
-
-  let result;
-  try {
-    result = await httpGet(`${pluginUrl}/api/ui/script`, token);
-  } catch (e) {
-    vscode.window.showErrorMessage(`Plugin request failed: ${e.message}`);
-    return;
-  }
-
-  const body = result.body;
-  if (result.status !== 200 || !body || !Array.isArray(body.steps)) {
-    vscode.window.showErrorMessage('Plugin returned no script — is the script open in Script Workspace?');
-    return;
-  }
-
-  const fetchedName = body.scriptName || scriptName;
-  if (fetchedName.toLowerCase() !== scriptName.toLowerCase()) {
-    const proceed = await vscode.window.showWarningMessage(
-      `Plugin has "${fetchedName}" open, but you clicked "${scriptName}". Save as "${fetchedName}"?`,
-      'Save', 'Cancel'
-    );
-    if (proceed !== 'Save') return;
-  }
-
-  const saveName = fetchedName || scriptName;
   const targetDir = path.join(root, 'agent', 'sandbox', solution || 'Unknown');
-  if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
-  const targetPath = path.join(targetDir, saveName + '.fmscript');
-  fs.writeFileSync(targetPath, formatFmscript(body.steps.join('\n')), 'utf8');
+  const targetPath = path.join(targetDir, scriptName + '.fmscript');
 
-  const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(targetPath));
-  await vscode.window.showTextDocument(doc, { preview: false, viewColumn: vscode.ViewColumn.One });
-  vscode.window.showInformationMessage(`Saved: ${path.relative(root, targetPath)}`);
+  await vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Notification, title: `Fetching "${scriptName}"…`, cancellable: false },
+    () => new Promise(resolve => {
+      execFile(
+        'python3', ['agent/scripts/agfm_bridge.py', 'fetch-script', scriptName, '--out', targetPath],
+        { cwd: root },
+        async (err, stdout, stderr) => {
+          resolve();
+          if (err) {
+            vscode.window.showErrorMessage(`Fetch failed: ${(stderr || err.message).trim()}`);
+            return;
+          }
+          try {
+            const res = JSON.parse(stdout.trim());
+            const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(res.path || targetPath));
+            await vscode.window.showTextDocument(doc, { preview: false, viewColumn: vscode.ViewColumn.One });
+            activateVSCode();
+            vscode.window.showInformationMessage(`Fetched "${res.scriptName || scriptName}" (${res.stepCount} steps)`);
+          } catch {
+            vscode.window.showErrorMessage('Unexpected response from fetch-script');
+          }
+        }
+      );
+    })
+  );
 }
 
 // ─── Context sidebar view ─────────────────────────────────────────────────────
@@ -413,7 +412,12 @@ function registerContextView(root, context, extPath) {
                 execFile(
                   'python3', ['agent/scripts/agfm_bridge.py', 'context', '--refresh'],
                   { cwd: root },
-                  () => refresh()
+                  (err, stdout, stderr) => {
+                    if (err) {
+                      vscode.window.showErrorMessage(`Context refresh failed: ${(stderr || err.message || String(err)).trim()}`);
+                    }
+                    refresh();
+                  }
                 );
                 break;
               case 'openScript':
@@ -1402,47 +1406,19 @@ async function fetchCurrentScript(uri) {
   const root = findProjectRoot(vscode.Uri.file(filePath));
   if (!root) { vscode.window.showErrorMessage('No agentic-fm workspace found'); return; }
 
-  const env = readEnvLocal(root);
-  const pluginUrl = env['AGFM_PLUGIN_URL'];
-  const token = env['AGFM_PLUGIN_TOKEN'];
-  if (!pluginUrl || !token) { vscode.window.showErrorMessage('Plugin not configured in .env.local'); return; }
-
-  // Derive expected solution name from sandbox path: agent/sandbox/<SolutionName>/Script.fmscript
-  const sandboxDir = path.join(root, 'agent', 'sandbox');
-  const rel = path.relative(sandboxDir, filePath);
-  const expectedSolution = rel.split(path.sep)[0]; // first path component
-
   await vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: `Fetching "${scriptName}"…`, cancellable: false },
-    async () => {
-      // Verify the frontmost FM file matches the script's solution folder
-      try {
-        const ctx = await httpGet(`${pluginUrl}/api/context`, token);
-        const frontmost = ctx.body && ctx.body.solution;
-        if (frontmost && expectedSolution &&
-            frontmost.toLowerCase() !== expectedSolution.toLowerCase()) {
-          vscode.window.showErrorMessage(
-            `Wrong file in FM — script is in "${expectedSolution}" but "${frontmost}" is frontmost. Switch files first.`
-          );
-          return;
+    () => new Promise(resolve => {
+      execFile(
+        'python3', ['agent/scripts/agfm_bridge.py', 'fetch-script', scriptName, '--out', filePath],
+        { cwd: root },
+        (err, _stdout, stderr) => {
+          resolve();
+          if (err) vscode.window.showErrorMessage(`Fetch failed: ${(stderr || err.message).trim()}`);
+          else { activateVSCode(); vscode.window.showInformationMessage(`Fetched "${scriptName}" ✓`); }
         }
-      } catch {}
-
-      try { await httpPost(`${pluginUrl}/api/ui/script/navigate`, token, { scriptName }); } catch {}
-
-      let result;
-      try { result = await httpGet(`${pluginUrl}/api/ui/script`, token); }
-      catch (e) { vscode.window.showErrorMessage(`Fetch failed: ${e.message}`); return; }
-
-      const body = result.body;
-      if (result.status !== 200 || !body || !Array.isArray(body.steps)) {
-        vscode.window.showErrorMessage('Plugin returned no script — is it open in Script Workspace?');
-        return;
-      }
-
-      fs.writeFileSync(filePath, formatFmscript(body.steps.join('\n')), 'utf8');
-      vscode.window.showInformationMessage(`Fetched "${scriptName}" ✓`);
-    }
+      );
+    })
   );
 }
 
