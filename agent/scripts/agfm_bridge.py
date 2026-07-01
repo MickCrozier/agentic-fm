@@ -277,11 +277,19 @@ class PluginClient:
         return self._post("/api/validate-hr", {"hr": hr})
 
     def fetch_script(self, script_name: str) -> dict:
-        """Navigate to script_name in Script Workspace and return HR steps.
+        """Bring FM to front, bind session, navigate to script, return HR steps.
 
         Returns {"success": True, "scriptName": ..., "hr": ..., "stepCount": ...}
         or {"success": False, "error": ...}.
         """
+        # Bring FM to foreground so the session binding matches the frontmost window.
+        self._post("/api/ui/activate", {})
+        time.sleep(0.4)
+
+        bind = self._post("/api/env/bind", {})
+        if not bind.get("ok"):
+            return {"success": False, "error": f"Bind failed: {bind.get('error', bind)}"}
+
         nav = self._post("/api/ui/script/navigate", {"scriptName": script_name}, timeout=35)
         if not (nav.get("ok") or nav.get("success")):
             return {"success": False, "error": nav.get("message", nav.get("error", f"Cannot navigate to '{script_name}'"))}
