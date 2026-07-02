@@ -277,14 +277,58 @@ class PluginClient:
         """Validate a human-readable script. Returns the validation result dict."""
         return self._post("/api/validate-hr", {"hr": hr})
 
+    _TRUNCATED = re.compile(r"…")  # Unicode ellipsis FM uses to truncate long calculations
+
+    def _steps_truncated(self, steps: list[str]) -> bool:
+        return any(self._TRUNCATED.search(s) for s in steps)
+
+    def _fetch_via_clipboard_xml(self, script_name: str) -> dict | None:
+        """Copy all steps to clipboard, read XML, convert to HR.
+
+        FM must already be frontmost. Suspends clipboard capture so the
+        user's clipboard is restored afterward. Returns result dict or None.
+        """
+        import subprocess
+        try:
+            self._post("/api/clipboard/suspend", {})
+            try:
+                self._post("/api/ui/script/focus", {})
+                time.sleep(0.15)
+                subprocess.run(
+                    ["osascript", "-e", 'tell application "System Events" to keystroke "a" using command down'],
+                    check=True, capture_output=True,
+                )
+                time.sleep(0.1)
+                subprocess.run(
+                    ["osascript", "-e", 'tell application "System Events" to keystroke "c" using command down'],
+                    check=True, capture_output=True,
+                )
+                time.sleep(0.35)
+                clip = self._get("/api/clipboard")
+                xml = clip.get("xml", "")
+                if not xml:
+                    return None
+                hr = self.xml_to_hr(xml)
+                if hr:
+                    steps = [l for l in hr.splitlines() if l.strip()]
+                    return {"success": True, "scriptName": script_name,
+                            "hr": hr, "stepCount": len(steps), "via": "clipboard-xml"}
+            finally:
+                self._post("/api/clipboard/resume", {"mode": "restore"})
+        except Exception:
+            return None
+        return None
+
     def fetch_script(self, script_name: str) -> dict:
         """Return HR content for a named script via the fastest available path.
 
-        Tier 1 — environment: if the script is already open in Script Workspace,
-                  read it via GET /api/ui/script (no FM focus required).
-        Tier 2 — discovery: if discovery is loaded, pull from the index via
-                  GET /api/discovery/entity/script/{name} (no FM interaction).
-        Tier 3 — navigate: bring FM to front, bind session, open via Open Quickly.
+        Tier 1 — environment: script already open in Script Workspace → read directly.
+        Tier 2 — discovery: loaded index → GET /api/discovery/entity/script/{name}.
+        Tier 3 — navigate: activate FM, bind session, open via Open Quickly.
+
+        After reading via Script Workspace (Tiers 1 & 3), any truncated step
+        (FileMaker uses … for long calculations in the UI) triggers a clipboard
+        XML fallback: select-all → copy → read XML → xml-to-hr.
 
         Returns {"success": True, "scriptName": ..., "hr": ..., "stepCount": ..., "via": ...}
         or      {"success": False, "error": ...}.
@@ -298,20 +342,26 @@ class PluginClient:
                     r = self._get("/api/ui/script")
                     steps = r.get("steps", [])
                     if isinstance(steps, list) and steps:
+                        if self._steps_truncated(steps):
+                            # FM is already open; activate so clipboard copy works
+                            self._post("/api/ui/activate", {})
+                            time.sleep(0.3)
+                            xml_result = self._fetch_via_clipboard_xml(script_name)
+                            if xml_result:
+                                return xml_result
                         hr = "\n".join(steps)
                         return {"success": True, "scriptName": r.get("scriptName") or script_name,
                                 "hr": hr, "stepCount": len(steps), "via": "environment"}
         except Exception:
             pass
 
-        # ── Tier 2: discovery index ───────────────────────────────────────────
+        # ── Tier 2: discovery index (full XML source — no truncation) ─────────
         try:
             status = self._get("/api/discovery/status")
             if status.get("hasData"):
                 import urllib.parse
                 encoded = urllib.parse.quote(script_name, safe="")
                 entity = self._get(f"/api/discovery/entity/script/{encoded}")
-                # entity may carry hr, xml, body, or content depending on plugin version
                 hr = entity.get("hr") or entity.get("body") or entity.get("content") or ""
                 xml = entity.get("xml", "")
                 if not hr and xml:
@@ -340,6 +390,10 @@ class PluginClient:
             r = self._get("/api/ui/script")
             steps = r.get("steps", [])
             if isinstance(steps, list) and steps:
+                if self._steps_truncated(steps):
+                    xml_result = self._fetch_via_clipboard_xml(script_name)
+                    if xml_result:
+                        return xml_result
                 hr = "\n".join(steps)
                 return {"success": True, "scriptName": r.get("scriptName") or script_name,
                         "hr": hr, "stepCount": len(steps), "via": "navigate"}
