@@ -277,46 +277,96 @@ class PluginClient:
         """Validate a human-readable script. Returns the validation result dict."""
         return self._post("/api/validate-hr", {"hr": hr})
 
-    _TRUNCATED = re.compile(r"…")  # Unicode ellipsis FM uses to truncate long calculations
+    # Match both U+2026 (Unicode ellipsis) and three literal dots — plugin may return either.
+    _TRUNCATED = re.compile(r"…|\.\.\.")
 
     def _steps_truncated(self, steps: list[str]) -> bool:
         return any(self._TRUNCATED.search(s) for s in steps)
 
-    def _fetch_via_clipboard_xml(self, script_name: str) -> dict | None:
-        """Copy all steps to clipboard, read XML, convert to HR.
+    @staticmethod
+    def _body_step_to_hr(step: dict) -> str:
+        """Convert a single script_body step dict to a human-readable line."""
+        name = step.get("name", "")
+        enabled = step.get("enabled", True)
+        calcs = step.get("calcs", {})
+        literals = step.get("literals", {})
 
-        FM must already be frontmost. Suspends clipboard capture so the
-        user's clipboard is restored afterward. Returns result dict or None.
+        if step.get("isComment"):
+            text = literals.get("Text", "")
+            return f"# {text}" if text else "#"
+
+        # Merge: literals first (structural params), calcs second (expressions)
+        params: dict[str, str] = {}
+        params.update(literals)
+        params.update(calcs)
+
+        if not params:
+            return f"{name}"
+
+        # Keys that are bare values (no "Key: " prefix in HR)
+        bare_keys = {"Boolean", "FieldReference", "Table", "List", "Name",
+                     "Name2", "ScriptName", "LayoutName", "FileName"}
+        parts = []
+        for k, v in params.items():
+            if k in bare_keys:
+                parts.append(str(v))
+            else:
+                parts.append(f"{k}: {v}")
+
+        param_str = " ; ".join(parts)
+        prefix = "// " if not enabled else ""
+        return f"{prefix}{name} [ {param_str} ]"
+
+    def _fetch_via_saxml(self, script_name: str, truncated_steps: list[str] | None = None) -> dict | None:
+        """Return full HR via discovery (loads SaXML first if discovery is empty).
+
+        When truncated_steps is provided and discovery is already loaded, splices
+        full calc text into the existing HR lines rather than rebuilding from scratch.
         """
-        import subprocess
         try:
-            self._post("/api/clipboard/suspend", {})
-            try:
-                self._post("/api/ui/script/focus", {})
-                time.sleep(0.15)
-                subprocess.run(
-                    ["osascript", "-e", 'tell application "System Events" to keystroke "a" using command down'],
-                    check=True, capture_output=True,
-                )
-                time.sleep(0.1)
-                subprocess.run(
-                    ["osascript", "-e", 'tell application "System Events" to keystroke "c" using command down'],
-                    check=True, capture_output=True,
-                )
-                time.sleep(0.35)
-                clip = self._get("/api/clipboard")
-                xml = clip.get("xml", "")
-                if not xml:
+            status = self._get("/api/discovery/status")
+            if not status.get("hasData"):
+                print("  [fetch] truncation detected — running SaXML export to get full content…", file=sys.stderr)
+                saxml = self.save_as_xml()
+                if not saxml.get("ok"):
+                    print(f"  [fetch] SaXML export failed: {saxml.get('error', saxml)}", file=sys.stderr)
                     return None
-                hr = self.xml_to_hr(xml)
-                if hr:
-                    steps = [l for l in hr.splitlines() if l.strip()]
-                    return {"success": True, "scriptName": script_name,
-                            "hr": hr, "stepCount": len(steps), "via": "clipboard-xml"}
-            finally:
-                self._post("/api/clipboard/resume", {"mode": "restore"})
-        except Exception:
+                path = saxml.get("path", "")
+                if path:
+                    load = self.discovery_load(path)
+                    if not (load.get("ok") or load.get("success")):
+                        print(f"  [fetch] discovery load failed: {load.get('error', load)}", file=sys.stderr)
+                        return None
+        except Exception as e:
+            print(f"  [fetch] discovery/load error: {e}", file=sys.stderr)
             return None
+
+        try:
+            r = self._post("/api/discovery/query/script_body", {"name": script_name})
+            if not r.get("ok"):
+                print(f"  [fetch] script_body query failed: {r.get('error', r)}", file=sys.stderr)
+                return None
+
+            body_steps = r.get("steps", [])
+            if not body_steps:
+                return None
+
+            if truncated_steps and len(truncated_steps) == len(body_steps):
+                # Splice full calcs into the existing (mostly-correct) HR lines
+                hr_lines = []
+                for hr_line, body in zip(truncated_steps, body_steps):
+                    if self._TRUNCATED.search(hr_line):
+                        hr_lines.append(self._body_step_to_hr(body))
+                    else:
+                        hr_lines.append(hr_line)
+            else:
+                hr_lines = [self._body_step_to_hr(s) for s in body_steps]
+
+            hr = "\n".join(hr_lines)
+            return {"success": True, "scriptName": r.get("scriptName") or script_name,
+                    "hr": hr, "stepCount": len(hr_lines), "via": "discovery-body"}
+        except Exception as e:
+            print(f"  [fetch] script_body error: {e}", file=sys.stderr)
         return None
 
     def fetch_script(self, script_name: str) -> dict:
@@ -326,9 +376,8 @@ class PluginClient:
         Tier 2 — discovery: loaded index → GET /api/discovery/entity/script/{name}.
         Tier 3 — navigate: activate FM, bind session, open via Open Quickly.
 
-        After reading via Script Workspace (Tiers 1 & 3), any truncated step
-        (FileMaker uses … for long calculations in the UI) triggers a clipboard
-        XML fallback: select-all → copy → read XML → xml-to-hr.
+        If truncated steps are detected (FM uses … in the UI for long calculations),
+        falls back to SaXML export → discovery load → entity lookup for full fidelity.
 
         Returns {"success": True, "scriptName": ..., "hr": ..., "stepCount": ..., "via": ...}
         or      {"success": False, "error": ...}.
@@ -343,12 +392,8 @@ class PluginClient:
                     steps = r.get("steps", [])
                     if isinstance(steps, list) and steps:
                         if self._steps_truncated(steps):
-                            # FM is already open; activate so clipboard copy works
-                            self._post("/api/ui/activate", {})
-                            time.sleep(0.3)
-                            xml_result = self._fetch_via_clipboard_xml(script_name)
-                            if xml_result:
-                                return xml_result
+                            return self._fetch_via_saxml(script_name, steps) or {
+                                "success": False, "error": "Truncated steps and SaXML fallback failed"}
                         hr = "\n".join(steps)
                         return {"success": True, "scriptName": r.get("scriptName") or script_name,
                                 "hr": hr, "stepCount": len(steps), "via": "environment"}
@@ -391,9 +436,8 @@ class PluginClient:
             steps = r.get("steps", [])
             if isinstance(steps, list) and steps:
                 if self._steps_truncated(steps):
-                    xml_result = self._fetch_via_clipboard_xml(script_name)
-                    if xml_result:
-                        return xml_result
+                    return self._fetch_via_saxml(script_name) or {
+                        "success": False, "error": "Truncated steps and SaXML fallback failed"}
                 hr = "\n".join(steps)
                 return {"success": True, "scriptName": r.get("scriptName") or script_name,
                         "hr": hr, "stepCount": len(steps), "via": "navigate"}
