@@ -17,6 +17,7 @@ CLI usage:
     python3 agent/scripts/agfm_bridge.py bundle <file1> [<file2> ...] [--names ...]
     python3 agent/scripts/agfm_bridge.py patch <patch.json>
     python3 agent/scripts/agfm_bridge.py convert <file.fmscript> [--out <file.xml>]
+    python3 agent/scripts/agfm_bridge.py xml-to-hr <file.xml> [--out <file.fmscript>]
     python3 agent/scripts/agfm_bridge.py lint <file.fmscript>
     python3 agent/scripts/agfm_bridge.py fetch-script "My Script" [--out <file.fmscript>]
     python3 agent/scripts/agfm_bridge.py clipboard-read
@@ -277,12 +278,52 @@ class PluginClient:
         return self._post("/api/validate-hr", {"hr": hr})
 
     def fetch_script(self, script_name: str) -> dict:
-        """Bring FM to front, bind session, navigate to script, return HR steps.
+        """Return HR content for a named script via the fastest available path.
 
-        Returns {"success": True, "scriptName": ..., "hr": ..., "stepCount": ...}
-        or {"success": False, "error": ...}.
+        Tier 1 — environment: if the script is already open in Script Workspace,
+                  read it via GET /api/ui/script (no FM focus required).
+        Tier 2 — discovery: if discovery is loaded, pull from the index via
+                  GET /api/discovery/entity/script/{name} (no FM interaction).
+        Tier 3 — navigate: bring FM to front, bind session, open via Open Quickly.
+
+        Returns {"success": True, "scriptName": ..., "hr": ..., "stepCount": ..., "via": ...}
+        or      {"success": False, "error": ...}.
         """
-        # Bring FM to foreground so the session binding matches the frontmost window.
+        # ── Tier 1: already open in Script Workspace ──────────────────────────
+        try:
+            env = self._get("/api/ui/environment")
+            for win in env.get("windows", []):
+                win_script = win.get("scriptName", "")
+                if win_script.lower() == script_name.lower() and win.get("type") in ("scriptWorkspace", "editScript"):
+                    r = self._get("/api/ui/script")
+                    steps = r.get("steps", [])
+                    if isinstance(steps, list) and steps:
+                        hr = "\n".join(steps)
+                        return {"success": True, "scriptName": r.get("scriptName") or script_name,
+                                "hr": hr, "stepCount": len(steps), "via": "environment"}
+        except Exception:
+            pass
+
+        # ── Tier 2: discovery index ───────────────────────────────────────────
+        try:
+            status = self._get("/api/discovery/status")
+            if status.get("hasData"):
+                import urllib.parse
+                encoded = urllib.parse.quote(script_name, safe="")
+                entity = self._get(f"/api/discovery/entity/script/{encoded}")
+                # entity may carry hr, xml, body, or content depending on plugin version
+                hr = entity.get("hr") or entity.get("body") or entity.get("content") or ""
+                xml = entity.get("xml", "")
+                if not hr and xml:
+                    hr = self.xml_to_hr(xml)
+                if hr:
+                    steps = [l for l in hr.splitlines() if l.strip()]
+                    return {"success": True, "scriptName": entity.get("name") or script_name,
+                            "hr": hr, "stepCount": len(steps), "via": "discovery"}
+        except Exception:
+            pass
+
+        # ── Tier 3: navigate (requires FM frontmost + session bind) ───────────
         self._post("/api/ui/activate", {})
         time.sleep(0.4)
 
@@ -300,8 +341,8 @@ class PluginClient:
             steps = r.get("steps", [])
             if isinstance(steps, list) and steps:
                 hr = "\n".join(steps)
-                name = r.get("scriptName") or script_name
-                return {"success": True, "scriptName": name, "hr": hr, "stepCount": len(steps)}
+                return {"success": True, "scriptName": r.get("scriptName") or script_name,
+                        "hr": hr, "stepCount": len(steps), "via": "navigate"}
 
         return {"success": False, "error": f"Timed out waiting for '{script_name}' in Script Workspace"}
 
@@ -739,17 +780,22 @@ def main():
     p_patch = sub.add_parser("patch", help="Apply surgical step edits to a script")
     p_patch.add_argument("patch_file", help="Path to JSON patch file")
 
-    # convert
-    p_conv = sub.add_parser("convert", help="Convert .fmscript to fmxmlsnippet XML")
+    # convert (HR → XML)
+    p_conv = sub.add_parser("convert", help="Convert .fmscript HR to fmxmlsnippet XML")
     p_conv.add_argument("path", help="Path to .fmscript file")
     p_conv.add_argument("--out", metavar="FILE", help="Output path (default: stdout)")
+
+    # xml-to-hr (XML → HR)
+    p_x2h = sub.add_parser("xml-to-hr", help="Convert fmxmlsnippet XML to human-readable .fmscript")
+    p_x2h.add_argument("path", help="Path to fmxmlsnippet .xml file")
+    p_x2h.add_argument("--out", metavar="FILE", help="Output path (default: stdout)")
 
     # lint
     p_lint = sub.add_parser("lint", help="Lint a .fmscript file")
     p_lint.add_argument("path", help="Path to .fmscript file")
 
     # fetch-script
-    p_fetch = sub.add_parser("fetch-script", help="Fetch a script from FM Script Workspace by name")
+    p_fetch = sub.add_parser("fetch-script", help="Fetch a named script from FM (env → discovery → navigate)")
     p_fetch.add_argument("script_name", help="Script name in FileMaker")
     p_fetch.add_argument("--out", metavar="FILE", help="Write HR output to this .fmscript path (default: stdout)")
 
@@ -866,12 +912,25 @@ def main():
             print(f"Error: {result.get('error')}", file=sys.stderr)
             sys.exit(1)
         hr = result["hr"]
+        via = result.get("via", "?")
         if args.out:
             out_path = Path(args.out)
             out_path.parent.mkdir(parents=True, exist_ok=True)
             out_path.write_text(hr, encoding="utf-8")
             print(json.dumps({"success": True, "scriptName": result["scriptName"],
-                               "stepCount": result["stepCount"], "path": str(out_path)}))
+                               "stepCount": result["stepCount"], "path": str(out_path), "via": via}))
+        else:
+            print(hr)
+
+    # ── xml-to-hr ──
+    elif args.cmd == "xml-to-hr":
+        with open(args.path, encoding="utf-8") as f:
+            xml = f.read()
+        hr = client.xml_to_hr(xml)
+        if args.out:
+            with open(args.out, "w", encoding="utf-8") as f:
+                f.write(hr)
+            print(f"Written to {args.out}")
         else:
             print(hr)
 
