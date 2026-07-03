@@ -351,6 +351,7 @@ class PluginClient:
             if not body_steps:
                 return None
 
+            mismatch = False
             if truncated_steps and len(truncated_steps) == len(body_steps):
                 # Splice full calcs into the existing (mostly-correct) HR lines
                 hr_lines = []
@@ -360,11 +361,21 @@ class PluginClient:
                     else:
                         hr_lines.append(hr_line)
             else:
+                # Step counts differ — rebuild from body_steps but flag the mismatch
+                if truncated_steps:
+                    mismatch = True
                 hr_lines = [self._body_step_to_hr(s) for s in body_steps]
 
             hr = "\n".join(hr_lines)
-            return {"success": True, "scriptName": r.get("scriptName") or script_name,
-                    "hr": hr, "stepCount": len(hr_lines), "via": "discovery-body"}
+            result = {"success": True, "scriptName": r.get("scriptName") or script_name,
+                      "hr": hr, "stepCount": len(hr_lines), "via": "discovery-body"}
+            if mismatch:
+                result["mismatch"] = True
+                result["note"] = (
+                    f"Step count mismatch: Script Workspace returned {len(truncated_steps)} steps "
+                    f"but discovery has {len(body_steps)}. Discovery data may be stale."
+                )
+            return result
         except Exception as e:
             print(f"  [fetch] script_body error: {e}", file=sys.stderr)
         return None
@@ -1011,12 +1022,37 @@ def main():
             sys.exit(1)
         hr = result["hr"]
         via = result.get("via", "?")
+
+        # Write file first regardless of mismatch
         if args.out:
             out_path = Path(args.out)
             out_path.parent.mkdir(parents=True, exist_ok=True)
             out_path.write_text(hr, encoding="utf-8")
+
+        if result.get("mismatch"):
+            note = result.get("note", "Step count mismatch between Script Workspace and discovery.")
+            print(f"\n⚠️  {note}", file=sys.stderr)
+            if sys.stdin.isatty():
+                ans = input("Re-fetch using SaXML export for full fidelity? [y/N] ").strip().lower()
+                if ans in ("y", "yes"):
+                    print("Running SaXML export…", file=sys.stderr)
+                    saxml = client.save_as_xml()
+                    if saxml.get("ok") and saxml.get("path"):
+                        client.discovery_load(saxml["path"])
+                    result2 = client.fetch_script(args.script_name)
+                    if result2.get("success") and not result2.get("mismatch"):
+                        hr = result2["hr"]
+                        via = result2.get("via", "?")
+                        if args.out:
+                            out_path.write_text(hr, encoding="utf-8")
+                        result = result2
+                    else:
+                        print("Re-fetch did not resolve the mismatch — keeping original.", file=sys.stderr)
+
+        if args.out:
             print(json.dumps({"success": True, "scriptName": result["scriptName"],
-                               "stepCount": result["stepCount"], "path": str(out_path), "via": via}))
+                               "stepCount": result["stepCount"], "path": str(out_path), "via": via,
+                               "mismatch": result.get("mismatch", False)}))
         else:
             print(hr)
 
