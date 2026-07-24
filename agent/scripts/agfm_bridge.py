@@ -19,7 +19,7 @@ CLI usage:
     python3 agent/scripts/agfm_bridge.py convert <file.fmscript> [--out <file.xml>]
     python3 agent/scripts/agfm_bridge.py xml-to-hr <file.xml> [--out <file.fmscript>]
     python3 agent/scripts/agfm_bridge.py lint <file.fmscript>
-    python3 agent/scripts/agfm_bridge.py fetch-script "My Script" [--out <file.fmscript>]
+    python3 agent/scripts/agfm_bridge.py fetch-script "My Script" [--out <file.fmscript>] [--file FILENAME]
     python3 agent/scripts/agfm_bridge.py clipboard-read
     python3 agent/scripts/agfm_bridge.py clipboard-write <file>
     python3 agent/scripts/agfm_bridge.py ddl "CREATE TABLE Foo (...)"
@@ -42,7 +42,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import platform
 import re
+import shutil
+import subprocess
 import sys
 import time
 import urllib.error
@@ -380,9 +383,126 @@ class PluginClient:
             print(f"  [fetch] script_body error: {e}", file=sys.stderr)
         return None
 
-    def fetch_script(self, script_name: str) -> dict:
+    @staticmethod
+    def _osascript_available() -> bool:
+        return platform.system() == "Darwin" and shutil.which("osascript") is not None
+
+    def _fm_app_name(self) -> str:
+        try:
+            with open(_CONFIG_PATH, encoding="utf-8") as f:
+                return json.load(f).get("fm_app_name", "FileMaker Pro")
+        except Exception:
+            return "FileMaker Pro"
+
+    @staticmethod
+    def _frontmost_bundle_id() -> str | None:
+        """Bundle identifier of the frontmost app (e.g. com.microsoft.VSCode).
+
+        Using the bundle ID rather than the System Events process name avoids a
+        mismatch bug: process names are often short forms (VS Code's process is
+        "Code") that `tell application "<name>" to activate` fails to resolve,
+        since that resolves against the .app bundle's display name ("Visual
+        Studio Code"), not the process name.
+        """
+        try:
+            result = subprocess.run(
+                ["osascript", "-e",
+                 'tell application "System Events" to get bundle identifier of first process whose frontmost is true'],
+                capture_output=True, text=True, timeout=5,
+            )
+            bundle_id = result.stdout.strip()
+            return bundle_id or None
+        except Exception:
+            return None
+
+    @staticmethod
+    def _activate_bundle_id(bundle_id: str) -> None:
+        try:
+            subprocess.run(["osascript", "-e", f'tell application id "{bundle_id}" to activate'],
+                            capture_output=True, text=True, timeout=5)
+        except Exception:
+            pass
+
+    def fetch_via_copy(self, script_name: str, file_name: str | None = None) -> dict | None:
+        """Fetch a script's true fmxmlsnippet content via navigate + a real ⌘A/⌘C.
+
+        This is the most trustworthy source of script content: it reads exactly
+        what a developer would get by manually selecting all steps in Script
+        Workspace and copying, bypassing both the UI-scrape's truncation of long
+        calculations ("…") and the discovery index's potential staleness.
+
+        Requires macOS + Accessibility permission for System Events, and briefly
+        steals OS-level focus onto FileMaker Pro — focus is restored to whatever
+        app was frontmost beforehand (e.g. VS Code) once the copy completes.
+        Returns None (never raises) if osascript is unavailable or any step
+        fails, so callers can fall back to another tier.
+
+        Returns {"success": True, "scriptName": ..., "hr": ..., "stepCount": ..., "via": "copy"}
+        or None.
+        """
+        if not self._osascript_available():
+            return None
+
+        previous_bundle_id = self._frontmost_bundle_id()
+        try:
+            fn_body = {"fileName": file_name} if file_name else {}
+            nav = self._post("/api/ui/script/navigate", {"scriptName": script_name, **fn_body}, timeout=35)
+            if not (nav.get("ok") or nav.get("success")):
+                return None
+
+            time.sleep(0.5)
+
+            fm_app_name = self._fm_app_name()
+            script = (
+                f'tell application "{fm_app_name}" to activate\n'
+                f'delay 0.5\n'
+                f'tell application "System Events"\n'
+                f'\ttell process "{fm_app_name}"\n'
+                f'\t\tset frontmost to true\n'
+                f'\t\tkeystroke "a" using {{command down}}\n'
+                f'\t\tdelay 0.4\n'
+                f'\t\tkeystroke "c" using {{command down}}\n'
+                f'\t\tdelay 0.4\n'
+                f'\tend tell\n'
+                f'end tell\n'
+            )
+            result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=15)
+            if result.returncode != 0:
+                print(f"  [fetch_via_copy] osascript error: {result.stderr.strip()}", file=sys.stderr)
+                return None
+
+            clip = self._get("/api/clipboard")
+            if not (clip.get("ok") or clip.get("success")):
+                return None
+            if clip.get("clipClass") != "XMSS":
+                # Wrong thing landed on the clipboard (stale focus, dialog in the way, etc.)
+                print(f"  [fetch_via_copy] unexpected clipClass {clip.get('clipClass')!r} — "
+                      f"keystrokes may not have reached Script Workspace", file=sys.stderr)
+                return None
+
+            xml = clip.get("xmlContent") or clip.get("xml", "")
+            if not xml:
+                return None
+
+            hr = self.xml_to_hr(xml)
+            if not hr:
+                return None
+            steps = [l for l in hr.splitlines() if l.strip()]
+            return {"success": True, "scriptName": script_name, "hr": hr,
+                    "stepCount": len(steps), "via": "copy"}
+        except Exception as e:
+            print(f"  [fetch_via_copy] error: {e}", file=sys.stderr)
+            return None
+        finally:
+            if previous_bundle_id:
+                self._activate_bundle_id(previous_bundle_id)
+
+    def fetch_script(self, script_name: str, file_name: str | None = None) -> dict:
         """Return HR content for a named script via the fastest available path.
 
+        Tier 0 — copy: navigate + real ⌘A/⌘C via System Events, read the FM
+                  clipboard directly. Primary path — the ground truth, bypassing
+                  both UI-scrape truncation and discovery staleness. macOS only.
         Tier 1 — environment: script already open in Script Workspace → read directly.
         Tier 2 — discovery: loaded index → GET /api/discovery/entity/script/{name}.
         Tier 3 — navigate: activate FM, bind session, open via Open Quickly.
@@ -393,6 +513,11 @@ class PluginClient:
         Returns {"success": True, "scriptName": ..., "hr": ..., "stepCount": ..., "via": ...}
         or      {"success": False, "error": ...}.
         """
+        # ── Tier 0: real select-all + copy (primary) ──────────────────────────
+        copied = self.fetch_via_copy(script_name, file_name=file_name)
+        if copied:
+            return copied
+
         # ── Tier 1: already open in Script Workspace ──────────────────────────
         try:
             env = self._get("/api/ui/environment")
@@ -540,7 +665,7 @@ class PluginClient:
         else:
             step_count = gr.get("stepCount", step_count)
 
-        time.sleep(3)
+        time.sleep(0.5)
 
         # Delete existing steps
         if select_all and step_count > 0:
@@ -556,14 +681,14 @@ class PluginClient:
                 if self._get("/api/ui/script").get("stepCount", 1) == 0:
                     break
 
-        time.sleep(3)
+        time.sleep(0.5)
 
         # Insert
         ir = self._post("/api/ui/script/insert", {"xml": xml, "afterIndex": -1, "type": "XMSS", **fn_body})
         if not (ir.get("success") or ir.get("ok")):
             return {"success": False, "error": ir.get("error", "Insert steps failed")}
 
-        time.sleep(3)
+        time.sleep(0.5)
 
         # Save
         sr = self._post("/api/ui/script/save", {**fn_body})
@@ -573,7 +698,7 @@ class PluginClient:
         mode = "replaced" if select_all else "appended to"
         return {"success": True, "message": f"'{script_name}' {mode} via plugin."}
 
-    def bundle(self, files: list[str], names: list[str] | None = None) -> dict:
+    def bundle(self, files: list[str], names: list[str] | None = None, file_name: str | None = None) -> dict:
         """Create new scripts directly via the plugin (no clipboard paste required).
 
         Uses POST /api/ui/script/create for each file. Accepts multiple files,
@@ -582,10 +707,17 @@ class PluginClient:
         Args:
             files: List of paths to .fmscript or .xml files.
             names: Script names (derived from filename if omitted).
+            file_name: Explicit FM fileName to target (default: derived from
+                context). Passing this avoids `targetDriftAskRequired` errors
+                when multiple FM files are open and the target isn't frontmost.
 
         Returns:
             Result dict with success/created/error.
         """
+        if file_name is None:
+            file_name = self._file_name_from_context()
+        fn_body = {"fileName": file_name} if file_name else {}
+
         effective_names = list(names or [])
         while len(effective_names) < len(files):
             effective_names.append(None)
@@ -601,7 +733,7 @@ class PluginClient:
             if not name:
                 name = os.path.splitext(os.path.basename(path))[0]
 
-            r = self._post("/api/ui/script/create", {"scriptName": name, "xml": xml})
+            r = self._post("/api/ui/script/create", {"scriptName": name, "xml": xml, **fn_body})
             if (r.get("ok") or r.get("success")) and not r.get("error"):
                 created.append(name)
             else:
@@ -617,15 +749,20 @@ class PluginClient:
             "message": f"Created {len(created)} script(s): {', '.join(repr(n) for n in created)}",
         }
 
-    def patch(self, patch_data: str | dict) -> dict:
+    def patch(self, patch_data: str | dict, file_name: str | None = None) -> dict:
         """Apply surgical step-level edits to an existing script.
 
         Args:
             patch_data: Path to a JSON patch file, or a dict with the payload.
+            file_name: Explicit FM fileName to target (default: derived from
+                context, or a "fileName" key in the patch payload). Passing
+                this avoids `targetDriftAskRequired` errors when multiple FM
+                files are open and the target isn't frontmost.
 
         Patch schema:
             {
                 "script": "Script Name",
+                "fileName": "Optional.fmp12",
                 "changes": [
                     {"op": "insert",  "afterIndex": N, "xml": "<fmxmlsnippet...>"},
                     {"op": "delete",  "steps": [N, ...]},
@@ -647,7 +784,11 @@ class PluginClient:
         if not script_name:
             return {"success": False, "error": "Patch missing 'script' field"}
 
-        nav = self._post("/api/ui/script/navigate", {"scriptName": script_name}, timeout=35)
+        if file_name is None:
+            file_name = payload.get("fileName") or self._file_name_from_context()
+        fn_body = {"fileName": file_name} if file_name else {}
+
+        nav = self._post("/api/ui/script/navigate", {"scriptName": script_name, **fn_body}, timeout=35)
         if not (nav.get("success") or nav.get("ok")):
             return {"success": False, "error": nav.get("error", f"Cannot navigate to '{script_name}'")}
 
@@ -657,21 +798,21 @@ class PluginClient:
 
             if op == "insert":
                 r = self._post("/api/ui/script/insert",
-                               {"xml": change["xml"], "afterIndex": change.get("afterIndex", -1)})
+                               {"xml": change["xml"], "afterIndex": change.get("afterIndex", -1), **fn_body})
             elif op == "delete":
-                r = self._post("/api/ui/script/delete", {"steps": change["steps"]})
+                r = self._post("/api/ui/script/delete", {"steps": change["steps"], **fn_body})
             elif op == "replace":
-                r = self._post("/api/ui/script/delete", {"steps": change["steps"]})
+                r = self._post("/api/ui/script/delete", {"steps": change["steps"], **fn_body})
                 if r.get("success") or r.get("ok"):
                     r = self._post("/api/ui/script/insert",
-                                   {"xml": change["xml"], "afterIndex": change["steps"][0] - 1})
+                                   {"xml": change["xml"], "afterIndex": change["steps"][0] - 1, **fn_body})
             else:
                 return {"success": False, "error": f"{label}: unknown op '{op}'"}
 
             if not (r.get("success") or r.get("ok")):
                 return {"success": False, "error": f"{label}: {r.get('error', 'failed')}"}
 
-        sr = self._post("/api/ui/script/save", {})
+        sr = self._post("/api/ui/script/save", fn_body)
         if not (sr.get("success") or sr.get("ok")):
             return {"success": False, "error": f"Save failed: {sr.get('error')}"}
 
@@ -811,10 +952,292 @@ def _extract_js_params(hr_source: str) -> list:
     return results
 
 
+def _split_top_level_semicolons(s: str) -> list:
+    """Split on ';' at paren-depth 0, ignoring separators inside quotes or parens."""
+    parts = []
+    depth = 0
+    in_quotes = False
+    current = []
+    for ch in s:
+        if ch == '"':
+            in_quotes = not in_quotes
+        if not in_quotes:
+            if ch == '(':
+                depth += 1
+            elif ch == ')':
+                depth -= 1
+        if ch == ';' and depth == 0 and not in_quotes:
+            parts.append(''.join(current))
+            current = []
+        else:
+            current.append(ch)
+    parts.append(''.join(current))
+    return parts
+
+
+_INSERT_FROM_URL_LABEL_RE = re.compile(
+    r'^\s*(select|with dialog\s*:|target\s*:|curl options\s*:|verify ssl certificates|don.?t encode url)',
+    re.IGNORECASE,
+)
+
+
+def _extract_insert_from_url_urls(hr_source: str) -> list:
+    """Extract the bare (unlabeled) URL expression from each Insert from URL step in HR source."""
+    results = []
+    for m in re.finditer(r'Insert from URL\s*\[([^\]]+)\]', hr_source):
+        segments = _split_top_level_semicolons(m.group(1))
+        url = ""
+        for seg in segments:
+            s = seg.strip()
+            if not s or _INSERT_FROM_URL_LABEL_RE.match(s):
+                continue
+            url = s
+            break
+        results.append(url)
+    return results
+
+
+_INSERT_FROM_URL_STEP_RE = re.compile(
+    r'<Step\b[^>]*\bname="Insert from URL"[^>]*>.*?</Step>',
+    re.DOTALL,
+)
+
+# The step's own URL <Calculation> (not the one nested in <CURLOptions>, whose closing
+# tag is immediately followed by </CURLOptions>).
+_INSERT_FROM_URL_OUTER_CALC_RE = re.compile(
+    r'<Calculation><!\[CDATA\[.*?\]\]></Calculation>(?!\s*</CURLOptions>)',
+    re.DOTALL,
+)
+
+
+def _fix_insert_from_url_bugs(xml: str, hr_source: str | None) -> str:
+    """Fix the plugin's Insert from URL HR->XML conversion bug.
+
+    The plugin drops the real (unlabeled) URL expression entirely and instead
+    writes a stray flag keyword (e.g. "Select") into the step's own
+    <Calculation> element. Re-derive the real URL from the HR source and
+    inject it positionally, one per Insert from URL step in document order.
+    """
+    if not hr_source:
+        return xml
+    urls = _extract_insert_from_url_urls(hr_source)
+    if not urls:
+        return xml
+    step_iter = iter(urls)
+
+    def _inject(m):
+        try:
+            url = next(step_iter)
+        except StopIteration:
+            return m.group(0)
+        if not url:
+            return m.group(0)
+        step_xml = m.group(0)
+        new_step, n = _INSERT_FROM_URL_OUTER_CALC_RE.subn(
+            f'<Calculation><![CDATA[{url}]]></Calculation>', step_xml, count=1
+        )
+        return new_step
+
+    return _INSERT_FROM_URL_STEP_RE.sub(_inject, xml)
+
+
+_SET_FIELD_BY_NAME_STEP_RE = re.compile(
+    r'<Step\b[^>]*\bname="Set Field By Name"[^>]*>.*?</Step>',
+    re.DOTALL,
+)
+
+
+def _fix_set_field_by_name_bugs(xml: str) -> str:
+    """Fix the plugin's Set Field By Name HR->XML conversion bug.
+
+    The plugin wraps the two calculations in <Target>/<Value> instead of the
+    correct <TargetName>/<Result> (confirmed against
+    agent/snippet_examples/steps/fields/Set Field By Name.xml). FileMaker
+    doesn't recognize the wrong tags and silently creates an empty step
+    (no target field, no value) instead of erroring. Scoped to Set Field By
+    Name step blocks only, since <Value> is a legitimate tag elsewhere
+    (e.g. Set Variable).
+    """
+    def _fix(m):
+        step_xml = m.group(0)
+        step_xml = re.sub(r'<Target>', '<TargetName>', step_xml)
+        step_xml = re.sub(r'</Target>', '</TargetName>', step_xml)
+        step_xml = re.sub(r'<Value>', '<Result>', step_xml)
+        step_xml = re.sub(r'</Value>', '</Result>', step_xml)
+        return step_xml
+
+    return _SET_FIELD_BY_NAME_STEP_RE.sub(_fix, xml)
+
+
+_GTPR_LOCATIONS = ["First", "Last", "Previous", "Next", "By Calculation"]
+
+_GTPR_STEP_RE = re.compile(
+    r'<Step\b[^>]*\bname="Go to Portal Row"[^>]*>.*?</Step>',
+    re.DOTALL,
+)
+
+
+def _extract_go_to_portal_row_specs(hr_source: str) -> list:
+    """Extract (location, selectAll, exitAfterLast, calcExpr) per Go to Portal Row step."""
+    results = []
+    for m in re.finditer(r'Go to Portal Row\s*\[([^\]]+)\]', hr_source):
+        segments = [s.strip() for s in _split_top_level_semicolons(m.group(1))]
+        select_all = False
+        exit_after_last = True
+        location = "First"
+        calc_expr = ""
+        for seg in segments:
+            if not seg:
+                continue
+            low = seg.lower()
+            if low == "select":
+                select_all = True
+                continue
+            if low.startswith("exit after last"):
+                if ":" in seg:
+                    exit_after_last = seg.split(":", 1)[1].strip().lower() == "on"
+                else:
+                    exit_after_last = True
+                continue
+            matched_loc = next((loc for loc in _GTPR_LOCATIONS if low == loc.lower()), None)
+            if matched_loc:
+                location = matched_loc
+                continue
+            calc_expr = seg
+        results.append((location, select_all, exit_after_last, calc_expr))
+    return results
+
+
+def _fix_go_to_portal_row_bugs(xml: str, hr_source: str | None) -> str:
+    """Fix the plugin's Go to Portal Row HR->XML conversion bug.
+
+    The plugin writes the location keyword (First/Last/Previous/Next) into a
+    stray <Calculation> instead of the RowPageLocation value attribute, and
+    gets SelectAll wrong. Confirmed against
+    agent/snippet_examples/steps/navigation/Go to Portal Row.xml, where the
+    real XML value for "by calculation" mode is "ByCalculation" (no space)
+    and Calculation only exists in that mode. Re-derive from HR source and
+    rebuild each step's attributes/Calculation positionally.
+    """
+    if not hr_source:
+        return xml
+    specs = _extract_go_to_portal_row_specs(hr_source)
+    if not specs:
+        return xml
+    spec_iter = iter(specs)
+
+    def _inject(m):
+        try:
+            location, select_all, exit_after_last, calc_expr = next(spec_iter)
+        except StopIteration:
+            return m.group(0)
+        step_xml = m.group(0)
+        xml_location = "ByCalculation" if location == "By Calculation" else location
+
+        step_xml = re.sub(
+            r'<RowPageLocation value="[^"]*"\s*/>',
+            f'<RowPageLocation value="{xml_location}"/>',
+            step_xml,
+        )
+        step_xml = re.sub(
+            r'<SelectAll state="[^"]*"\s*/>',
+            f'<SelectAll state="{"True" if select_all else "False"}"/>',
+            step_xml,
+        )
+        if '<Exit ' in step_xml:
+            step_xml = re.sub(
+                r'<Exit state="[^"]*"\s*/>',
+                f'<Exit state="{"True" if exit_after_last else "False"}"/>',
+                step_xml,
+            )
+
+        if location == "By Calculation":
+            step_xml = re.sub(
+                r'<Calculation><!\[CDATA\[.*?\]\]></Calculation>',
+                f'<Calculation><![CDATA[{calc_expr}]]></Calculation>',
+                step_xml,
+                flags=re.DOTALL,
+            )
+        else:
+            step_xml = re.sub(
+                r'<Calculation><!\[CDATA\[.*?\]\]></Calculation>', '', step_xml, flags=re.DOTALL
+            )
+
+        return step_xml
+
+    return _GTPR_STEP_RE.sub(_inject, xml)
+
+
+_PERFORM_SCRIPT_STEP_RE = re.compile(
+    r'<Step\b[^>]*\bname="Perform Script"[^>]*>.*?</Step>',
+    re.DOTALL,
+)
+
+# Matches the plugin's bug output: the literal script name (quoted) landed in
+# <Calculation> (which should hold the parameter), and the whole "Parameter: <expr>"
+# text landed in <Script name="..."> (which should hold just the script name).
+_PS_BROKEN_WITH_PARAM_RE = re.compile(
+    r'<Calculation><!\[CDATA\[\s*"([^"]*)"\s*\]\]></Calculation>\s*'
+    r'<Script\s+id="0"\s+name="Parameter:\s*(.*?)"\s*/>',
+    re.DOTALL,
+)
+
+# Matches the no-parameter case: only the quoted name in <Calculation>, no <Script> at all.
+_PS_BROKEN_NO_PARAM_RE = re.compile(
+    r'<Calculation><!\[CDATA\[\s*"([^"]*)"\s*\]\]></Calculation>',
+)
+
+
+def _unescape_xml_attr(s: str) -> str:
+    return (s.replace('&quot;', '"')
+             .replace('&apos;', "'")
+             .replace('&lt;', '<')
+             .replace('&gt;', '>')
+             .replace('&amp;', '&'))
+
+
+def _fix_perform_script_step(step_xml: str) -> str:
+    m = _PS_BROKEN_WITH_PARAM_RE.search(step_xml)
+    if m:
+        script_name, param_expr_escaped = m.group(1), m.group(2)
+        param_expr = _unescape_xml_attr(param_expr_escaped)
+        replacement = (
+            f'<Calculation><![CDATA[{param_expr}]]></Calculation>\n'
+            f'    <Script id="0" name="{script_name}"/>'
+        )
+        return step_xml[:m.start()] + replacement + step_xml[m.end():]
+
+    if '<Script' not in step_xml:
+        m2 = _PS_BROKEN_NO_PARAM_RE.search(step_xml)
+        if m2:
+            script_name = m2.group(1)
+            replacement = f'<Script id="0" name="{script_name}"/>'
+            return step_xml[:m2.start()] + replacement + step_xml[m2.end():]
+
+    return step_xml
+
+
+def _fix_perform_script_bugs(xml: str) -> str:
+    """Fix the plugin's Perform Script HR->XML conversion bug.
+
+    The plugin always puts the quoted script name in <Calculation> (which
+    should hold the parameter) instead of in <Script name="...">, and when a
+    Parameter clause is present, dumps the raw "Parameter: <expr>" text into
+    <Script name="..."> instead of parsing it out. Confirmed against
+    agent/snippet_examples/steps/control/Perform Script.xml, where
+    Calculation = parameter value and Script = target script reference.
+    """
+    return _PERFORM_SCRIPT_STEP_RE.sub(lambda m: _fix_perform_script_step(m.group(0)), xml)
+
+
 def _patch_converted_xml(xml: str, hr_source: str | None = None) -> str:
     """Fix known HR→XML conversion bugs in the plugin's output."""
     xml = xml.replace("<WebViewerObjectName>", "<ObjectName>")
     xml = xml.replace("</WebViewerObjectName>", "</ObjectName>")
+    xml = _fix_perform_script_bugs(xml)
+    xml = _fix_insert_from_url_bugs(xml, hr_source)
+    xml = _fix_set_field_by_name_bugs(xml)
+    xml = _fix_go_to_portal_row_bugs(xml, hr_source)
 
     if hr_source:
         js_params = _extract_js_params(hr_source)
@@ -884,10 +1307,12 @@ def main():
     p_bundle = sub.add_parser("bundle", help="Bundle scripts into a clipboard paste")
     p_bundle.add_argument("files", nargs="+", help=".fmscript or .xml files to bundle")
     p_bundle.add_argument("--names", nargs="+", metavar="NAME", help="Script names (one per file)")
+    p_bundle.add_argument("--file", metavar="FILENAME", help="Override FM fileName (default: derived from context)")
 
     # patch
     p_patch = sub.add_parser("patch", help="Apply surgical step edits to a script")
     p_patch.add_argument("patch_file", help="Path to JSON patch file")
+    p_patch.add_argument("--file", metavar="FILENAME", help="Override FM fileName (default: derived from context or patch's fileName key)")
 
     # convert (HR → XML)
     p_conv = sub.add_parser("convert", help="Convert .fmscript HR to fmxmlsnippet XML")
@@ -904,9 +1329,10 @@ def main():
     p_lint.add_argument("path", help="Path to .fmscript file")
 
     # fetch-script
-    p_fetch = sub.add_parser("fetch-script", help="Fetch a named script from FM (env → discovery → navigate)")
+    p_fetch = sub.add_parser("fetch-script", help="Fetch a named script from FM (copy → env → discovery → navigate)")
     p_fetch.add_argument("script_name", help="Script name in FileMaker")
     p_fetch.add_argument("--out", metavar="FILE", help="Write HR output to this .fmscript path (default: stdout)")
+    p_fetch.add_argument("--file", metavar="FILENAME", help="Override FM fileName (default: derived from context)")
 
     # clipboard-read
     sub.add_parser("clipboard-read", help="Read fmxmlsnippet XML from the FM clipboard")
@@ -984,13 +1410,13 @@ def main():
 
     # ── bundle ──
     elif args.cmd == "bundle":
-        result = client.bundle(args.files, args.names)
+        result = client.bundle(args.files, args.names, file_name=getattr(args, "file", None))
         _print_result(result)
         sys.exit(0 if result.get("success") else 1)
 
     # ── patch ──
     elif args.cmd == "patch":
-        result = client.patch(args.patch_file)
+        result = client.patch(args.patch_file, file_name=getattr(args, "file", None))
         _print_result(result)
         sys.exit(0 if result.get("success") else 1)
 
@@ -1016,7 +1442,7 @@ def main():
 
     # ── fetch-script ──
     elif args.cmd == "fetch-script":
-        result = client.fetch_script(args.script_name)
+        result = client.fetch_script(args.script_name, file_name=getattr(args, "file", None))
         if not result.get("success"):
             print(f"Error: {result.get('error')}", file=sys.stderr)
             sys.exit(1)
