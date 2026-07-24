@@ -1,17 +1,18 @@
 # Automation & OData
 
-The agentic-fm script collection (`filemaker/agentic-fm.xml`) contains the FM-side scripts that power the agent's feedback loops. These scripts are installed in every solution. They can be triggered in two ways:
+The agentic-fm script collection (`filemaker/agentic-fm.xml`) contains the FM-side scripts that power the agent's feedback loops. They can be triggered three ways:
 
+- **Via the plugin** (primary): `POST /api/performscript`, routed through `AGFM_Bridge`
 - **Manually**: developer runs them from the Scripts menu in FM Pro
-- **Via OData** (when configured): agent calls FM scripts through `AGFMScriptBridge`
+- **Via OData** (optional, for server-hosted files): agent calls FM scripts through `AGFMScriptBridge`
 
 ## Plugin API discovery
 
 Always use `GET /api/discover` to find available plugin endpoints rather than guessing. This returns the full list of supported routes with descriptions.
 
 ```bash
-TOKEN=$(grep AGFM_PLUGIN_TOKEN /workspaces/agentic-fm/.env.local | cut -d= -f2)
-URL=$(grep AGFM_PLUGIN_URL /workspaces/agentic-fm/.env.local | cut -d= -f2)
+TOKEN=$AGFM_PLUGIN_TOKEN
+URL=http://localhost:${AGFM_PLUGIN_PORT:-8766}   # host.docker.internal inside a container
 curl -s -H "Authorization: Bearer $TOKEN" "$URL/api/discover"
 ```
 
@@ -28,63 +29,51 @@ curl -s -H "Authorization: Bearer $TOKEN" "$URL/api/discover"
 | `/api/ui/script/insert` | POST | Insert steps at a given index |
 | `/api/ui/script/save` | POST | Save the open script |
 
-**HR → XML is the required step before deploying any `.fmscript` file.** deploy.py handles this automatically — pass the `.fmscript` path directly and it calls `/api/hr-to-xml` before writing to the clipboard.
+**HR → XML is the required step before deploying any `.fmscript` file.** `agfm_bridge.py` handles this automatically — pass the `.fmscript` path directly and it calls `/api/hr-to-xml` first.
 
-## Deploying scripts with deploy.py
+## Deploying scripts with agfm_bridge.py
 
 ```bash
-# Existing script — replace steps (Tier 4 auto-selected when plugin creds are present)
-python3 agent/scripts/deploy.py agent/sandbox/MyScript.fmscript "My Script" --replace
+# Existing script — replace all steps
+python3 agent/scripts/agfm_bridge.py deploy agent/sandbox/{Solution}/MyScript.fmscript "My Script"
 
-# New scripts — bundle one or more into a single clipboard paste (always Tier 1)
-# Script names are derived from filenames, or pass --names to set them explicitly
-python3 agent/scripts/deploy.py --bundle agent/sandbox/ScriptA.fmscript agent/sandbox/ScriptB.fmscript
-python3 agent/scripts/deploy.py --bundle agent/sandbox/A.fmscript agent/sandbox/B.fmscript --names "Script A" "Script B"
+# New scripts — create them directly via the plugin
+# Names derive from filenames, or pass --names to set them explicitly
+python3 agent/scripts/agfm_bridge.py bundle agent/sandbox/{Solution}/A.fmscript agent/sandbox/{Solution}/B.fmscript --names "Script A" "Script B"
+
+# Surgical step edits
+python3 agent/scripts/agfm_bridge.py patch agent/sandbox/{Solution}/mypatch.json
 ```
-
-`--bundle` writes a multi-script `fmxmlsnippet` to the clipboard. Open Script Workspace in FileMaker and **⌘V** — FM creates all scripts at once.
-
-### Flags
-
-| Flag | Purpose |
-|------|---------|
-| `--bundle FILE [FILE ...]` | Bundle one or more scripts into a single clipboard paste (always Tier 1). |
-| `--names NAME [NAME ...]` | Script names for `--bundle` (one per file; derived from filename if omitted). |
-| `--replace` | Replace all existing steps without prompting (Tier 2/4). |
-| `--append` | Append after existing steps without prompting (Tier 2/4). |
-| `--tier N` | Override auto-selected tier (1–4). |
-| `--file NAME` | Target a specific FM file (multi-file solutions). |
 
 ### HR script auto-conversion
 
-deploy.py detects `.fmscript` files and calls `POST /api/hr-to-xml` on the plugin before deploying. Conversion warnings (unresolved layouts, fields) are printed to stderr but do not block deployment — FileMaker resolves IDs by name on paste as long as the objects exist.
+`agfm_bridge.py` detects `.fmscript` files and calls `POST /api/hr-to-xml` on the plugin before deploying. Conversion warnings (unresolved layouts, fields) are printed to stderr but do not block deployment — FileMaker resolves IDs by name on paste as long as the objects exist.
+
+**If a deploy fails, stop and ask the developer.** Do not retry with different flags or fall back to a clipboard workaround.
 
 ## Docker networking
 
-When FM Server runs in a Docker container and the companion server runs on the host, OData-triggered scripts execute server-side inside the container. In that case `localhost:8765` in the FM scripts will not reach the companion server — use `host.docker.internal:8765` instead.
-
-This also applies to the agent itself when running inside a container (e.g. a Claude Code worktree). Any direct HTTP call the agent makes to the companion server will fail on `localhost:8765`. Use the fallback sequence: try `http://localhost:8765` first; if the connection is refused (curl exit code 7), retry with `http://host.docker.internal:8765` and use that host for all subsequent calls in the session.
+When the agent runs inside a container (e.g. a Claude Code worktree), `localhost` does not reach the plugin on the macOS host. Set `AGFM_PLUGIN_URL=http://host.docker.internal:8766` in `.env.local`; `agfm_bridge.py` resolves this automatically.
 
 ## Agentic-fm scripts
 
 | Script                   | What it does                                                                                                                             |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| **Get agentic-fm path**  | Validates and returns the path to the agentic-fm project folder, stored in `$$AGENTIC.FM`; called by other scripts                       |
-| **Push Context**         | Prompts for a task description, calls `Context()` custom function, writes `agent/CONTEXT.json` directly via FM file steps                |
-| **Explode XML**          | Calls `Save a Copy as XML`, then POSTs to `localhost:8765/explode` — companion server parses the XML into `xml_parsed/`                  |
-| **Agentic-fm Debug**     | POSTs runtime state JSON to `localhost:8765/debug` — companion server writes `agent/debug/output.json`                                   |
-| **AGFMScriptBridge**     | OData entry point — accepts `{ script, parameter }` JSON and runs any named script; used by the agent to trigger FM scripts autonomously |
-| **AGFMGoToLayout**       | Navigates FM to a named layout; used before calling Push Context to switch solution context                                              |
-| **AGFMEvaluation**       | Evaluates a FileMaker calculation expression server-side and returns the result; optionally navigates to a layout first                   |
-| **Agentic-fm webviewer** | Starts or stops the agentic-fm webviewer from within FileMaker via the companion server                                                  |
+| **AGFM_Bridge**          | The plugin's in-FileMaker entry point. Dispatches sub-protocol commands (SaXML export, window open, webview, file open, performScript). Install with `agfm_bridge.py bridge-upgrade`. |
+| **ModifySchema**         | Executes a DDL statement passed as a script parameter; see the schema section below                                                     |
+| **Agentic-fm Debug**     | Appends runtime state JSON to `$$DEBUG`; the agent reads it via `GET /api/ui/dataviewer`                                                |
+| **AGFMScriptBridge**     | OData entry point — accepts `{ script, parameter }` JSON and runs any named script on a server-hosted file                              |
+| **AGFMGoToLayout**       | Navigates FM to a named layout                                                                                                          |
+| **AGFMEvaluation**       | Evaluates a FileMaker calculation expression server-side and returns the result; optionally navigates to a layout first                  |
 | **Agentic-fm Menu**      | Handles custom menu calls and passes them through to the agentic-fm web viewer via JavaScript                                            |
-| **Agentic-fm Paste**     | Opens a script tab in Script Workspace via MBS `ScriptWorkspace.OpenScript`; used by Tier 2 deployment                                   |
 
 ## OData script execution
 
-`agent/config/automation.json` supports multiple FM solutions. Each solution is listed under the `solutions` key, where the key is the **exact FM file name** — matching the `solution` field in `agent/CONTEXT.json`. This allows the agent to work across multi-file solutions (UI file, data file, etc.) or completely separate solutions, each with their own OData credentials and paths.
+OData is optional and complementary to the plugin — it reaches a **server-hosted** copy of the file, which is useful for headless or CI-style automation where no FileMaker Pro client is running. Local development still goes through the plugin.
 
-**To resolve the active solution config**: read `CONTEXT.json["solution"]`, then look up `automation.json["solutions"][solution_name]`. If a match exists and it has an `odata` block, OData is available for that solution.
+`agent/config/automation.json` supports multiple FM solutions. Each solution is listed under the `solutions` key, where the key is the **exact FM file name** — matching the `solution` field returned by `GET /api/context`. This allows the agent to work across multi-file solutions (UI file, data file, etc.) or completely separate solutions, each with their own OData credentials.
+
+**To resolve the active solution config**: read `solution` from `GET /api/context`, then look up `automation.json["solutions"][solution_name]`. If a match exists and it has an `odata` block, OData is available for that solution.
 
 **IMPORTANT**: Always confirm with the developer before triggering a script via OData. State what script you are about to run and why, and wait for approval before proceeding.
 
@@ -108,19 +97,11 @@ Response shape: `{ "scriptResult": { "code": 0, "resultParameter": "<script resu
 
 ### Key agent-triggered scripts
 
-**Run Explode XML** (refresh `xml_parsed/` after FM schema or script changes):
+**Switch layout context**: call `AGFMGoToLayout` with parameter `{ "layout": "<layout name>" }`.
 
-- Script: `Explode XML`
-- Parameter: `{ "repo_path": "...", "export_path": "...", "companion_url": "..." }`
-- Values come from `automation.json["solutions"][solution]["explode_xml"]`
-- `companion_url` here is the URL FMS uses to reach the companion server — typically `http://host.docker.internal:8765` when FMS runs in Docker
+**Evaluate an expression server-side**: call `AGFMEvaluation` with the calculation as the parameter.
 
-**Switch layout context and refresh CONTEXT.json**:
-
-1. Call `AGFMGoToLayout` with parameter `{ "layout": "<layout name>" }` — navigates FM to the target layout
-2. Call `Push Context` with parameter `{ "task": "<task description>", "repo_path": "...", "companion_url": "..." }` — writes a fresh `agent/CONTEXT.json` scoped to that layout
-
-**Run any solution script**: call `AGFMScriptBridge` directly with `{ "script": "<ScriptName>", "parameter": "<optional>" }` to trigger any named script in the solution.
+**Run any solution script**: call `AGFMScriptBridge` directly with `{ "script": "<ScriptName>", "parameter": "<optional>" }`.
 
 ### automation.json solution config structure
 
@@ -134,29 +115,23 @@ Response shape: `{ "scriptResult": { "code": 0, "resultParameter": "<script resu
         "username": "<odata_account>",
         "password": "<password>",
         "script_bridge": "AGFMScriptBridge"
-      },
-      "explode_xml": {
-        "repo_path": "<absolute POSIX path to agentic-fm root on companion host>",
-        "export_path": "<absolute POSIX path FMS writes the XML export to — must include filename, e.g. .../Documents/My Solution.xml>",
-        "companion_url": "http://host.docker.internal:8765"
       }
     }
   }
 }
 ```
 
-Add one entry per FM file. The key must match `Get(FileName)` exactly — this is what appears in `CONTEXT.json["solution"]`. `automation.json` is gitignored; credentials are safe to store there.
+Add one entry per FM file. The key must match `Get(FileName)` exactly — this is the `solution` value returned by `GET /api/context`. `automation.json` is gitignored; credentials are safe to store there.
 
 ---
 
 ## Schema modification via plugin (ModifySchema script)
 
-> **Preferred method for all schema changes** — always use `deploy.py --ddl` when the ModifySchema script is available. Only fall back to OData REST calls or manual Manage Database if the script is not installed.
+> **Preferred method for all schema changes** — always use `agfm_bridge.py ddl` when the ModifySchema script is available. Only fall back to manual Manage Database if the script is not installed.
 
 ```bash
-python3 agent/scripts/deploy.py --ddl "CREATE TABLE MyTable (MyField VARCHAR(100))"
-python3 agent/scripts/deploy.py --ddl "ALTER TABLE MyTable ADD COLUMN AnotherField NUMERIC"
-python3 agent/scripts/deploy.py --ddl "DROP TABLE MyTable"
+python3 agent/scripts/agfm_bridge.py ddl "CREATE TABLE MyTable (MyField VARCHAR(100))"
+python3 agent/scripts/agfm_bridge.py ddl "ALTER TABLE MyTable ADD COLUMN AnotherField NUMERIC"
 ```
 
 > **Required** — this script must be installed in every solution where schema modification is needed.
@@ -208,7 +183,7 @@ curl -s -H "Authorization: Bearer $TOKEN" $PLUGIN_URL/api/eval/<eval-id>
 
 ### Error handling
 
-Timeout and other errors from `deploy.py --ddl` are most likely caused by a privilege issue or the ModifySchema script not being available in the target file — not a genuine timeout. When a DDL call returns an error:
+Timeout and other errors from `agfm_bridge.py ddl` are most likely caused by a privilege issue or the ModifySchema script not being available in the target file — not a genuine timeout. When a DDL call returns an error:
 
 1. **Check whether it worked first** — query `FileMaker_Tables` or `FileMaker_Fields` via `POST /api/query` to see if the change was applied.
 2. If the change is present, treat it as a success and continue.

@@ -304,8 +304,6 @@ function findScriptFile(root, solution, scriptName) {
   const dirs = [
     solution ? path.join(root, 'agent', 'sandbox', solution) : null,
     path.join(root, 'agent', 'sandbox'),
-    solution ? path.join(root, 'agent', 'xml_parsed', 'scripts_sanitized', solution) : null,
-    path.join(root, 'agent', 'xml_parsed', 'scripts_sanitized'),
   ].filter(Boolean);
 
   for (const dir of dirs) {

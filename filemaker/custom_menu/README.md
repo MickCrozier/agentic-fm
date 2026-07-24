@@ -22,7 +22,7 @@ The web viewer object on the target layout **must be named `agentic-fm`** for th
 
 - The agentic-fm web viewer is embedded on a layout with the object name `agentic-fm`
 - The main agentic-fm scripts are already installed (see `filemaker/README.md`)
-- The Explode XML script has been run at least once so `agent/xml_parsed/` is populated
+- The agentic-fm plugin is running and reachable (`python3 agent/scripts/agfm_bridge.py status`)
 
 ---
 
@@ -35,15 +35,16 @@ Because FileMaker custom menus use solution-specific UUIDs and script IDs, the X
 Load the script onto the clipboard and paste it into your Script Workspace:
 
 ```bash
-python3 agent/scripts/clipboard.py write filemaker/custom_menu/Agentic-fm Menu-script.xml
+python3 agent/scripts/agfm_bridge.py clipboard-write "filemaker/custom_menu/Agentic-fm Menu-script.xml"
 ```
 
 Switch to FileMaker, open **Scripts > Script Workspace**, click in the script list, and press **⌘V**. The **Agentic-fm Menu** script will appear.
 
-**Note the script ID FileMaker assigns to it** — you will need this in step 4. You can find it by running the Explode XML script (which populates `agent/xml_parsed/`) and then checking your solution's scripts index:
+The install script looks up the ID FileMaker assigns automatically via the plugin — you don't need to note it. To check it yourself:
 
 ```bash
-grep "Agentic-fm Menu" "agent/context/agentic-fm/scripts.index"
+python3 agent/scripts/agfm_bridge.py context | python3 -c "
+import sys, json; print(json.load(sys.stdin)['scripts'].get('Agentic-fm Menu'))"
 ```
 
 ### 2. Create placeholder custom menus in FileMaker
@@ -77,34 +78,30 @@ With the placeholder menus and menu set still selected in FileMaker:
 1. In **Manage > Custom Menus**, select **all five menus**, copy them (⌘C), then run:
 
 ```bash
-python3 agent/scripts/clipboard.py read agent/sandbox/custom_menus.xml
+python3 agent/scripts/agfm_bridge.py clipboard-read > agent/sandbox/custom_menus.xml
 ```
 
 2. Select the **agentic-fm** menu set, copy it (⌘C), then run:
 
 ```bash
-python3 agent/scripts/clipboard.py read agent/sandbox/custom_menu_set.xml
+python3 agent/scripts/agfm_bridge.py clipboard-read > agent/sandbox/custom_menu_set.xml
 ```
 
-These snapshot files capture the solution-specific catalog UUIDs that FileMaker requires for paste operations.
+These snapshots capture every solution-specific UUID and ID that FileMaker requires for paste operations — the catalog UUIDs, each menu's own UUID and ID, and the menu set's UUID and ID.
 
-### 5. Run Explode XML
-
-Run the **Explode XML** script (or `fmparse.sh` from the terminal) to export the updated solution XML. This writes the new menus and menu set — including their real UUIDs — to `agent/xml_parsed/custom_menus/` and `agent/xml_parsed/custom_menu_sets/`.
-
-### 6. Run the install script
+### 5. Run the install script
 
 ```bash
 python3 agent/scripts/install_menus.py
 ```
 
-The script auto-reads UUIDs from `xml_parsed/`, looks up the script ID from `context/{solution}/scripts.index`, builds the populated XML, writes it to `agent/sandbox/custom_menus.xml`, and loads it onto the clipboard.
+The script reads the UUIDs and IDs from the snapshots, looks up the bridge script ID via the plugin, builds the populated XML, writes it back to `agent/sandbox/custom_menus.xml`, and loads it onto the clipboard.
 
-### 7. Paste the custom menus
+### 6. Paste the custom menus
 
 In FileMaker, open **File > Manage > Custom Menus**. Select the first menu in the list (`agentic-fm — File`), then press **⌘V**. Repeat for each of the five menus — FileMaker matches by UUID and populates each menu with its items.
 
-### 8. Load and paste the menu set
+### 7. Load and paste the menu set
 
 ```bash
 python3 agent/scripts/install_menus.py --set
@@ -112,7 +109,7 @@ python3 agent/scripts/install_menus.py --set
 
 In FileMaker, select the **agentic-fm** menu set and press **⌘V**.
 
-### 9. Assign the menu set to the layout
+### 8. Assign the menu set to the layout
 
 Switch to the layout that hosts the web viewer. Enter **Layout mode**, open **Layouts > Layout Setup**, and under **Menu Set** choose **agentic-fm**. Save the layout.
 
@@ -120,11 +117,11 @@ Switch to the layout that hosts the web viewer. Enter **Layout mode**, open **La
 
 ## Troubleshooting
 
-**Paste does nothing** — The UUID in the XML does not match the solution. Make sure step 4 (Explode XML) ran after you created the menus in step 2, and that the agent read the UUIDs from `agent/xml_parsed/custom_menus/` rather than from this folder.
+**Paste does nothing** — The UUID in the XML does not match the solution. Make sure you captured the snapshots (step 4) *after* creating the menus in step 2, and that the UUIDs came from those snapshots rather than from the template files in this folder.
 
 **Menu actions have no effect** — Confirm the web viewer object on the layout is named exactly `agentic-fm`. Check that the bridge script is installed and its name is **Agentic-fm Menu**.
 
-**Wrong script called** — The `<Script id="...">` in `custom_menus.xml` still references the source solution's ID (271). Repeat step 5 with the correct ID for your solution.
+**Wrong script called** — The `<Script id="...">` in `custom_menus.xml` still references the source solution's ID (271). Re-run `install_menus.py`; it resolves the ID from the plugin's live context each time.
 
 ---
 

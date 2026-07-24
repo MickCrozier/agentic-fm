@@ -89,9 +89,9 @@ After the outline, explicitly call out:
 
 ### Objects needed
 List every FM object the script will reference, with where to find the ID:
-- Fields: table::field (from plugin `/api/context`, or CONTEXT.json/fields.index as fallback)
-- Layouts: name (from plugin, or layouts.index)
-- Scripts: name (from plugin, or scripts.index)
+- Fields: table::field (from plugin `/api/context`)
+- Layouts: name (from plugin `/api/context`)
+- Scripts: name (from plugin `/api/context`, or `discovery-query scripts` for the full roster)
 - Value lists, custom functions if applicable
 
 ### Missing context

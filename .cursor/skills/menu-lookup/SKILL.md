@@ -1,62 +1,56 @@
 ---
 name: menu-lookup
-description: Locate a specific FileMaker custom menu or menu set in `agent/xml_parsed/custom_menus/` or `agent/xml_parsed/custom_menu_sets/`. Extracts the real UUIDs required before creating or modifying any menu XML. Use when the user asks to create, modify, review, or look up a custom menu or menu set by name or ID.
+description: Capture a FileMaker custom menu or menu set from the live solution via the plugin clipboard, and extract the real UUIDs required before creating or modifying any menu XML. Use when the user asks to create, modify, review, or look up a custom menu or menu set by name or ID.
 ---
 
 # Menu Lookup
 
-Locate a FileMaker custom menu or menu set in the parsed XML export and extract the critical UUIDs required before any menu XML can be created or modified. Without the correct UUIDs, FileMaker silently ignores paste operations.
+Capture a FileMaker custom menu or menu set from the live solution and extract the critical UUIDs required before any menu XML can be created or modified. **Without the correct UUIDs, FileMaker silently ignores paste operations.**
 
-Resolves using either:
-- A **menu name** (exact/contains/fuzzy match), or
-- A **menu ID** (numeric, from the filename pattern `- ID {N}.xml` or menu set's `<CustomMenuReference id="N">`)
-
-**Performance target**: 3 tool calls for unambiguous lookups (discover + read + confirm), 4 for ambiguous.
+Custom menus are not exposed by any plugin API endpoint — there is no `/api/menus` and no discovery query for them. The only reliable source of real UUIDs is the FileMaker clipboard. This skill is therefore developer-assisted by design: you tell the developer exactly what to copy, then read it back through the plugin.
 
 ## Lookup workflow
 
-### Step 1 — Discover files (PARALLEL)
-
-Run these in **parallel** (single message, multiple tool calls):
-
-**Tool call A — List all menu files:**
+### Step 1 — Check the sandbox first
 
 ```bash
-ls "agent/xml_parsed/custom_menus/"*/  "agent/xml_parsed/custom_menu_sets/"*/ 2>/dev/null
+ls agent/sandbox/{Solution}/
 ```
 
-This returns every menu and menu set file across all solutions in one call. The output groups by directory — solution names appear as path prefixes. If no directories exist or the output is empty, report that menus haven't been exported and stop.
+If a menu XML for this menu was captured earlier in the session, reuse it rather than asking the developer to copy again. Confirm with the developer that it is still current before relying on it.
 
-**Tool call B — List sandbox:**
+### Step 2 — Ask the developer to copy the menu
+
+Be specific about *which* object you need — a **CustomMenu** (an individual menu) and a **CustomMenuSet** (the per-layout container) are different objects with different UUIDs.
+
+For an individual menu:
+
+> I need the real UUIDs for the **{Menu Name}** menu — FileMaker ignores pastes with invented ones.
+>
+> 1. **File > Manage > Custom Menus**
+> 2. Select **{Menu Name}** in the list
+> 3. **⌘C**
+>
+> Let me know when that's done and I'll read it back.
+
+For a menu set, direct them to the **Custom Menu Sets** tab of the same dialog instead.
+
+### Step 3 — Read it back
 
 ```bash
-ls agent/sandbox/
+python3 agent/scripts/agfm_bridge.py clipboard-read > "agent/sandbox/{Solution}/{MenuName}-original.xml"
 ```
 
-Check for any in-progress menu XML.
+Confirm the clipboard actually holds a menu — the XML root will be `<FMObjectTransfer>` containing either `<CustomMenuCatalog>` or `<CustomMenuSetCatalog>`. If you get script steps or layout objects instead, the developer copied the wrong thing; say so and ask again.
 
-### Step 2 — Match and read
+If the clipboard read fails to decode, re-digest it and retry:
 
-From the Step 1A file listing:
+```bash
+curl -s -X POST -H "Authorization: Bearer $AGFM_PLUGIN_TOKEN" \
+  "http://localhost:${AGFM_PLUGIN_PORT:-8766}/api/clipboard/digest"
+```
 
-**Multi-solution handling**: If files appear under multiple solution subfolders, check whether the user mentioned a solution name or whether `CONTEXT.json` identifies one. If still ambiguous, use `AskUserQuestion` to disambiguate before proceeding.
-
-**Determine menu type**: Infer from the user's request whether the target is a **CustomMenu** (individual menu, in `custom_menus/`) or **CustomMenuSet** (container assigned to a layout, in `custom_menu_sets/`). If unclear, search both — filenames are distinct between the two directories.
-
-**Match against the file listing** using this priority (stop at first high-confidence match):
-
-1. **ID match** (highest confidence) — filename contains `- ID {N}.xml`
-2. **Exact name match** (case-insensitive) — filename prefix matches the menu name
-3. **Contains match** (all tokens from the hint present in a candidate filename)
-4. **Fuzzy match** (most tokens match) — pick the best, include up to 3-5 alternates
-
-If the match is ambiguous (multiple plausible candidates, no clear best), use `AskUserQuestion` to present candidates and ask which menu to work with.
-
-Once matched, **derive the full path** from the directory listing. Menu filenames follow the pattern `{MenuName} - ID {N}.xml`.
-
-**Read the matched file** to extract UUIDs. If a sandbox match also exists (from Step 1B, matched by name), note it in the report.
-
-### Step 3 — Menu match report + confirmation
+### Step 4 — Menu match report + confirmation
 
 Present the report and confirm in one response:
 
@@ -64,26 +58,21 @@ Present the report and confirm in one response:
 - Name: `{menu name}`
 - ID: `{id}`
 - Type: CustomMenu / CustomMenuSet
-- Confidence: High / Medium / Low (reason)
 
-**Paths found**
-- Source XML: `{path in xml_parsed/custom_menus/ or custom_menu_sets/, or "not found"}`
-- In-progress sandbox: `{path in agent/sandbox/, or "not found"}`
+**Paths**
+- Captured XML: `agent/sandbox/{Solution}/{MenuName}-original.xml`
+- In-progress sandbox copy: `{path, or "none"}`
 
 **Extracted UUIDs**
 - Catalog UUID: `{UUID}`
 - Menu/Set UUID: `{UUID}`
 - Menu item count: `{N from MenuItemList membercount}`
 
-**Alternates (if any)**
-- Up to 3-5 other candidates (name + ID + path)
+Then confirm: "Is this the correct menu? — {Menu Name} (ID: {id})"
 
-Then use `AskUserQuestion`: "Is this the correct menu? -- {Menu Name} (ID: {id}) in {solution}"
-- Options: `yes` -- "Yes, proceed" / `no` -- "No, let me clarify"
+## Critical UUIDs — why they matter
 
-## Critical UUIDs -- why they matter
-
-FileMaker uses UUIDs to match pasted XML against existing objects in the solution. If either UUID is wrong or made up, the paste silently does nothing.
+FileMaker uses UUIDs to match pasted XML against existing objects in the solution. If either UUID is wrong or made up, the paste silently does nothing — no error, no change.
 
 | UUID | Location in XML | Purpose |
 |---|---|---|
@@ -92,7 +81,7 @@ FileMaker uses UUIDs to match pasted XML against existing objects in the solutio
 | **CustomMenuSetCatalog UUID** | `<CustomMenuSetCatalog> > <UUID>` | Identifies the solution's menu set catalog |
 | **CustomMenuSet UUID** | `<CustomMenuSet> > <UUID>` | Identifies the specific menu set to update |
 
-Always read these directly from `xml_parsed/` -- never invent them.
+Always read these from a clipboard capture of the live solution — never invent them, and never carry them over from a different file.
 
 ## Handoff: creating or modifying menu XML
 
@@ -100,95 +89,58 @@ Once confirmed:
 
 ### Modifying an existing menu
 
-1. Use the source XML from `xml_parsed/custom_menus/` as the base -- copy to `agent/sandbox/` if not already there.
+1. Use the captured XML in `agent/sandbox/{Solution}/` as the base.
 2. Apply the requested changes following the structure in `agent/docs/CUSTOM_MENUS.md`.
-3. Keep both the `CustomMenuCatalog UUID` and `CustomMenu UUID` from the original -- do not regenerate them.
-4. Write to clipboard: `python3 agent/scripts/clipboard.py write agent/sandbox/<menu>.xml`
-5. In FileMaker: open Manage > Custom Menus, select the target menu, paste.
+3. Keep both the `CustomMenuCatalog UUID` and `CustomMenu UUID` from the original — do not regenerate them.
+4. Write to clipboard: `python3 agent/scripts/agfm_bridge.py clipboard-write agent/sandbox/{Solution}/<menu>.xml`
+5. Tell the developer: open **Manage > Custom Menus**, select the target menu, paste.
 
 ### Creating a new menu item block for an existing menu
 
 1. Confirm the menu's real UUIDs from the match report above.
 2. Build new `<CustomMenuItem>` elements using the patterns in `agent/docs/CUSTOM_MENUS.md`.
-3. `CustomMenuItem UUID` and `hash` values can be placeholder -- FileMaker reassigns on paste.
+3. `CustomMenuItem UUID` and `hash` values can be placeholders — FileMaker reassigns them on paste.
 4. Increment `MenuItemList membercount` to match the new total.
 5. Write and paste as above.
 
-### Creating a brand-new menu (no existing XML)
+### Creating a brand-new menu
 
-The `xml_parsed/` export for this menu won't exist yet. The correct workflow is:
+A menu that doesn't exist yet has no UUIDs to capture. Create the shell in FileMaker first:
 
-1. In FileMaker, create the empty menu in Manage > Custom Menus.
-2. Copy it from FileMaker and save: `python3 agent/scripts/clipboard.py read agent/sandbox/<menu>-original.xml`
-3. Use this file as the base -- it contains the real UUIDs.
-4. Build the menu XML from there following `agent/docs/CUSTOM_MENUS.md`.
+1. In FileMaker, create the empty menu in **Manage > Custom Menus** and name it.
+2. Select it and **⌘C**.
+3. Read it back: `python3 agent/scripts/agfm_bridge.py clipboard-read > agent/sandbox/{Solution}/<menu>-original.xml`
+4. Use that file as the base — it now contains real UUIDs.
+5. Build the menu XML from there following `agent/docs/CUSTOM_MENUS.md`.
 
 ## Key reference
 
-Full XML patterns, shortcut modifier values, `<Override>` rules, `<Base>` element behavior, and the `ut16` clipboard format are documented in:
-
-`agent/docs/CUSTOM_MENUS.md`
+Full XML patterns, shortcut modifier values, `<Override>` rules, `<Base>` element behavior, and the `ut16` clipboard format are documented in `agent/docs/CUSTOM_MENUS.md`.
 
 ## Examples
 
-### Example 1 — Single solution, unambiguous match (3 tool calls)
+### Example 1 — Modifying an existing menu
 
 User: "Add a Sort Lines item to the Format menu"
 
-**Step 1 (parallel):**
-- List: `ls "agent/xml_parsed/custom_menus/"*/ "agent/xml_parsed/custom_menu_sets/"*/ 2>/dev/null` -- shows files under `Invoice Solution/` only
-- Sandbox: `ls agent/sandbox/` -- no existing menu XML
+1. `ls agent/sandbox/{Solution}/` — no existing Format menu capture
+2. Ask the developer to select **Format** in Manage > Custom Menus and press ⌘C
+3. `agfm_bridge.py clipboard-read > agent/sandbox/{Solution}/Format-original.xml`
+4. Report the extracted UUIDs and confirm the menu
+5. On confirmation: add the new `<CustomMenuItem>` block, bump `membercount`, write to clipboard, tell the developer to paste
 
-**Step 2:**
-- Match: "agentic-fm -- Format - ID 40.xml" matches "Format" (contains match, high confidence)
-- Read: `agent/xml_parsed/custom_menus/Invoice Solution/agentic-fm — Format - ID 40.xml` -- extract UUIDs
+### Example 2 — Menu already captured this session
 
-**Step 3:** Report + confirm -- "Is this the correct menu? -- agentic-fm -- Format (ID: 40) in Invoice Solution"
+User: "Now add a Sort Descending item too"
 
-On confirmation: add the new `<CustomMenuItem>` block, write to clipboard.
+1. `ls agent/sandbox/{Solution}/` — `Format-original.xml` is already there
+2. Confirm with the developer that the menu hasn't changed in FileMaker since
+3. Reuse the existing UUIDs — no second copy needed
 
-**Tool calls: 3** (2 parallel discover + 1 read + confirm in same response)
-
-### Example 2 — Multiple solutions present (4 tool calls)
-
-User: "Look up the Format menu"
-
-**Step 1 (parallel):**
-- List: shows files under both `Invoice Solution/` and `agentic-fm/`
-- Sandbox: no match
-
-**Step 1.5:** `AskUserQuestion`: "Multiple solution files found: Invoice Solution, agentic-fm -- which are you working with?"
-
-**Step 2:** User selects -- read the matched file, extract UUIDs.
-
-**Step 3:** Report + confirm.
-
-**Tool calls: 4** (2 parallel + 1 ask + 1 read)
-
-### Example 3 — Ambiguous menu name (4 tool calls)
-
-User: "Open the Format menu"
-
-**Step 1 (parallel):**
-- List: shows "agentic-fm -- Format - ID 40.xml", "Format 2 - ID 34.xml", "Format 3 - ID 37.xml", etc. in one solution
-- Sandbox: no match
-
-**Step 1.5:** `AskUserQuestion`: "Multiple Format menus found -- which one? agentic-fm -- Format (ID 40) / Format 2 (ID 34) / Format 3 (ID 37)"
-
-**Step 2:** User selects -- read file, extract UUIDs.
-
-**Step 3:** Report + confirm.
-
-**Tool calls: 4** (2 parallel + 1 ask + 1 read)
-
-### Example 4 — New menu with no existing XML (2 tool calls)
+### Example 3 — Brand-new menu
 
 User: "Create a View menu"
 
-**Step 1 (parallel):**
-- List: no View menu found in any solution subfolder
-- Sandbox: no match
-
-**Step 2:** Report that the menu hasn't been exported yet. Instruct: create the empty menu in FileMaker, copy it, then run `clipboard.py read` to capture the real UUIDs before generation begins.
-
-**Tool calls: 2** (2 parallel discover -- done)
+1. `ls agent/sandbox/{Solution}/` — nothing found
+2. Explain that a menu must exist in FileMaker before it can be populated: ask the developer to create an empty **View** menu, select it, and ⌘C
+3. Read it back, then build the item blocks against its real UUIDs

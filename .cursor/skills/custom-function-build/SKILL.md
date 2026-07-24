@@ -5,7 +5,7 @@ description: Create a new FileMaker custom function and deploy it to the clipboa
 
 # Custom Function Build
 
-Generate a FileMaker custom function as `fmxmlsnippet type="FMObjectList"` with `<CustomFunction>` as the root element. Deploy via `clipboard.py` (auto-detects `XMFN`).
+Generate a FileMaker custom function as `fmxmlsnippet type="FMObjectList"` with `<CustomFunction>` as the root element. Deploy via `agfm_bridge.py` (auto-detects `XMFN`).
 
 ---
 
@@ -14,7 +14,7 @@ Generate a FileMaker custom function as `fmxmlsnippet type="FMObjectList"` with 
 Before writing, check whether the function already exists:
 
 ```bash
-grep -r "name=\"FunctionName\"" agent/xml_parsed/custom_function_calcs/*/
+python3 agent/scripts/agfm_bridge.py discovery-query text_search --text "FunctionName"
 ```
 
 Also check the plugin context for custom functions — `GET /api/context` may include a `custom_functions` section. Fall back to `agent/CONTEXT.json` if plugin is unavailable. If the function exists, read it and modify rather than creating from scratch.
@@ -95,10 +95,10 @@ If ( n <= 26 ;
 Write the XML to `agent/sandbox/{FunctionName}.xml`, then copy to clipboard:
 
 ```bash
-python3 agent/scripts/clipboard.py write agent/sandbox/FunctionName.xml
+python3 agent/scripts/agfm_bridge.py clipboard-write agent/sandbox/FunctionName.xml
 ```
 
-`clipboard.py` auto-detects `XMFN` from the `<CustomFunction>` element — no `--class` flag needed.
+`agfm_bridge.py` auto-detects `XMFN` from the `<CustomFunction>` element — no `--class` flag needed.
 
 ### Paste instructions
 
@@ -118,4 +118,4 @@ python3 agent/scripts/clipboard.py write agent/sandbox/FunctionName.xml
 - `functionArity` must exactly match the number of parameters in the `parameters` attribute
 - Private functions (`visible="False"`) are not callable from layout calculations or scripts — only from other custom functions
 - Custom function names are global across the file — check for conflicts before creating
-- Never modify files in `agent/xml_parsed/` — copy to `agent/sandbox/` first
+- Always work in `agent/sandbox/{Solution}/` — never edit a script in place in FileMaker

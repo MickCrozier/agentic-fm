@@ -2,14 +2,14 @@
 """
 fm_xml_to_snippet.py
 
-Translate a FileMaker "Save As XML" script export (xml_parsed/scripts/ format)
+Translate a FileMaker "Save As XML" (SaXML) script export
 into the fmxmlsnippet clipboard format used by FileMaker for script pasting.
 
 Usage:
     python3 agent/scripts/fm_xml_to_snippet.py <input.xml> [output.xml]
 
 Arguments:
-    input.xml   Path to the Save-As-XML script file (from xml_parsed/scripts/)
+    input.xml   Path to the Save-As-XML script file (from a SaXML export)
     output.xml  Optional output path. Defaults to stdout.
 
 Notes:
@@ -66,7 +66,7 @@ def cdata(text: str) -> str:
 
 def get_calc_text(element) -> str:
     """
-    Extract calculation text from the xml_parsed nested Calculation structure:
+    Extract calculation text from the SaXML nested Calculation structure:
 
         <outer-element>
             <Calculation datatype="N" position="N">
@@ -366,7 +366,7 @@ def tx_show_custom_dialog(step) -> str:
     ]
     for label, commit in buttons:
         if label:
-            # Button labels are stored as raw text in xml_parsed but are
+            # Button labels are stored as raw text in SaXML but are
             # FileMaker calculation expressions in fmxmlsnippet, so wrap in quotes.
             parts += [
                 f'{L2}<Button CommitState="{commit}">',
@@ -560,7 +560,7 @@ def tx_set_web_viewer(step) -> str:
     action      = 'GoToURL'
     url_calc    = ''
 
-    # Map xml_parsed List value → fmxmlsnippet Action string
+    # Map SaXML List value → fmxmlsnippet Action string
     _SWV_ACTION = {'1': 'Reset', '2': 'Reload', '3': 'GoBack', '4': 'GoForward', '5': 'GoToURL'}
 
     for p in all_params(step):
@@ -827,7 +827,7 @@ def tx_enter_find_mode(step) -> str:
 
 def tx_perform_find(step) -> str:
     enable, sid = step_attrs(step)
-    # Restore is "True" only when stored find requests exist in xml_parsed.
+    # Restore is "True" only when stored find requests exist in the SaXML.
     # An empty step (no ParameterValues) means no stored requests → "False".
     restore = 'False'
     pv = step.find('ParameterValues')

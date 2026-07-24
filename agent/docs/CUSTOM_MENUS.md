@@ -8,14 +8,14 @@ This document covers the custom menu creation and modification workflow, coverin
 
 FileMaker menu objects use a completely different clipboard format from all other FM objects. Scripts, layouts, fields, etc. are stored as binary FM descriptor classes (`XMSS`, `XML2`, etc.). **Menu objects are stored as UTF-16 Unicode text** (`«class ut16»`).
 
-This means `clipboard.py` handles menus via a separate code path:
+This means the clipboard layer handles menus via a separate code path:
 
 - **Write**: strips the XML declaration, re-encodes the content as UTF-16 with BOM, pushes as `«data ut16XXXX»`
 - **Read**: `osascript` returns the raw XML text for `ut16` (not a binary descriptor), so stdout is decoded directly as UTF-8
 
-Auto-detection in `clipboard.py` works by checking for `<CustomMenu` or `<CustomMenuSet` elements in the XML — these are checked before `<Step>` to avoid false-positive `XMSS` detection (menu XML contains `<Step>` elements inside action blocks).
+Auto-detection works by checking for `<CustomMenu` or `<CustomMenuSet` elements in the XML — these are checked before `<Step>` to avoid false-positive `XMSS` detection (menu XML contains `<Step>` elements inside action blocks).
 
-The source file can be UTF-8 or UTF-16; `clipboard.py` detects the BOM and handles both.
+The source file can be UTF-8 or UTF-16; the BOM is detected and both are handled.
 
 ---
 
@@ -24,7 +24,7 @@ The source file can be UTF-8 or UTF-16; `clipboard.py` detects the BOM and handl
 Menu objects are wrapped in `<FMObjectTransfer>` (not `<fmxmlsnippet>`). There are two distinct object types:
 
 ### CustomMenuSet
-The container that groups menus and is assigned per-layout. Stored in `xml_parsed/custom_menu_sets/`.
+The container that groups menus and is assigned per-layout.
 
 ```xml
 <FMObjectTransfer ...>
@@ -46,7 +46,7 @@ The container that groups menus and is assigned per-layout. Stored in `xml_parse
 ```
 
 ### CustomMenu
-An individual menu with its items. Stored in `xml_parsed/custom_menus/`.
+An individual menu with its items.
 
 ```xml
 <FMObjectTransfer ...>
@@ -136,7 +136,7 @@ An individual menu with its items. Stored in `xml_parsed/custom_menus/`.
 
 FileMaker uses UUIDs to identify objects. When pasting a `CustomMenu`, FileMaker matches it to the existing menu in the solution via the `CustomMenu > UUID`. If the UUID is wrong or made up, the paste silently does nothing.
 
-**Always obtain real UUIDs from the existing XML** in `xml_parsed/custom_menus/` or by reading from the clipboard after copying in FileMaker.
+**Always obtain real UUIDs from the live solution** — ask the developer to select the menu in Manage > Custom Menus and copy it (⌘C), then read it with `agfm_bridge.py clipboard-read`. Never invent a UUID.
 
 | Field | Source |
 |---|---|
@@ -221,16 +221,16 @@ Standard FM menu values: File=2, Edit=3, View=4, Insert=5, Format=6, Records=7, 
 
 ### Modifying an existing menu
 
-1. Locate the menu in `xml_parsed/custom_menus/` by name or ID
-2. Read it to get the real UUIDs
-3. Copy to `agent/sandbox/` and modify
-4. Write to clipboard: `python agent/scripts/clipboard.py write agent/sandbox/<menu>.xml`
-5. In FileMaker, open Manage > Custom Menus, select the target menu, paste
+1. Ask the developer to open Manage > Custom Menus, select the target menu, and copy it (⌘C)
+2. Read it back to get the real UUIDs: `python3 agent/scripts/agfm_bridge.py clipboard-read`
+3. Save to `agent/sandbox/{Solution}/` and modify
+4. Write to clipboard: `python3 agent/scripts/agfm_bridge.py clipboard-write agent/sandbox/{Solution}/<menu>.xml`
+5. In FileMaker, with the target menu still selected in Manage > Custom Menus, paste
 
 ### Creating a new menu from scratch
 
 1. In FileMaker, create an empty custom menu (gives it a real UUID in the solution)
-2. Copy it from FileMaker, save via: `python agent/scripts/clipboard.py read agent/sandbox/<menu>-original.xml`
+2. Copy it from FileMaker, save via: `python3 agent/scripts/agfm_bridge.py clipboard-read > agent/sandbox/{Solution}/<menu>-original.xml`
 3. Use the real `CustomMenu > UUID` and `CustomMenuCatalog > UUID` from that file as the basis for the generated XML
 4. Build the full menu XML following the patterns above
 5. Write and paste as above
@@ -238,7 +238,7 @@ Standard FM menu values: File=2, Edit=3, View=4, Insert=5, Format=6, Records=7, 
 ### Reading a menu from the clipboard
 
 ```bash
-python agent/scripts/clipboard.py read agent/sandbox/output.xml
+python3 agent/scripts/agfm_bridge.py clipboard-read > agent/sandbox/{Solution}/output.xml
 ```
 
 Note: `osascript` returns `ut16` clipboard content as plain UTF-8 text (not a binary descriptor), so the read path decodes stdout directly without hex parsing.

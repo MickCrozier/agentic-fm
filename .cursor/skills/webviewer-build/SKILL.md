@@ -9,14 +9,13 @@ Generate a complete web application that runs inside a FileMaker Web Viewer obje
 
 ---
 
-## Step 1: Determine the automation tier
+## Step 1: Confirm the plugin is reachable
 
-Read `agent/config/automation.json` and check `project_tier` (preferred) or `default_tier`:
+```bash
+python3 agent/scripts/agfm_bridge.py status
+```
 
-- **Tier 1** — FM scripts go to clipboard with paste instructions
-- **Tier 2/3** — agent can deploy FM scripts via companion server automation
-
-Also read `companion_url` from `automation.json` for preview pushes.
+The plugin is the only path to FileMaker. If it is unreachable, say so and stop — do not fall back to stale data or manual workarounds.
 
 ---
 
@@ -30,7 +29,7 @@ Also read `companion_url` from `automation.json` for preview pushes.
    - `value_lists` — for dropdowns, filters, and validation
    - `custom_functions` — for any calculations the FM scripts need
 
-2. If CONTEXT.json is absent or scoped to the wrong layout, ask the developer to run **Push Context** on the target layout.
+2. If CONTEXT.json is absent or scoped to the wrong layout, ask the developer to navigate to the target layout, then re-fetch with `agfm_bridge.py context`.
 
 3. Read the theme data from `agent/context/{solution}/`:
    ```bash
@@ -234,10 +233,10 @@ Push the HTML to the webviewer for the developer to preview:
 ```bash
 curl -s -X POST -H "Content-Type: application/json" \
   -d '{"type": "layout-preview", "content": "<html content>"}' \
-  {companion_url}/webviewer/push
+  "http://localhost:${AGFM_PLUGIN_PORT:-8766}/api/preview"
 ```
 
-If the companion server is not reachable, write the HTML to `agent/sandbox/{app-name}.html` and instruct the developer to open it in a browser.
+If the plugin is unreachable, write the HTML to `agent/sandbox/{Solution}/{app-name}.html` and instruct the developer to open it in a browser.
 
 > The web viewer app has been pushed to the webviewer for preview. Note that FM bridge calls (`FileMaker.PerformScript`) will log to the browser console since there is no FM context — the UI and layout are what to review here.
 
@@ -257,12 +256,12 @@ Write all output files to `agent/sandbox/`:
 
 ### Deploy FM scripts
 
-Deploy the companion FM scripts per the current tier:
+Deploy the paired FM bridge scripts:
 
-**Tier 1:**
+**Clipboard (manual paste):**
 
 ```bash
-python3 agent/scripts/clipboard.py write agent/sandbox/{app-name}-data-loader.xml
+python3 agent/scripts/agfm_bridge.py clipboard-write agent/sandbox/{app-name}-data-loader.xml
 ```
 
 > The data loader script is on your clipboard. To install it:
@@ -272,7 +271,7 @@ python3 agent/scripts/clipboard.py write agent/sandbox/{app-name}-data-loader.xm
 
 Repeat for the event handler script.
 
-**Tier 2/3:** Deploy via `agent/scripts/deploy.py`.
+**Direct (preferred):** Deploy via `agent/scripts/agfm_bridge.py`.
 
 ### Install the Web Viewer
 

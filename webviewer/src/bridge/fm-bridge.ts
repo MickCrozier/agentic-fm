@@ -35,7 +35,7 @@ export function notifyEditorReady(): void {
   callFileMakerScript('Editor Ready', '');
 }
 
-/** Request FileMaker to push context */
+/** Request FileMaker to refresh context (the plugin regenerates it on next idle) */
 export function requestContext(): void {
-  callFileMakerScript('Push Context', '');
+  callFileMakerScript('AGFM_Bridge', JSON.stringify({ command: 'refreshContext' }));
 }

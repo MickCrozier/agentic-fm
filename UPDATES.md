@@ -12,7 +12,7 @@ The `Context()` function has been updated to v2 with three fixes:
 2. **Script/layout names with brackets** — names containing `[` or `]` (e.g. `"Prepare for Distribution [OLD]"`) broke `JSONSetElement`'s path parser, causing the entire scripts or layouts section to be empty `{}`. Now built via string concatenation.
 3. **Version tracking** — output now includes `"context_version": 2` so tools can detect outdated functions.
 
-**How to update**: Copy the updated function from `agent/sandbox/context.fmfn` into your solution's custom function editor, replacing the existing `Context` function. Then run **Push Context** to regenerate `CONTEXT.json`.
+**How to update**: Copy the updated function from `agent/sandbox/context.fmfn` into your solution's custom function editor, replacing the existing `Context` function. Then refresh the plugin's context: `python3 agent/scripts/agfm_bridge.py context`.
 
 **How to tell if you're affected**: If the webviewer status bar shows "Context() outdated — update to v2", or if your `CONTEXT.json` has empty `scripts: {}` or `layouts: {}`, you need to update.
 
@@ -117,7 +117,7 @@ Whenever you are told an update is available — whether by the AI agent, a GitH
 git pull --ff-only
 ```
 
-That's it. Your files will be updated to the latest version. If the companion server is running, stop it and restart it after pulling.
+That's it. Your files will be updated to the latest version. Restart your agent session afterwards, and re-check the plugin connection with `python3 agent/scripts/agfm_bridge.py status`.
 
 ---
 

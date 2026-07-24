@@ -488,10 +488,10 @@ class ContextStaleness(LintRule):
                     message=(
                         f"CONTEXT.json is {age_minutes} minutes old "
                         f"(threshold: {stale_minutes} min). "
-                        "Consider running Push Context to refresh."
+                        "Refresh it with: agfm_bridge.py context"
                     ),
                     line=0,
-                    fix_hint="Run Push Context in FileMaker to refresh CONTEXT.json",
+                    fix_hint="Run: python3 agent/scripts/agfm_bridge.py context",
                 )]
         except (ValueError, TypeError):
             # Can't parse the timestamp — skip silently
@@ -547,8 +547,9 @@ class ScopeMismatch(LintRule):
                     ),
                     line=idx + 1,
                     fix_hint=(
-                        "Run Push Context on the target layout if you need "
-                        "field validation for references after this navigation."
+                        "Navigate to the target layout in FileMaker and re-fetch "
+                        "context (agfm_bridge.py context) if you need field "
+                        "validation for references after this navigation."
                     ),
                 ))
         return diags
@@ -574,8 +575,9 @@ class ScopeMismatch(LintRule):
                     ),
                     line=ln.line_number,
                     fix_hint=(
-                        "Run Push Context on the target layout if you need "
-                        "field validation for references after this navigation."
+                        "Navigate to the target layout in FileMaker and re-fetch "
+                        "context (agfm_bridge.py context) if you need field "
+                        "validation for references after this navigation."
                     ),
                 ))
         return diags

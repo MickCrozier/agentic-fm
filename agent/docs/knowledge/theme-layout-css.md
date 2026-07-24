@@ -20,7 +20,7 @@ A layout is associated with exactly one theme via `<LayoutThemeReference>`. The 
 
 ### Theme files
 
-Theme CSS lives in `xml_parsed/themes/{solution}/{theme_name} - ID {N}.xml`. Each theme XML contains a single `<CSS>` element with the full stylesheet for all named classes. Theme files range from 2K-10K lines depending on the number of styles.
+Theme CSS lives in the solution's SaXML export, under `themes/{theme_name} - ID {N}.xml`. Load the discovery index (`agfm_bridge.py save-as-xml --load`) to make the export available, then read the theme file from the export directory. Each theme XML contains a single `<CSS>` element with the full stylesheet for all named classes; theme files range from 2K-10K lines depending on the number of styles.
 
 The theme's class UUIDs are **different** from the layout's `LocalCSS` UUIDs. The theme uses its own namespace (e.g., `FM-DC7DE56F-...` for "Card") while the layout uses a local namespace (e.g., `FM-9AC3DAA0-...` for the same "Card" style). The mapping is by `displayName`, not by UUID.
 
@@ -171,7 +171,7 @@ When building a visual profile of a layout:
 1. **Start with `LocalCSS` on each object** — extract `displayName` (semantic role) and any inline CSS properties (overrides)
 2. **For empty inline CSS** — the object inherits from the theme. The `displayName` is the lookup key into the theme XML
 3. **For anonymous overrides** (`displayName=""`) — the inline CSS IS the style; there is no theme fallback
-4. **To resolve theme-level colors** — grep the theme XML (`xml_parsed/themes/{solution}/`) for the `displayName` and read the CSS block that follows
+4. **To resolve theme-level colors** — grep the theme XML in the SaXML export (`themes/`) for the `displayName` and read the CSS block that follows
 5. **For part backgrounds** — check the part's `<Definition>` `<LocalCSS>` and the theme's part-level CSS
 
 The `layout_to_summary.py` script extracts `displayName` as `styleName` and key visual properties as `visuals` (bgColor, textColor, fontSize, fontFamily, borderRadius, bgGradient) from inline CSS. These are available in the summary JSON without needing to read the full layout XML.

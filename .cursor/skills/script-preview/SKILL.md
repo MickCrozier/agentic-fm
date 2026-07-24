@@ -12,7 +12,7 @@ Produce a human-readable script outline for review and iteration before generati
 Before generating a preview of an existing script (or when verifying line numbers), run:
 
 ```bash
-python3 .claude/skills/script-preview/scripts/saxmlpreview.py agent/xml_parsed/scripts/<solution>/<path/to/script.xml>
+python3 .claude/skills/script-preview/scripts/saxmlpreview.py <saxml-export-dir>/scripts/<path/to/script.xml>
 ```
 
 This parses the SaXML file and produces **one output line per `<Step>` element**, numbered from 1. Because each step maps to exactly one Script Workspace row, the line numbers are 1:1 with what a developer sees in FileMaker. Use this as the authoritative line map when discussing specific steps or referencing insertion points.
@@ -108,4 +108,4 @@ AskQuestion:
 
 - The preview is a planning artifact, but **step syntax must match Script Workspace format** — a developer will compare this directly against what they see in FileMaker
 - When iterating, show the full updated preview each time (not just the changed lines)
-- The sanitized scripts in `xml_parsed/scripts_sanitized/` use a different format (e.g. `Collapsed: OFF`, `[1]` repetitions, `Exit Script []`) — do **not** use that as the format reference; always target Script Workspace format
+- SaXML-derived script text uses a different format (e.g. `Collapsed: OFF`, `[1]` repetitions, `Exit Script []`) — do **not** use that as the format reference; always target Script Workspace format

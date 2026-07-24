@@ -1,6 +1,6 @@
 # agentic-fm Plugin
 
-The agentic-fm plugin runs on the macOS host and exposes a REST API for clipboard operations, direct Script Workspace manipulation, schema queries, UI automation, and more. It replaces most AppleScript-based automation.
+The agentic-fm plugin runs on the macOS host and exposes a REST API for clipboard operations, direct Script Workspace manipulation, schema queries, UI automation, and more. **It is the only supported way to interact with FileMaker** — there is no AppleScript or companion-server fallback.
 
 ## Connection
 
@@ -12,8 +12,6 @@ The agentic-fm plugin runs on the macOS host and exposes a REST API for clipboar
 All requests require: `Authorization: Bearer <token>`
 
 `agfm_bridge.py` resolves the URL automatically: reads `AGFM_PLUGIN_URL` if set, otherwise constructs the URL from `AGFM_PLUGIN_PORT` (default 8766) using the correct host for the current environment. Manually specify `AGFM_PLUGIN_URL` only when the default host/port construction is wrong for your setup.
-
-The companion server moves to port **8767** when the plugin is running.
 
 ```bash
 TOKEN=$(grep AGFM_PLUGIN_TOKEN .env.local | cut -d= -f2)
@@ -30,24 +28,27 @@ curl -s -H "Authorization: Bearer $TOKEN" http://host.docker.internal:${PORT}/ap
 
 ## Deployment
 
-Use `agfm_bridge.py` for all deploy operations when the plugin is reachable — it handles HR→XML conversion, navigation, insert, and save in one call. `deploy.py` is the fallback for Tier 1–3 (companion server / AppleScript) when the plugin is unavailable.
+Use `agfm_bridge.py` for all deploy operations — it handles HR→XML conversion, navigation, insert, and save in one call. If the plugin is unreachable, deployment is not possible; write the `.fmscript` file and hold until the plugin is back.
 
-### New script fallback
+```bash
+# Existing script — replace all steps
+python3 agent/scripts/agfm_bridge.py deploy agent/sandbox/MySolution/MyScript.fmscript "My Script"
 
-`deploy.py` can only deploy to **existing** scripts — it navigates by name. If a script doesn't exist yet in FileMaker:
+# New script — create directly via the plugin
+python3 agent/scripts/agfm_bridge.py bundle agent/sandbox/MySolution/MyScript.fmscript --names "My Script"
 
-1. Copy XML to clipboard: `POST /api/clipboard/write`
-2. Tell the user: create a new script named **X** in Script Workspace, then **⌘V**
-
-If `deploy.py` errors with "Could not navigate to", immediately fall back to clipboard copy + paste instructions.
+# Surgical edits
+python3 agent/scripts/agfm_bridge.py patch agent/sandbox/MySolution/mypatch.json
+```
 
 ### Replace vs patch
 
 | Situation | Use |
 |-----------|-----|
-| New script being populated for the first time | Full replace (`deploy.py` with `"r"`) |
-| Large change affecting many steps | Full replace |
-| Small surgical edit (<~5 steps) | Patch mode (`deploy.py --patch`) |
+| New script | `bundle` (creates the script via `POST /api/ui/script/create`) |
+| New script being populated for the first time | `deploy` (full replace) |
+| Large change affecting many steps | `deploy` (full replace) |
+| Small surgical edit (<~5 steps) | `patch` |
 
 Patch is preferred for small edits — it's safer and avoids the select-all reliability issues. Full replace is simpler for large changes. Patch requires reading current step indices first via `GET /api/ui/script`.
 
@@ -55,7 +56,7 @@ Patch is preferred for small edits — it's safer and avoids the select-all reli
 
 ## Context & schema
 
-**Always use the plugin as the primary context source** — it is always live and requires no Push Context step.
+**The plugin is the only context source.** It is always live and requires no Push Context step. `agent/CONTEXT.json` is written by the plugin — never hand-authored, and never a substitute when the plugin is down.
 
 ```bash
 # Set up TOKEN and URL once (or use: python3 agent/scripts/agfm_bridge.py context)
@@ -75,7 +76,7 @@ curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/
   $URL/api/query
 ```
 
-Fallback order when plugin is unavailable: `CONTEXT.json` → index files → `xml_parsed/`.
+If the plugin is unreachable, stop and tell the developer — do not guess at IDs or fall back to stale local copies.
 
 ---
 
@@ -157,7 +158,7 @@ Before applying a patch, read the current step list via `GET /api/ui/script` to 
 | `POST` | `/api/lint` | Run full FMLint (requires repoPath in preferences) |
 | `GET` | `/api/lint/status` | Check whether Python FMLint is available |
 
-> **HR→XML fallback**: When the plugin is unavailable, use `agent/scripts/hr_to_xml.py` as a local fallback. It emits `id="0"` for field/layout/script references (FileMaker resolves by name on paste). Always prefer the plugin endpoint when available.
+> **Local HR→XML converter**: `agent/scripts/hr_to_xml.py` converts HR to fmxmlsnippet without the plugin, but emits `id="0"` for field/layout/script references (FileMaker resolves by name on paste). Use it for offline inspection only — always deploy via the plugin endpoint.
 >
 > **Known bug**: The plugin's `/api/hr-to-xml` drops the `Parameter:` calculation in `Perform Script` when it spans multiple lines. The local `hr_to_xml.py` handles this correctly.
 

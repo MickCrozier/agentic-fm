@@ -13,22 +13,22 @@ The AI chat has access to:
 - **Layout instructions** — any custom instructions set by the developer in AI Settings
 
 What is NOT automatically available:
-- Value lists — ask the developer to paste the list of value lists from CONTEXT.json or `value_lists.index`
-- Script names — ask the developer to provide script names from CONTEXT.json or `scripts.index`
+- Value lists — read the `value_lists` section of `GET /api/context`
+- Script names — read the `scripts` section of `GET /api/context`
 
 ---
 
 ## Discovering context
 
-When a request requires information not in the available fields list, tell the developer how to get it:
+When a request requires information not in the available fields list, fetch it from the plugin:
 
-**Value lists**: "I need the value list names. Run Push Context and paste the `value_lists` section, or check `agent/context/{solution}/value_lists.index`."
+**Value lists**: read the `value_lists` section of `GET /api/context` (`agfm_bridge.py context`).
 
-**Scripts for buttons**: "I need the script name. Check `agent/context/{solution}/scripts.index` or the `scripts` section of CONTEXT.json."
+**Scripts for buttons**: read the `scripts` section of `GET /api/context`, or `agfm_bridge.py discovery-query scripts` for the full roster.
 
-**Additional related tables**: "That table isn't in my field list. It may not be related to this layout's TO — check `agent/context/{solution}/relationships.index` to confirm."
+**Additional related tables**: if a table isn't in the field list it may not be related to this layout's TO. Confirm with `POST /api/query` against `FileMaker_Tables`, or ask the developer to navigate to a layout where it is in scope.
 
-**Theme classes**: "I don't have the theme class list. Check `agent/context/{solution}/theme-classes.json` or provide a class name from the inspector."
+**Theme classes**: not exposed by the plugin. Ask the developer for a class name from the Inspector.
 
 ---
 

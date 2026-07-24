@@ -249,51 +249,6 @@ function readContext(): Record<string, unknown> | null {
   }
 }
 
-/** Recursively find a layout XML file matching the given ID (or name fallback). */
-function findLayoutXML(layoutName: string, layoutId: number, solution?: string): string | null {
-  const agent = agentDir();
-  const xmlParsed = path.join(agent, 'xml_parsed', 'layouts');
-  if (!fs.existsSync(xmlParsed)) return null;
-
-  const rootDirs: string[] = solution
-    ? [path.join(xmlParsed, solution)]
-    : fs.readdirSync(xmlParsed, { withFileTypes: true })
-        .filter(e => e.isDirectory())
-        .map(e => path.join(xmlParsed, e.name));
-
-  function search(dir: string): string | null {
-    if (!fs.existsSync(dir)) return null;
-    const entries = fs.readdirSync(dir, { withFileTypes: true });
-
-    // Match by ID — use word boundary so ID 7 doesn't match ID 77
-    const idPattern = new RegExp(`\\bID ${layoutId}\\b`);
-    const byId = entries.find(
-      e => e.isFile() && e.name.endsWith('.xml') && idPattern.test(e.name)
-    );
-    if (byId) return path.join(dir, byId.name);
-
-    // Recurse into subdirectories
-    for (const entry of entries.filter(e => e.isDirectory())) {
-      const found = search(path.join(dir, entry.name));
-      if (found) return found;
-    }
-
-    // Name fallback (after recursion so ID match in subdirs wins)
-    const byName = entries.find(
-      e => e.isFile() && e.name.toLowerCase().startsWith(layoutName.toLowerCase())
-    );
-    if (byName) return path.join(dir, byName.name);
-
-    return null;
-  }
-
-  for (const dir of rootDirs) {
-    const found = search(dir);
-    if (found) return found;
-  }
-  return null;
-}
-
 // ── Agent state sync ─────────────────────────────────────────────────────────
 // Allows external agents to GET the current layout state and POST a modified
 // version back. The client pushes its state on every change; incoming state
@@ -306,35 +261,42 @@ export function apiMiddleware(): Plugin {
   return {
     name: 'layout-editor-api',
     configureServer(server) {
-      server.middlewares.use('/api/layout-xml', (_req, res) => {
-        const ctx = readContext();
-        if (!ctx) {
-          res.writeHead(404, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'CONTEXT.json not found' }));
+      // Layout XML comes from the FM clipboard via the plugin. The plugin cannot
+      // switch to Layout Mode or copy objects itself, so the developer must select
+      // all (Cmd+A) and copy (Cmd+C) in Layout Mode first.
+      server.middlewares.use('/api/layout-xml', async (_req, res) => {
+        const token = process.env.AGFM_PLUGIN_TOKEN;
+        if (!token) {
+          res.writeHead(503, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'AGFM_PLUGIN_TOKEN not set — cannot reach the plugin' }));
           return;
         }
-
-        const layout = ctx.current_layout as { name: string; id: number } | undefined;
-        if (!layout) {
-          res.writeHead(404, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'No current_layout in CONTEXT.json' }));
-          return;
-        }
-
-        const solution = ctx.solution as string | undefined;
-        const xmlPath = findLayoutXML(layout.name, layout.id, solution);
-        if (!xmlPath) {
-          res.writeHead(404, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: `Layout XML not found for: ${layout.name} (ID ${layout.id})` }));
-          return;
-        }
+        const pluginUrl = process.env.AGFM_PLUGIN_URL
+          || `http://localhost:${process.env.AGFM_PLUGIN_PORT || 8766}`;
 
         try {
-          const xml = fs.readFileSync(xmlPath, 'utf-8');
+          const pluginRes = await fetch(`${pluginUrl}/api/clipboard`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (!pluginRes.ok) {
+            res.writeHead(502, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: `Plugin returned ${pluginRes.status}` }));
+            return;
+          }
+          const json = await pluginRes.json() as { xml?: string; class?: string };
+          if (!json.xml || (json.class !== 'XML2' && json.class !== 'XMLO')) {
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              error: 'No layout objects on the clipboard. In FileMaker: switch to Layout Mode, '
+                + 'select all (Cmd+A), copy (Cmd+C), then retry.',
+              found: json.class ?? 'nothing',
+            }));
+            return;
+          }
           res.writeHead(200, { 'Content-Type': 'application/xml; charset=utf-8' });
-          res.end(xml);
+          res.end(json.xml);
         } catch (e) {
-          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.writeHead(502, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: String(e) }));
         }
       });
@@ -379,18 +341,26 @@ export function apiMiddleware(): Plugin {
       makeInstructionsEndpoint('/api/custom-instructions', 'custom-instructions.txt');
       makeInstructionsEndpoint('/api/layout-instructions', 'layout-instructions.txt');
 
-      // /api/clipboard — proxy to companion server to avoid browser CORS restrictions
+      // /api/clipboard — proxy to the agentic-fm plugin to avoid browser CORS restrictions
       server.middlewares.use('/api/clipboard', async (req, res) => {
         if (req.method !== 'POST') { res.writeHead(405); res.end(); return; }
+        const token = process.env.AGFM_PLUGIN_TOKEN;
+        if (!token) {
+          res.writeHead(503, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'AGFM_PLUGIN_TOKEN not set — cannot reach the plugin' }));
+          return;
+        }
+        const pluginUrl = process.env.AGFM_PLUGIN_URL
+          || `http://localhost:${process.env.AGFM_PLUGIN_PORT || 8766}`;
         try {
           const body = await readBody(req);
-          const companionRes = await fetch('http://localhost:8765/clipboard', {
+          const pluginRes = await fetch(`${pluginUrl}/api/clipboard/write`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
             body,
           });
-          const json = await companionRes.json();
-          res.writeHead(companionRes.ok ? 200 : 500, { 'Content-Type': 'application/json' });
+          const json = await pluginRes.json();
+          res.writeHead(pluginRes.ok ? 200 : 500, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(json));
         } catch (e) {
           res.writeHead(502, { 'Content-Type': 'application/json' });

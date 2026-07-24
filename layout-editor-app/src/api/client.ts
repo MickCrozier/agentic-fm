@@ -1,4 +1,4 @@
-/** Slim API client for the layout editor companion server endpoints. */
+/** Slim API client for the layout editor dev-server endpoints. */
 
 const BASE = '';
 

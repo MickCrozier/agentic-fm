@@ -125,7 +125,7 @@ Determine from the developer's request:
 3. **Test scope** — is this a single TEST script, or does it belong in a TESTSUITE?
 
 If testing a custom function, read its definition:
-- Check `agent/xml_parsed/custom_function_calcs/` or `agent/xml_parsed/custom_functions_sanitized/`
+- Check the `custom_functions` section of `GET /api/context`, or `agfm_bridge.py discovery-query text_search --text "<FunctionName>"`
 - Or extract from the Add-on's `template.xml` if it's a FMTest-provided function
 
 If testing a FileMaker script, use `script-lookup` to read the sanitized source.
@@ -316,7 +316,7 @@ Structure:
 - Multi-line calculations inside `Set Variable` are fine — use tabs for indentation per CODING_CONVENTIONS.md.
 - Use `# (comment)` blank steps between groups for readability.
 - Do NOT use XML comments (`<!-- -->`); they are silently discarded by FileMaker.
-- Resolve `Perform Script` IDs from CONTEXT.json or `scripts.index`. If IDs are unknown, use `id="0"` — FileMaker will assign on paste.
+- Resolve `Perform Script` IDs from `GET /api/context`. If IDs are unknown, use `id="0"` — FileMaker will assign on paste.
 
 ---
 
@@ -338,7 +338,7 @@ Fix any ERROR-level diagnostics before proceeding.
 ## Step 6: Deploy
 
 ```bash
-python3 agent/scripts/clipboard.py write agent/sandbox/TEST\ [Name].xml
+python3 agent/scripts/agfm_bridge.py clipboard-write agent/sandbox/TEST\ [Name].xml
 ```
 
 Then present to the developer:
@@ -353,11 +353,11 @@ Then present to the developer:
 
 ## Step 7: Running tests and reading results
 
-### Manually (Tier 1)
+### Manually
 
 The developer runs the TEST or TESTSUITE script from Script Workspace. Results are visible in `$$FMT` in the Data Viewer, or written to `FMT::Output` after calling `FMT:WriteOutputBuffers`.
 
-### Via OData (Tier 3)
+### Via the plugin or OData
 
 Call the TESTSUITE (single entry point) via `AGFMScriptBridge`:
 

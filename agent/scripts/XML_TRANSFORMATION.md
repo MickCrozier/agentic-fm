@@ -1,33 +1,33 @@
-# XML Transformation: xml_parsed → fmxmlsnippet
+# XML Transformation: SaXML → fmxmlsnippet
 
 ## Overview
 
-`fm_xml_to_snippet.py` converts FileMaker's "Save As XML" export format (stored in `agent/xml_parsed/scripts/`) into the fmxmlsnippet clipboard format (used in `agent/scripts/` and `agent/sandbox/`). These two formats are structurally distinct and not interchangeable — see `SKILL.md` in `.cursor/skills/script-review/` for the full breakdown.
+`fm_xml_to_snippet.py` converts FileMaker's "Save As XML" (SaXML) export format into the fmxmlsnippet clipboard format used in `agent/sandbox/`. Produce a SaXML export with `python3 agent/scripts/agfm_bridge.py save-as-xml`. These two formats are structurally distinct and not interchangeable — see `SKILL.md` in `.cursor/skills/script-review/` for the full breakdown.
 
 ---
 
 ## Verification Methodology
 
-Coverage is verified by running the converter against the scripts in `xml_parsed/scripts/` (by line count) and comparing the output line-by-line against a ground-truth fmxmlsnippet copied directly from FileMaker.
+Coverage is verified by running the converter against the scripts in a SaXML export (by line count) and comparing the output line-by-line against a ground-truth fmxmlsnippet copied directly from FileMaker.
 
 ### Per-script process
 
 For each script:
 
-1. **Run the converter** against the `xml_parsed` version and capture stderr warnings for unhandled step types.
+1. **Run the converter** against the SaXML version and capture stderr warnings for unhandled step types.
 2. **Copy the fmxmlsnippet** directly from FileMaker and paste it into `agent/scripts/script.xml` as ground truth.
 3. **For each unhandled step type**, inspect three sources in parallel:
    - The ground-truth fmxmlsnippet (desired output structure)
-   - The `xml_parsed` source (input structure to decode)
+   - The SaXML source (input structure to decode)
    - The canonical snippet example in `agent/snippet_examples/steps/`
-4. **Implement a translator function** (`tx_*`) that maps the xml_parsed `ParameterValues` structure to the correct fmxmlsnippet elements.
+4. **Implement a translator function** (`tx_*`) that maps the SaXML `ParameterValues` structure to the correct fmxmlsnippet elements.
 5. **Add the function** to the `TRANSLATORS` dispatch table.
 6. **Re-run the converter** and confirm zero warnings.
 7. **Spot-check** key step outputs against the ground truth by line number.
 
 ### Key structural mappings discovered
 
-| xml_parsed pattern                                 | fmxmlsnippet pattern                                                 | Notes                |
+| SaXML pattern                                      | fmxmlsnippet pattern                                                 | Notes                |
 | -------------------------------------------------- | -------------------------------------------------------------------- | -------------------- |
 | `Boolean type="With dialog" value="False"`         | `<NoInteract state="True"/>`                                         | Inverted             |
 | `Boolean type="Select" value="True"`               | `<SelectAll state="True"/>`                                          | Direct               |

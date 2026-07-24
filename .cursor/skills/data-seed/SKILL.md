@@ -26,17 +26,18 @@ Read `agent/config/automation.json` and identify the target solution:
 
 Use the following sources in order of preference to understand the solution's tables, fields, and relationships:
 
-### Option A: CONTEXT.json + index files (preferred)
+### Option A: Plugin (preferred)
 
-1. Read `agent/CONTEXT.json` for `tables` (fields with types), `relationships` (join fields, cascade settings).
-2. If CONTEXT.json is scoped to only a subset of tables, supplement with index files:
-   - `agent/context/{solution}/fields.index` -- all fields across all tables
-   - `agent/context/{solution}/relationships.index` -- full relationship graph
-   - `agent/context/{solution}/table_occurrences.index` -- TO-to-base-table mapping
+1. Fetch `GET /api/context` for `tables` (fields with types) and `relationships` (join fields, cascade settings).
+2. If the context is scoped to only a subset of tables, query the rest directly:
+   ```bash
+   python3 agent/scripts/agfm_bridge.py query "SELECT TableName, TableID FROM FileMaker_Tables"
+   python3 agent/scripts/agfm_bridge.py query "SELECT TableName, FieldName, FieldType, FieldID FROM FileMaker_Fields"
+   ```
 
-### Option B: OData `$metadata` (fallback)
+### Option B: OData `$metadata` (server-hosted files)
 
-If index files are not available, fetch the schema from OData:
+For a server-hosted file with no plugin session, fetch the schema from OData:
 
 ```
 GET {odata.base_url}/{odata.database}/$metadata
@@ -47,7 +48,7 @@ Parse `EntityType` elements for field names and types. Parse `NavigationProperty
 
 ### Option C: Developer-provided schema
 
-If neither source is available, ask the developer to describe the tables and fields, or to run **Explode XML** or **Push Context** first.
+If the plugin is unreachable, ask the developer to start it — or to describe the tables and fields directly.
 
 ---
 

@@ -75,13 +75,26 @@ Project dependencies (npm packages, Python packages, etc.) install inside the co
 
 ## Caveats
 
-### Companion server runs on the host
+### The plugin runs on the host
 
-The agentic-fm companion server (`python3 agent/scripts/companion_server.py`) must run on your **Mac host**, not inside the container. FileMaker Pro also runs on the host and communicates with the companion server directly. The agent inside the container reaches the companion server via `host.docker.internal:8765` rather than `localhost:8765`.
+The agentic-fm plugin runs on your **Mac host** alongside FileMaker Pro, never inside the container. It is the only path between the agent and FileMaker — there is no AppleScript or companion-server fallback.
 
-### Clipboard and AppleScript
+From inside the container, `localhost` refers to the container, so `agfm_bridge.py` resolves the plugin to `host.docker.internal:8766` automatically. If your setup needs something different, set it explicitly in `.env.local`:
 
-FileMaker script deployment (pasting fmxmlsnippet XML into Script Workspace) relies on macOS clipboard and AppleScript, which are not available inside the container. `deploy.py` handles this automatically by delegating to the companion server on the host — no manual workaround needed.
+```env
+AGFM_PLUGIN_TOKEN=your-token
+AGFM_PLUGIN_URL=http://host.docker.internal:8766
+```
+
+Verify with `python3 agent/scripts/agfm_bridge.py status` — `postStart.sh` runs this check on every container start.
+
+### Do not forward port 8766
+
+If `devcontainer.json` forwards the plugin's port, VS Code intercepts connections from the container and routes them back **into** the container, creating a loop where requests hang with no response. 8766 is deliberately absent from `forwardPorts`; leave it that way. If you add it by accident, remove it and rebuild the container.
+
+### Clipboard and deployment
+
+FileMaker clipboard operations and script deployment run plugin-side on the host, so they work identically from inside the container — `agfm_bridge.py deploy`, `bundle`, `patch`, `clipboard-read`, and `clipboard-write` need no special handling.
 
 ### First build time
 

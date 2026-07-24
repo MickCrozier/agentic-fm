@@ -1,23 +1,22 @@
 ---
 name: fm-debug
-description: Debug a FileMaker script by capturing runtime state. At Tier 1 the agent instruments the script and gives the developer run instructions. At Tier 3 the agent can autonomously look up the script source, generate a debug-instrumented copy, deploy it via AppleScript, trigger it via the companion, and read the results — no human intervention required. Triggers on phrases like "debug this", "script not working", "wrong output", "script error", or when a script produces unexpected behavior that cannot be diagnosed from source alone.
-compatibility: Tier 3 requires the companion server and macOS Accessibility permission for AppleScript deployment.
+description: Debug a FileMaker script by capturing runtime state. The agent looks up the script source, generates a debug-instrumented copy, deploys it via the plugin, runs it, and reads $$DEBUG back through the Data Viewer endpoint. Triggers on phrases like "debug this", "script not working", "wrong output", "script error", or when a script produces unexpected behavior that cannot be diagnosed from source alone.
+compatibility: Requires the agentic-fm plugin. Running scripts autonomously also requires AGFM_Bridge installed in the solution.
 ---
 
 # fm-debug
 
-Debug a FileMaker script by capturing runtime variable state, error codes, and error locations. The agent's level of autonomy depends on the deployment tier configured in `agent/config/automation.json`.
+Debug a FileMaker script by capturing runtime variable state, error codes, and error locations. Everything runs through the plugin — instrument, deploy, run, read back.
 
 ---
 
-## Step 1: Determine the automation tier
+## Step 1: Confirm the plugin is reachable
 
-Read `agent/config/automation.json` and check `project_tier` (preferred) or `default_tier`:
+```bash
+python3 agent/scripts/agfm_bridge.py status
+```
 
-- **Tier 1** — the developer runs scripts manually. The agent instruments the script and provides run instructions.
-- **Tier 3** — the agent can autonomously deploy and trigger scripts. The agent instruments, deploys, runs, and reads results without developer intervention.
-
-Tier 2 follows the Tier 3 workflow for running scripts (via `/trigger`) but cannot create new scripts autonomously.
+The plugin is the only path to FileMaker. If it is unreachable, say so and stop — do not fall back to stale data or manual workarounds.
 
 ---
 
@@ -27,7 +26,7 @@ Before generating any instrumentation:
 
 1. **State specifically what runtime information is needed** — variable values, error codes, script result, which conditional branch was taken, etc.
 2. **Check for existing debug output** at `agent/debug/output.json`. If it exists and is recent, read it and skip to Step 5.
-3. **Look up the script source** — read the human-readable version from `agent/xml_parsed/scripts_sanitized/` to understand the script's logic and identify where to insert debug instrumentation.
+3. **Look up the script source** — pull the script body from the plugin (`agfm_bridge.py discovery-query script_body --script "<Name>"`) to understand its logic and identify where to insert debug instrumentation.
 
 ---
 
@@ -61,10 +60,10 @@ curl -s -H "Authorization: Bearer $(grep AGFM_PLUGIN_TOKEN /workspaces/agentic-f
 import sys, json; d=json.load(sys.stdin)
 for n,i in d.get('scripts',{}).items(): print(f\"{i.get('id')}|{n}\")
 " | grep -i "ScriptName"
-# Fallback: grep "ScriptName" "agent/context/{solution}/scripts.index"
+# Fallback: agfm_bridge.py discovery-query scripts
 ```
 
-Read the human-readable source from `agent/xml_parsed/scripts_sanitized/` to understand the logic. Identify where to insert debug capture points — typically immediately after steps that might fail or at decision points.
+Read the script body from the plugin to understand the logic. Identify where to insert debug capture points — typically immediately after steps that might fail or at decision points.
 
 Generate a modified copy of the script as fmxmlsnippet XML in `agent/sandbox/` that includes debug instrumentation at the identified points. Each debug point should:
 
@@ -97,27 +96,31 @@ Validate the instrumented script with `validate_snippet.py` before proceeding.
 
 ## Step 4: Deploy and run
 
-### Tier 3 (autonomous)
+### Autonomous (default)
 
 The agent has the full deploy → run → read loop available:
 
-1. **Load clipboard** — `POST {companion_url}/clipboard` with the XML
-2. **Deploy via raw AppleScript** — `POST {companion_url}/trigger` with a `raw_applescript` payload that:
-   - Activates FM Pro and switches to standard menus
-   - Opens Script Workspace
-   - Uses Cmd+N → Rename to create the debug script (if new), OR uses AXPress to open the existing script tab and Cmd+A → Delete → Cmd+V to replace (if modifying)
-   - Saves with Cmd+S
-3. **Run the script** — `POST {companion_url}/trigger` with `fm_app_name`, `script`, and optionally `target_file`
-4. **Read the output** — read `agent/debug/output.json` (allow 2–3 seconds for the script to execute and the companion to write the file)
+**Pause first** — deploying and running touches the developer's live file. Ask before proceeding and wait for a go-ahead.
 
-**Prerequisites for Tier 3 autonomous debugging:**
-- `fmextscriptaccess` extended privilege must be enabled on the active account's privilege set in the frontmost FM document (required for `/trigger` `do script` calls)
-- The companion server must be running on the host and reachable at `companion_url`
+1. **Deploy the instrumented script**
+   ```bash
+   # Existing script — replace all steps
+   python3 agent/scripts/agfm_bridge.py deploy agent/sandbox/{Solution}/{ScriptName}.fmscript "{ScriptName}"
+
+   # New debug script
+   python3 agent/scripts/agfm_bridge.py bundle agent/sandbox/{Solution}/{ScriptName}.fmscript --names "{ScriptName}"
+   ```
+2. **Run it** — `POST /api/performscript` with `{"scriptName": "{ScriptName}"}`, then poll `/api/eval/:id` until `complete: true`. **One at a time** — concurrent calls deadlock FileMaker.
+3. **Read the output** — `GET /api/ui/dataviewer` and pull the `$$DEBUG` entry.
+
+**Prerequisites for autonomous debugging:**
+- The plugin must be reachable (`agfm_bridge.py status`)
+- `AGFM_Bridge` must be installed in the solution (`agfm_bridge.py bridge-upgrade`)
 - Agentic-fm Debug script must be installed in the solution
 
-**Important**: if deploying an instrumented copy of an existing script, use `--replace` mode (Cmd+A → Delete → Cmd+V) rather than creating a new script. After debugging, deploy the original script back to restore it.
+**Important**: when instrumenting an existing script, save its current body to `agent/sandbox/{Solution}/{ScriptName}.original.fmscript` first. After debugging, deploy that original back to restore it.
 
-### Tier 1 (developer-assisted)
+### Developer-assisted (scripts with side effects)
 
 Give the developer clear instructions:
 
@@ -175,5 +178,5 @@ The developer retrieves the value from the Data Viewer (Tools > Data Viewer) and
 
 1. Explain the root cause clearly
 2. Propose and generate the fix
-3. **Restore the original script** — if the script was modified for debugging, deploy the original version back (Tier 3: autonomous restore; Tier 1: clipboard with paste instructions)
+3. **Restore the original script** — if the script was modified for debugging, deploy the original version back via `agfm_bridge.py deploy`
 4. If the Agentic-fm Debug script doesn't exist yet, offer to help create it (see `agent/docs/AGENTIC_DEBUG.md`)

@@ -6,89 +6,73 @@ This document describes the architecture of the agentic-fm project -- the data p
 
 ```mermaid
 flowchart TD
-    A["FileMaker Solution"] -->|"Save a Copy as XML"| B["xml_exports/"]
-    B -->|"fmparse.sh"| C["agent/xml_parsed/ (exploded XML)"]
-    C -->|"fmcontext.sh"| D["agent/context/ (index files)"]
-    E["FileMaker evaluates Context()"] --> F["agent/CONTEXT.json (incl. generated_at)"]
-    N["companion_server.py (port 8765)"] -->|"Insert from URL"| A
-    D --> G["AI Script Generation"]
-    F --> G
+    A["FileMaker Pro (live solution)"] <-->|"REST API"| P["agentic-fm plugin (port 8766)"]
+    P -->|"GET /api/context"| F["agent/CONTEXT.json (cached snapshot)"]
+    P -->|"SaXML export + index"| D["Discovery system (in-memory + SQLite cache)"]
+    F --> G["AI Script Generation"]
+    D --> G
     K["agent/catalogs/ (step catalog — primary)"] --> G
     H["agent/snippet_examples/ (archival)"] -.->|"fallback"| G
-    I["agent/xml_parsed/scripts_sanitized/"] --> G
-    G -->|"CLI / IDE"| J["agent/sandbox/ (fmxmlsnippet output)"]
+    G --> J["agent/sandbox/{Solution}/*.fmscript"]
+    J -->|"fmlint"| Q{"clean?"}
+    Q -->|"yes, on developer go-ahead"| R["agfm_bridge.py deploy / bundle / patch"]
+    R -->|"POST /api/hr-to-xml → /api/ui/script/*"| P
     K --> L["Webviewer (hr-to-xml.ts)"]
     F --> L
     L --> M["HR script in Monaco editor"]
 ```
 
-Data flows through three stages before it reaches an AI agent:
+**The plugin is the only interface to FileMaker.** It runs on the macOS host beside FileMaker Pro and serves a token-authenticated REST API for context, schema queries, clipboard, Script Workspace manipulation, calculation evaluation, and UI automation. There is no AppleScript, companion-server, or offline-export path; when the plugin is unreachable the agent stops rather than degrading to stale data.
 
-1. **Export** -- A FileMaker solution is exported as XML via _Save a Copy as XML_.
-2. **Parse** -- `fmparse.sh` archives the export and explodes it into hundreds of individual XML files organised by domain (tables, scripts, layouts, etc.) inside `agent/xml_parsed/`.
-3. **Index** -- `fmcontext.sh` distills the exploded XML into a small set of pipe-delimited index files in `agent/context/{solution}/`, extracting only signal (names, IDs, types, references) and discarding noise (UUIDs, hashes, timestamps, visual positioning).
+Two data sources reach the AI, both served by the plugin:
 
-At script-generation time three additional inputs converge:
+1. **Live context** (`GET /api/context`) -- scoped to the frontmost file and current layout, providing exactly the tables, fields, relationships, layouts, scripts, and value lists the AI needs, complete with IDs that embed directly into fmxmlsnippet output. Mirrored to `agent/CONTEXT.json` as a cached snapshot with a `generated_at` timestamp (ISO 8601 UTC).
+2. **Discovery index** -- a full SaXML export indexed in memory (backed by an on-disk SQLite cache), loaded once per session with `agfm_bridge.py save-as-xml --load`. It answers solution-wide questions — script bodies, references, dependencies, orphans, impact analysis — without touching the Script Workspace.
 
-- **CONTEXT.json** -- generated inside FileMaker by the `Context()` custom function. It is scoped to the current layout and task, providing exactly the tables, fields, relationships, layouts, scripts, and value lists the AI needs, complete with IDs that can be embedded directly into fmxmlsnippet output. Includes a `generated_at` timestamp (ISO 8601 UTC) used for staleness detection.
-- **Step catalog** (`agent/catalogs/step-catalog-en.json`) -- the single source of truth for all FileMaker script step XML structure. Provides step IDs, parameter definitions, types, enums, HR signatures, and behavioral notes. Agents grep it before any other source; it supersedes snippet_examples as the primary step reference.
-- **snippet_examples/** -- archival fmxmlsnippet templates retained for historical reference and complex step examples not yet fully captured in the catalog. No longer the primary lookup source.
+At generation time two local inputs converge with those:
 
-The AI combines these inputs to produce fmxmlsnippet output in `agent/sandbox/`, which is then pasted back into FileMaker via the clipboard. The **webviewer** provides a parallel workflow where the same CONTEXT.json and step catalog feed a browser-based editor; HR-to-XML conversion happens client-side via `webviewer/src/converter/hr-to-xml.ts`.
+- **Step catalog** (`agent/catalogs/step-catalog-en.json`) -- the single source of truth for all FileMaker script step XML structure. Provides step IDs, parameter definitions, types, enums, HR signatures, and behavioral notes. Agents grep it before any other source.
+- **snippet_examples/** -- archival fmxmlsnippet templates retained for complex step examples not yet fully captured in the catalog. Not the primary lookup source.
+
+The AI produces a human-readable `.fmscript` in `agent/sandbox/{Solution}/`, lints it, and — after the developer signals readiness — deploys it back through the plugin, which converts HR to fmxmlsnippet and writes it into the Script Workspace. The **webviewer** provides a parallel workflow where the same context and step catalog feed a browser-based editor; HR-to-XML conversion happens client-side via `webviewer/src/converter/hr-to-xml.ts`.
 
 ## Artifact Inventory
 
 | Artifact             | Location                              | Generated By                   | Purpose                                                       |
 | -------------------- | ------------------------------------- | ------------------------------ | ------------------------------------------------------------- |
-| Raw XML export       | `xml_exports/<Solution>/<date>/`      | FileMaker (manual)             | Archived source of truth                                      |
-| Exploded XML         | `agent/xml_parsed/`                   | `fmparse.sh`                   | Per-object XML fragments for deep inspection                  |
-| Sanitized scripts    | `agent/xml_parsed/scripts_sanitized/` | `fmparse.sh`                   | Human-readable script text (~90% smaller than XML)            |
-| Index files          | `agent/context/{solution}/*.index`    | `fmcontext.sh`                 | Compact, greppable lookup tables covering the entire solution |
-| CONTEXT.json         | `agent/CONTEXT.json`                  | FileMaker `Context()` function | Scoped context for a single script-generation request; includes `generated_at` timestamp |
+| Plugin bridge        | `agent/scripts/agfm_bridge.py`        | Manual (checked in)            | The single CLI interface to the plugin — context, query, lint, deploy, clipboard, discovery |
+| Live context         | `GET /api/context`                    | agentic-fm plugin              | Authoritative scoped context for the current file and layout  |
+| CONTEXT.json         | `agent/CONTEXT.json`                  | agentic-fm plugin              | On-disk cache of the live context; includes `generated_at` timestamp |
 | CONTEXT.example.json | `agent/CONTEXT.example.json`          | Manual (checked in)            | Schema reference and realistic example                        |
+| Discovery index      | Plugin memory + SQLite cache          | `agfm_bridge.py save-as-xml --load` | Solution-wide cross-reference: script bodies, references, dependencies, orphans, impact |
 | Snippet examples     | `agent/snippet_examples/`             | Manual (checked in)            | Archival fmxmlsnippet templates; fallback when catalog entry is insufficient |
 | Step catalog         | `agent/catalogs/step-catalog-en.json` | Manual (checked in)            | Single source of truth for all script steps -- IDs, params, types, enums, HR signatures, behavioral notes |
-| Companion server     | `agent/scripts/companion_server.py`   | Manual (checked in)            | Lightweight HTTP server (port 8765) FileMaker calls via Insert from URL to run shell commands |
 | Webviewer            | `webviewer/`                          | Manual (checked in)            | Browser-based visual script editor with live HR-to-XML conversion and AI chat |
-| Generated scripts    | `agent/sandbox/`                      | AI agent                       | fmxmlsnippet output ready for clipboard import                |
+| Generated scripts    | `agent/sandbox/{Solution}/`           | AI agent                       | Human-readable `.fmscript` output, one subfolder per solution  |
+| Linter               | `agent/fmlint/`                       | Manual (checked in)            | Structural, naming, reference, and calculation validation      |
 | Validation script    | `agent/scripts/validate_snippet.py`   | Manual (checked in)            | Post-generation validation of fmxmlsnippet output; checks staleness and coding conventions |
-| Deploy script        | `agent/scripts/deploy.py`             | Manual (checked in)            | Tiered deployment: Tier 1 (manual clipboard paste), Tier 2 (AGFMPaste via OData), Tier 3 (future full automation) |
 
 ## Context Hierarchy
 
-The AI uses a strict hierarchy when looking up FileMaker objects. This hierarchy exists to minimise token consumption -- each level is progressively larger and more expensive to read.
+There is a single authoritative source — the plugin. The hierarchy below is about **cost**, not fallback: each level answers a different class of question, and the cheapest sufficient one wins.
 
 ```
-Priority 1 ─ agent/CONTEXT.json                    (scoped to the current task, ~2-5 KB)
-Priority 2 ─ agent/context/{solution}/*.index      (solution-wide indexes, ~50-100 KB total)
-Priority 3 ─ agent/xml_parsed/                     (full exploded XML, several MB)
+Level 1 ─ agent/catalogs/step-catalog-en.json   (step structure — no FM round-trip needed)
+Level 2 ─ GET /api/context                      (current file + layout, ~2-5 KB)
+Level 3 ─ POST /api/query                       (arbitrary SQL against FM system tables)
+Level 4 ─ Discovery queries                     (solution-wide cross-reference; needs one-time load)
 ```
 
-1. **CONTEXT.json** -- Read first. Contains everything needed for the current task with IDs ready to use.
-2. **Index files** -- Search via `grep` when CONTEXT.json is missing an object. Each index file is a single flat file covering the entire solution, located under `agent/context/{solution}/`.
-3. **xml_parsed/** -- Last resort. Only grep into this directory when indexes and CONTEXT.json both lack the needed information.
+1. **Step catalog** -- Answer structural questions locally. Never costs a FileMaker round-trip.
+2. **`/api/context`** -- Read first for anything solution-specific. Contains everything needed for the current task with IDs ready to use.
+3. **`/api/query`** -- When an object is outside the current layout's scope, query `FileMaker_Tables` / `FileMaker_Fields` directly. Asynchronous: poll `/api/eval/:id` until `complete: true`.
+4. **Discovery** -- For cross-solution questions (who calls this, what breaks if I rename it, what's unused). Requires `save-as-xml --load` once per session.
 
-## Index File Format
-
-All index files in `agent/context/{solution}/` follow the same conventions:
-
-- **Pipe-delimited**, one record per line.
-- **Header comment** on the first line documents the column order.
-- **No quoting or escaping** -- the data does not require it.
-- Generated by `fmcontext.sh` using `xmllint --xpath` against the exploded XML.
-
-| File                      | Columns                                                                                              | Source in xml_parsed         |
-| ------------------------- | ---------------------------------------------------------------------------------------------------- | ---------------------------- |
-| `fields.index`            | `TableName\|TableID\|FieldName\|FieldID\|DataType\|FieldType\|AutoEnterCalc\|Flags`                  | `tables/**/*.xml`            |
-| `relationships.index`     | `LeftTO\|LeftTOID\|RightTO\|RightTOID\|JoinType\|LeftField=RightField\|CascadeCreate\|CascadeDelete` | `relationships/**/*.xml`     |
-| `layouts.index`           | `LayoutName\|LayoutID\|BaseTOName\|BaseTOID\|FolderPath`                                             | `layouts/**/*.xml`           |
-| `scripts.index`           | `ScriptName\|ScriptID\|FolderPath`                                                                   | `script_stubs/**/*.xml`      |
-| `table_occurrences.index` | `TOName\|TOID\|BaseTableName\|BaseTableID`                                                           | `table_occurrences/**/*.xml` |
-| `value_lists.index`       | `ValueListName\|ValueListID\|SourceType\|Values`                                                     | `value_lists/**/*.xml`       |
+If the plugin is unreachable, none of levels 2-4 are available. Stop and tell the developer — do not guess at IDs or work from a stale `CONTEXT.json`.
 
 ## CONTEXT.json Schema
 
-`CONTEXT.json` is the single most important file the AI reads. It is generated by FileMaker's `Context()` custom function and is scoped to the layout where the user invokes it.
+`CONTEXT.json` is an on-disk cache of `GET /api/context`, written by the plugin and scoped to the frontmost file and current layout. Prefer a live fetch; the file exists so context survives between calls.
 
 Top-level keys:
 
@@ -96,7 +80,7 @@ Top-level keys:
 | ------------------ | ------ | ----------------------------------------------------------------------------------- |
 | `solution`         | String | FileMaker file name                                                                 |
 | `task`             | String | Natural-language description of what to create                                      |
-| `generated_at`     | String | ISO 8601 UTC timestamp of when the context was generated; used for staleness detection (>60 min triggers a warning in validate_snippet.py) |
+| `generated_at`     | String | ISO 8601 UTC timestamp of when the context was generated; used for staleness detection (>60 min triggers a warning in validate_snippet.py). Refresh with `POST /api/context/refresh` |
 | `current_layout`   | Object | `name`, `id`, `base_to`, `base_to_id`                                               |
 | `tables`           | Object | Keyed by base table name; each entry has `id`, `to`, `to_id`, and a `fields` object |
 | `ddl`              | String | SQL DDL with FOREIGN KEY constraints and field comments                             |
@@ -131,64 +115,62 @@ Consumers: CLI/IDE agents (grep for step structure), webviewer (HR-to-XML conver
 
 ## Interaction Modes
 
-The toolchain supports three interaction modes. All share the same `agent/` folder, CONTEXT.json, and step catalog.
+The toolchain supports three interaction modes. All share the same `agent/` folder, plugin connection, and step catalog.
 
-| Aspect           | CLI (e.g. Claude Code)              | IDE (e.g. Cursor, VS Code)          | Webviewer                                      |
-| ---------------- | ----------------------------------- | ----------------------------------- | ---------------------------------------------- |
-| Interface        | Terminal                            | Editor with AI pane                 | Browser (standalone or embedded in FileMaker)   |
-| Output format    | fmxmlsnippet XML in `agent/sandbox/`| fmxmlsnippet XML in `agent/sandbox/`| HR script in Monaco editor                      |
-| XML generation   | Agent constructs XML from catalog   | Agent constructs XML from catalog   | Client-side `hr-to-xml.ts` converter            |
-| AI provider      | Model behind the CLI/IDE            | Model behind the CLI/IDE            | Anthropic API, OpenAI API, or Claude Code CLI   |
+| Aspect           | CLI (e.g. Claude Code)               | IDE (e.g. Cursor, VS Code)           | Webviewer                                     |
+| ---------------- | ------------------------------------ | ------------------------------------ | --------------------------------------------- |
+| Interface        | Terminal                             | Editor with AI pane                  | Browser (standalone or embedded in FileMaker) |
+| Output format    | `.fmscript` in `agent/sandbox/`      | `.fmscript` in `agent/sandbox/`      | HR script in Monaco editor                    |
+| XML generation   | Plugin `/api/hr-to-xml` at deploy    | Plugin `/api/hr-to-xml` at deploy    | Client-side `hr-to-xml.ts` converter          |
+| Delivery         | `agfm_bridge.py deploy/bundle/patch` | `agfm_bridge.py deploy/bundle/patch` | Plugin clipboard write                        |
+| AI provider      | Model behind the CLI/IDE             | Model behind the CLI/IDE             | Anthropic API, OpenAI API, or Claude Code CLI |
 
 The webviewer is a Preact + Monaco + Vite application in `webviewer/`. Its three-panel layout provides a Monaco script editor, live XML preview, and integrated AI chat. It can run as a standalone browser app or embedded inside a FileMaker WebViewer object. See `webviewer/WEBVIEWER_INTEGRATION.md` for full details.
 
 ## Script Generation Workflow
 
-The AI follows a mandatory sequence when generating fmxmlsnippet output:
+The AI follows a mandatory sequence when generating script output:
 
-1. **Read `agent/CONTEXT.json`** -- understand the task and collect all reference IDs.
+1. **Fetch live context** (`GET /api/context`, or `agfm_bridge.py context`) -- understand the task and collect all reference IDs. Verify the solution and layout match what the developer asked for.
 2. **Grep the step catalog** (`agent/catalogs/step-catalog-en.json`) for each step type being generated. The catalog is the single source of truth — behavioral notes from snippet_examples have been migrated into the catalog's `notes` field. For steps with `"status": "complete"`, construct XML directly from the catalog's `params` array. Fall back to reading the corresponding `agent/snippet_examples/` file only for archival reference when the catalog entry is insufficient.
-3. **Substitute IDs and names** from CONTEXT.json into the step structure.
-4. If a reference is missing from CONTEXT.json, search the relevant `agent/context/{solution}/*.index` file.
-5. Only fall back to `agent/xml_parsed/` as a last resort.
-6. Write the resulting fmxmlsnippet to `agent/sandbox/`.
-7. Run `validate_snippet.py` to check the output for structural and reference errors before handing it to the user.
+3. **Substitute IDs and names** from the context into the step structure.
+4. If a reference is outside the current layout's scope, resolve it via `POST /api/query` or a discovery query. If the plugin is unreachable, stop and tell the developer.
+5. Write the resulting human-readable script to `agent/sandbox/{Solution}/<Name>.fmscript`.
+6. Run `agfm_bridge.py lint` and fix all ERROR-severity diagnostics before presenting the work.
+7. **Pause for the developer's go-ahead** before any FileMaker-touching operation — they may be mid-edit. Then deploy via `agfm_bridge.py deploy` / `bundle` / `patch`.
 
 Output rules:
 
-- All output is fmxmlsnippet XML wrapped in `<fmxmlsnippet type="FMObjectList">`.
-- Output contains **script steps only** -- never wrap in `<Script>` tags.
+- Scripts are authored as human-readable `.fmscript`; the plugin converts to fmxmlsnippet at deploy time via `/api/hr-to-xml`.
+- Generated fmxmlsnippet is wrapped in `<fmxmlsnippet type="FMObjectList">` and contains **script steps only** -- never wrapped in `<Script>` tags.
 - Step structures must match the step catalog or snippet_examples; never invent or guess XML structure.
 - Paired steps (e.g. `If` / `End If`, `Open Transaction` / `Commit Transaction`) must always appear together.
-- In the webviewer context, output HR format instead of XML -- the client-side converter handles the translation.
+- Never use XML comments (`<!-- -->`) — FileMaker silently discards them on paste. Use `#` comment steps instead.
+- In the webviewer context, output HR format -- the client-side converter handles the translation.
 
 ## CLI Tools
 
-### fmparse.sh
+### agfm_bridge.py
 
-Archives a FileMaker XML export and explodes it into per-object XML files using [fm-xml-export-exploder](https://github.com/bc-m/fm-xml-export-exploder).
-
-```
-./fmparse.sh -s "<Solution Name>" <path-to-export> [options]
-```
-
-- Clears and repopulates only the current solution's subdirectories within `agent/xml_parsed/` on each run, preserving other solutions' data. This supports the FileMaker data separation model where multiple files (e.g. UI.fmp12, Data.fmp12) are parsed independently.
-- Archives the export under `xml_exports/<Solution>/<date>/`.
-
-### fmcontext.sh
-
-Generates AI-optimised index files from the exploded XML.
+The single interface to the plugin, and therefore to FileMaker. All FM-touching operations go through it.
 
 ```
-./fmcontext.sh                         # regenerate all solutions
-./fmcontext.sh -s "Invoice Solution"   # regenerate one solution only
+python3 agent/scripts/agfm_bridge.py status                      # health check + discovery state
+python3 agent/scripts/agfm_bridge.py context                     # fetch and cache live context
+python3 agent/scripts/agfm_bridge.py query "SELECT ..."          # SQL against FM system tables
+python3 agent/scripts/agfm_bridge.py lint <file>                 # FMLint (plugin, local fallback)
+python3 agent/scripts/agfm_bridge.py deploy <file> "Script"      # replace an existing script
+python3 agent/scripts/agfm_bridge.py bundle <file> --names "..." # create a new script
+python3 agent/scripts/agfm_bridge.py patch <patch.json>          # surgical step edits
+python3 agent/scripts/agfm_bridge.py save-as-xml --load          # export SaXML + load discovery
+python3 agent/scripts/agfm_bridge.py discovery-query <type> ...  # cross-reference queries
+python3 agent/scripts/agfm_bridge.py bridge-upgrade              # install/update AGFM_Bridge in FM
 ```
 
-- Reads `agent/xml_parsed/` and writes to `agent/context/{solution}/`.
-- Supports multiple solutions: each solution gets its own subfolder, mirroring the xml_parsed hierarchy.
-- Uses `xmllint --xpath` (ships with macOS; `libxml2-utils` on Linux).
-- Clears and regenerates only the targeted solution's subfolder on each run.
-- Run after `fmparse.sh` whenever the solution XML changes.
+- Resolves the plugin URL from `AGFM_PLUGIN_URL`, else `AGFM_PLUGIN_PORT` (default 8766), using the right host for the environment (`host.docker.internal` inside a container).
+- Authenticates with `AGFM_PLUGIN_TOKEN` from `.env.local`.
+- Detects `.fmscript` input and converts HR to fmxmlsnippet automatically before deploying.
+- Full endpoint reference: `agent/docs/PLUGIN.md`.
 
 ### validate_snippet.py
 
@@ -204,22 +186,9 @@ python3 agent/scripts/validate_snippet.py [file_or_directory] [options]
 - Use `--context <path>` to specify an alternate CONTEXT.json, `--snippets <path>` for a custom snippet_examples directory, or `--quiet` for errors-only output.
 - Exit code 0 = all files passed, 1 = one or more files failed.
 
-### companion_server.py
-
-A lightweight HTTP server that FileMaker calls via `Insert from URL` to run shell commands.
-
-```
-python3 agent/scripts/companion_server.py
-```
-
-- Listens on port 8765 by default.
-- Uses Python stdlib only — no virtualenv required.
-- Must be running before the **Explode XML** companion script is invoked.
-- Receives commands from FileMaker (encoded as JSON in a POST body), executes them on the host machine, and returns stdout/stderr output.
-
 ### Context() custom function
 
-A FileMaker custom function (`filemaker/Context.fmfn`) that generates `CONTEXT.json` at runtime inside the FileMaker solution.
+A FileMaker custom function (`filemaker/Context.fmfn`) that generates the context JSON at runtime inside the FileMaker solution. The plugin evaluates it to serve `GET /api/context`, so it must be installed in every solution you work on.
 
 ```
 Context ( "Create a script to add a new line item to the current invoice" )
@@ -227,18 +196,28 @@ Context ( "Create a script to add a new line item to the current invoice" )
 
 - Requires FileMaker Pro 21.0+.
 - Evaluates on the current layout and auto-discovers relevant TOs, fields, and relationships.
-- Invoked automatically by the **Push Context** companion script (`filemaker/agentic-fm.xml`).
 - See `docs/Context.fmfn.md` for the full technical reference.
+
+### AGFM_Bridge script
+
+The plugin's in-FileMaker counterpart. The plugin dispatches sub-protocol commands to it for operations that must execute inside FileMaker — SaXML export, window open, webview control, file open.
+
+```
+python3 agent/scripts/agfm_bridge.py bridge-upgrade
+```
+
+- Install or update in one command; the plugin drives the paste via AX automation.
+- `GET /api/bridge/status` returns the detected version and the full sub-protocol command catalog.
 
 ## Adding New Features
 
 When extending this project, keep the following principles in mind:
 
-1. **Preserve the context hierarchy.** Any new data source should slot into the existing priority order (CONTEXT.json > index files > xml_parsed). If you add a new index file, document it in this file and in `.cursor/AGENTS.md`. New index files follow the same `agent/context/{solution}/` subfolder pattern.
+1. **The plugin is the only path to FileMaker.** Do not add AppleScript, `osascript`, companion-server, or local-export fallbacks. If a capability is missing, add a plugin endpoint (and document it in `agent/docs/PLUGIN.md`) rather than routing around the plugin. When the plugin cannot do something, `GET /api/capability-gaps` is the honest answer — surface it to the developer.
 
-2. **Keep indexes lean.** Index files exist to reduce token consumption. Only extract signal -- names, IDs, types, and references. Discard UUIDs, hashes, timestamps, and visual positioning data.
+2. **Keep responses lean.** Plugin responses and discovery queries exist to reduce token consumption. Return signal -- names, IDs, types, and references. Discard UUIDs, hashes, timestamps, and visual positioning data.
 
-3. **Follow existing conventions.** New index files should be pipe-delimited with a header comment. New CLI tools should follow the `set -euo pipefail` / `msg()` / `error()` pattern used by `fmparse.sh` and `fmcontext.sh`.
+3. **Route new commands through `agfm_bridge.py`.** New FM operations become subcommands there rather than standalone scripts, so URL resolution, auth, and error handling stay in one place.
 
 4. **Update documentation together.** When adding a new artifact or changing the pipeline:
    - Update this file (`ARCHITECTURE.md`) with the new artifact and its role.
@@ -247,18 +226,17 @@ When extending this project, keep the following principles in mind:
 
 5. **The step catalog is the single source of truth for step structure.** `agent/catalogs/step-catalog-en.json` is the definitive reference for step XML structure, parameter definitions, enums, and behavioral notes. `snippet_examples/` is archival — it serves as a fallback only for complex steps with `"auto"`/`"unfinished"` catalog status or where the catalog entry remains insufficient. If you add support for a new script step type, add its catalog entry (including behavioral notes in the `notes` field) and a corresponding snippet_examples template for reference. All snippet files must follow the conventions in `agent/snippet_examples/steps/CONVENTIONS.md`.
 
-6. **CONTEXT.json is generated, not authored.** Changes to the CONTEXT.json schema require updating the `Context()` custom function in FileMaker (`filemaker/Context.fmfn`), not just the example file. The `agent/CONTEXT.example.json` file and `docs/Context.fmfn.md` should be updated to reflect any schema changes.
+6. **CONTEXT.json is generated, not authored.** Changes to the context schema require updating the `Context()` custom function in FileMaker (`filemaker/Context.fmfn`), not just the example file. The `agent/CONTEXT.example.json` file and `docs/Context.fmfn.md` should be updated to reflect any schema changes.
 
-7. **xml_parsed is read-only.** Never modify files in `agent/xml_parsed/`. It is a reference copy of the exploded FileMaker XML. Each solution's subdirectories are regenerated when `fmparse.sh` runs for that solution.
+7. **Pause before touching FileMaker.** The developer may be actively working in the file. Any FM-touching operation — deploy, bridge upgrade, SaXML export, AX automation — waits for an explicit go-ahead. Build this into any new command that reaches into FileMaker.
 
 8. **Webviewer changes require converter parity.** If you modify the step catalog or add new step types, verify that the webviewer's HR-to-XML converter (`webviewer/src/converter/hr-to-xml.ts`) handles the changes correctly. The converter must stay in sync with the catalog.
 
 ## Dependencies
 
-| Dependency                                                               | Required By                                   | Notes                                                                            |
-| ------------------------------------------------------------------------ | --------------------------------------------- | -------------------------------------------------------------------------------- |
-| [fm-xml-export-exploder](https://github.com/bc-m/fm-xml-export-exploder) | `fmparse.sh`                                  | Must be on PATH or set via `FM_XML_EXPLODER_BIN`                                 |
-| `xmllint`                                                                | `fmcontext.sh`                                | Ships with macOS; `libxml2-utils` on Linux                                       |
-| FileMaker Pro 21.0+                                                      | `Context()` function                          | For `GetTableDDL` and `While` support                                            |
-| Python 3 (stdlib)                                                        | `clipboard.py`, `validate_snippet.py`, `companion_server.py`, `deploy.py` | No virtualenv required; run directly with `python3 agent/scripts/...` |
-| Node.js 18+                                                              | `webviewer/`                                  | For Vite dev server and build                                                    |
+| Dependency          | Required By                                                | Notes                                                                            |
+| ------------------- | ---------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| agentic-fm plugin   | Everything that touches FileMaker                          | macOS host; `AGFM_PLUGIN_TOKEN` in `.env.local`, port 8766 by default            |
+| FileMaker Pro 21.0+ | `Context()` function, `AGFM_Bridge`                        | For `GetTableDDL` and `While` support                                            |
+| Python 3 (stdlib)   | `agfm_bridge.py`, `validate_snippet.py`, `agent/fmlint/`   | No virtualenv required; run directly with `python3 agent/scripts/...`            |
+| Node.js 18+         | `webviewer/`                                               | For Vite dev server and build                                                    |

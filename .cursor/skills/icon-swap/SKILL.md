@@ -59,9 +59,9 @@ Same as `icon-extract` skill — the input can come from:
 python3 agent/scripts/fm_icon_extract.py agent/sandbox/<filename>.xml --json
 ```
 
-**B) Clipboard via companion server:**
+**B) Clipboard via the plugin:**
 ```bash
-curl -s http://local.hub:8765/clipboard | python3 -c "
+python3 agent/scripts/agfm_bridge.py clipboard-read | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
 if data.get('success'):
@@ -74,7 +74,7 @@ else:
 "
 ```
 
-Fall back to `host.docker.internal:8765` if `local.hub:8765` is unreachable.
+`agfm_bridge.py` resolves the plugin host automatically, including from inside a container.
 
 **C) Developer pastes XML directly** — save to sandbox and proceed.
 
@@ -266,7 +266,7 @@ The function:
 
 **If the input came from clipboard**, write the updated XML back to clipboard:
 ```bash
-python3 agent/scripts/clipboard.py write agent/sandbox/<input>_updated.xml
+python3 agent/scripts/agfm_bridge.py clipboard-write agent/sandbox/<input>_updated.xml
 ```
 
 Then instruct the developer:
@@ -277,7 +277,7 @@ Then instruct the developer:
 **If the input came from a file**, inform the developer:
 > The updated XML is at `agent/sandbox/<input>_updated.xml`. You can load it to clipboard with:
 > ```
-> python3 agent/scripts/clipboard.py write agent/sandbox/<input>_updated.xml
+> python3 agent/scripts/agfm_bridge.py clipboard-write agent/sandbox/<input>_updated.xml
 > ```
 
 ---

@@ -1,6 +1,6 @@
 ---
 name: script-debug
-description: Systematic debugging workflow for FileMaker scripts — reproduce the issue, isolate the failure point, form a hypothesis, verify with runtime data, and produce a fix. At Tier 1 the developer runs scripts manually and provides debug output. At Tier 3 the agent autonomously instruments the script, deploys the instrumented version, triggers it, reads debug output, and iterates until the root cause is found. Triggers on phrases like "debug this", "script not working", "wrong output", "script error", or when a script produces unexpected behavior.
+description: Systematic debugging workflow for FileMaker scripts — reproduce the issue, isolate the failure point, form a hypothesis, verify with runtime data, and produce a fix. The agent instruments the script, deploys the instrumented version through the plugin, runs it, reads $$DEBUG back, and iterates until the root cause is found. Triggers on phrases like "debug this", "script not working", "wrong output", "script error", or when a script produces unexpected behavior.
 ---
 
 # Script Debug
@@ -9,12 +9,13 @@ A systematic debugging workflow: reproduce → isolate → hypothesise → verif
 
 ---
 
-## Step 1: Determine the automation tier
+## Step 1: Confirm the plugin is reachable
 
-Read `agent/config/automation.json` and check `project_tier` (preferred) or `default_tier`.
+```bash
+python3 agent/scripts/agfm_bridge.py status
+```
 
-- **Tier 1** — the developer runs scripts manually; the agent provides instrumented scripts on the clipboard and reads `agent/debug/output.json` after the developer confirms execution.
-- **Tier 3** — the agent autonomously deploys instrumented scripts, triggers them via the companion, reads debug output, and iterates without developer intervention.
+The plugin is the only path to FileMaker. If it is unreachable, say so and stop — do not fall back to stale data or manual workarounds.
 
 ---
 
@@ -28,14 +29,14 @@ Gather information from the developer:
 4. **When does it happen?** — always, only with certain data, only on server, etc.
 5. **Any recent changes?** — was the script modified recently?
 
-Look up the script source from `agent/xml_parsed/scripts_sanitized/` and read the human-readable version.
+Pull the script body from the plugin: `agfm_bridge.py discovery-query script_body --script "<Name>"`.
 
 ### Resolve the call tree
 
 Before forming hypotheses, load the full call tree — the bug may be in a subscript.
 
 1. **Extract Perform Script references** — scan the human-readable script for all `Perform Script` lines. Extract every target script name.
-2. **Load each subscript** — locate and read each subscript's human-readable version from `scripts_sanitized/`. Resolve name→ID via plugin (preferred):
+2. **Load each subscript** — pull each subscript's body from the plugin. Resolve name→ID via plugin (preferred):
    ```bash
    curl -s -H "Authorization: Bearer $(grep AGFM_PLUGIN_TOKEN /workspaces/agentic-fm/.env.local | cut -d= -f2)" \
      $(grep AGFM_PLUGIN_URL /workspaces/agentic-fm/.env.local | cut -d= -f2)/api/context | python3 -c "
@@ -43,7 +44,7 @@ Before forming hypotheses, load the full call tree — the bug may be in a subsc
    for n,i in d.get('scripts',{}).items(): print(f\"{i.get('id')}|{n}\")
    " | grep -i "ScriptName"
    ```
-   Index fallback: `grep "ScriptName" "agent/context/{solution}/scripts.index"`
+   Fallback: `agfm_bridge.py discovery-query scripts`
 3. **Recurse** — each subscript may call further subscripts. Repeat until no new references are found. Track visited scripts to avoid cycles.
 4. **Present the call tree**:
 
@@ -122,7 +123,7 @@ curl -s -H "Authorization: Bearer $(grep AGFM_PLUGIN_TOKEN /workspaces/agentic-f
 import sys, json; d=json.load(sys.stdin)
 for n,i in d.get('scripts',{}).items(): print(f\"{i.get('id')}|{n}\")
 " | grep -i "Agentic-fm Debug"
-# Fallback: grep "Agentic-fm Debug" "agent/context/{solution}/scripts.index"
+# Fallback: agfm_bridge.py discovery-query scripts
 ```
 
 Generate the instrumented script as fmxmlsnippet in `agent/sandbox/` and validate:
@@ -135,16 +136,18 @@ python3 agent/scripts/validate_snippet.py agent/sandbox/{ScriptName}.xml
 
 ## Step 5: Deploy and run
 
-### Tier 3 (autonomous)
+### Autonomous (default)
 
-1. **Save the original** — before replacing the script, note its current state (the `scripts_sanitized/` version is the reference)
-2. **Deploy the instrumented version** — load clipboard via `POST {companion_url}/clipboard`, then replace the script content via:
-   - `POST {companion_url}/trigger` with raw AppleScript: activate FM, open Script Workspace, AXPress the script's tab button, Cmd+A → Delete → Cmd+V → Cmd+S
-3. **Run the script** — `POST {companion_url}/trigger` with `{ "fm_app_name": "...", "script": "ScriptName", "target_file": "SolutionName" }`
-4. **Wait and read** — allow 2–3 seconds, then read `agent/debug/output.json`
+1. **Save the original** — write the current script body to `agent/sandbox/{Solution}/{ScriptName}.original.fmscript` before replacing it
+2. **Deploy the instrumented version** — after pausing for the developer's go-ahead:
+   ```bash
+   python3 agent/scripts/agfm_bridge.py deploy agent/sandbox/{Solution}/{ScriptName}.fmscript "{ScriptName}"
+   ```
+3. **Run the script** — `POST /api/performscript` with `{"scriptName": "{ScriptName}"}`, then poll `/api/eval/:id` until `complete: true`
+4. **Read the output** — `GET /api/ui/dataviewer` and pull the `$$DEBUG` entry
 5. **Iterate if needed** — if the first debug output doesn't reveal the root cause, adjust instrumentation and repeat from step 4
 
-### Tier 1 (developer-assisted)
+### Developer-assisted (scripts with side effects)
 
 1. Present the instrumented script on the clipboard with paste instructions:
 
@@ -189,23 +192,21 @@ Once the root cause is identified:
 1. **Explain the root cause** clearly to the developer — what went wrong, why, and at what line
 2. **Generate the fixed script** as fmxmlsnippet in `agent/sandbox/` — remove all debug instrumentation and apply the fix
 3. **Validate**: `python3 agent/scripts/validate_snippet.py agent/sandbox/{ScriptName}.xml`
-4. **Deploy** per the current tier:
-   - **Tier 3**: deploy autonomously, replacing the instrumented version with the fixed version
-   - **Tier 1**: clipboard with paste instructions
+4. **Deploy** the fix with `agfm_bridge.py deploy`, replacing the instrumented version — after pausing for the developer's go-ahead
 
 ### Restore safety
 
-If the fix doesn't work or the developer wants to revert, the original script is always available in `agent/xml_parsed/scripts_sanitized/`. At Tier 3, the agent can convert and redeploy the original:
+If the fix doesn't work or the developer wants to revert, redeploy the pre-instrumentation copy you saved into `agent/sandbox/{Solution}/`. Always save that copy before instrumenting:
 
 ```bash
-python3 agent/scripts/fm_xml_to_snippet.py "agent/xml_parsed/scripts/{solution}/{path}.xml" "agent/sandbox/{ScriptName}.xml"
+python3 agent/scripts/fm_xml_to_snippet.py "<saxml-export-dir>/scripts/{path}.xml" "agent/sandbox/{Solution}/{ScriptName}.xml"
 ```
 
 ---
 
 ## Constraints
 
-- **Do not modify the original in xml_parsed/** — it is read-only reference
+- **Keep the pre-instrumentation copy** in `agent/sandbox/{Solution}/` so you can always revert
 - **Always restore the original script** after debugging unless the developer explicitly approves the fix as the new version
 - **One script at a time** — if the bug is in a subscript, debug that subscript separately
 - **Label every debug point** — use descriptive labels in the `Perform Script` parameter so the output is self-documenting

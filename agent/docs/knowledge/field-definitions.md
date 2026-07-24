@@ -1,6 +1,6 @@
 # Field Definition fmxmlsnippet Format
 
-Field definitions are pasted into FileMaker via Manage Database > Fields using clipboard class `XMFD`. The fmxmlsnippet format for fields differs significantly from SaXML (the format in `xml_parsed/tables/`).
+Field definitions are pasted into FileMaker via Manage Database > Fields using clipboard class `XMFD`. The fmxmlsnippet format for fields differs significantly from SaXML (the format returned by a Save a Copy as XML export).
 
 ## Normal field
 
@@ -68,7 +68,7 @@ For a Normal field with a calculated auto-enter (not a Calculated fieldType):
 
 ## SaXML vs fmxmlsnippet differences
 
-| Aspect | SaXML (`xml_parsed/tables/`) | fmxmlsnippet (clipboard) |
+| Aspect | SaXML (export format) | fmxmlsnippet (clipboard) |
 |--------|------------------------------|--------------------------|
 | Calculation formula | `<Calculation><TableOccurrenceReference/><Text><![CDATA[...]]></Text></Calculation>` | `<Calculation table="TO Name"><![CDATA[...]]></Calculation>` |
 | Attribute case | `fieldtype`, `datatype` (lowercase) | `fieldType`, `dataType` (camelCase) |

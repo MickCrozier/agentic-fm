@@ -112,6 +112,6 @@ When used as part of the standard script creation workflow (CLAUDE.md steps 6-7)
    ```
 2. Fix any ERROR-level diagnostics before deployment
 3. Review WARNING-level diagnostics with the developer
-4. Proceed to `deploy.py` only after errors are resolved
+4. Proceed to `agfm_bridge.py` only after errors are resolved
 
 The linter replaces `validate_snippet.py` as the primary validation tool while maintaining backward compatibility — `validate_snippet.py` continues to work for its original XML-only checks.

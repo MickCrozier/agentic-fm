@@ -8,7 +8,7 @@ Set any value that is used more than once as a local variable near the top of th
 
 ```
 # -- Configuration --
-Set Variable [ $server ; "http://localhost:8765" ]
+Set Variable [ $server ; "https://api.example.com" ]
 
 # -- Work --
 Insert from URL [ $response ; $server & "/webviewer/status" ]
@@ -24,8 +24,8 @@ If the port changes, only the `Set Variable` step needs updating.
 
 | Category                                            | Examples                                                  |
 | --------------------------------------------------- | --------------------------------------------------------- |
-| Base URLs / server addresses                        | `"http://localhost:8765"`, `"https://api.example.com/v2"` |
-| File or folder paths                                | `$$AGENTIC.FM & "agent/sandbox/"`                         |
+| Base URLs / server addresses                        | `"https://api.example.com"`, `"https://api.example.com/v2"` |
+| File or folder paths                                | `$repoPath & "agent/sandbox/"`                            |
 | Status / state strings used in multiple comparisons | `"Pending"`, `"Sent"`                                     |
 | Threshold values                                    | record limits, retry counts, timeout durations            |
 | Derived values that are expensive to compute        | results of `ExecuteSQL`, large JSON payloads              |
@@ -48,7 +48,7 @@ Group configuration variables together at the top, separated from the functional
 
 ```
 # -- Configuration --
-Set Variable [ $server    ; "http://localhost:8765" ]
+Set Variable [ $server    ; "https://api.example.com" ]
 Set Variable [ $repoPath  ; ConvertFromFileMakerPath ( JSONGetElement ( $$AGENTIC.FM ; "path" ) ; 1 ) ]
 Set Variable [ $outputDir ; $repoPath & "agent/sandbox/" ]
 

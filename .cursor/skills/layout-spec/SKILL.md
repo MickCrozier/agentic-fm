@@ -196,7 +196,7 @@ After approval, suggest next steps:
 > The layout specification is complete. Next steps:
 >
 > 1. **Create the layout shell** in FileMaker — Layout Mode > New Layout > name it **{Layout Name}**, base it on **{TO Name}**
-> 2. Run **Push Context** on the new layout to refresh CONTEXT.json
+> 2. Navigate to the new layout, then re-fetch context with `agfm_bridge.py context`
 > 3. Use the `layout-design` skill to generate the layout objects from this spec
 
 ---
@@ -207,5 +207,5 @@ After approval, suggest next steps:
 - The agent cannot create the layout container — only specify what goes on it
 - All field references must come from CONTEXT.json or index files — never invent field names or IDs
 - All style class references must come from `theme-classes.json` when available — never invent class names
-- Portal configurations must reference valid related TOs from CONTEXT.json or `relationships.index`
-- Button script references must use script names and IDs from CONTEXT.json or `scripts.index`
+- Portal configurations must reference valid related TOs from `GET /api/context`
+- Button script references must use script names and IDs from `GET /api/context`

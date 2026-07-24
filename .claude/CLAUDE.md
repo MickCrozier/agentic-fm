@@ -45,13 +45,13 @@ Do this **once per session**, not on every prompt. If the check fails (no networ
 
 ## Environment detection
 
-Also at session start, check if you are running in a sandboxed or non-macOS environment:
+Also at session start, confirm the plugin is reachable — it is the only path to FileMaker:
 
 ```bash
-uname -s 2>/dev/null; command -v osascript &>/dev/null && echo "OSASCRIPT" || echo "NO_OSASCRIPT"
+python3 agent/scripts/agfm_bridge.py status
 ```
 
-If `uname` returns `Linux` or `osascript` is not found, read `agent/docs/SANDBOXED_ENVIRONMENT.md` before proceeding. That document covers setup paths, platform limitations, and the filesystem bridge workflow for sandboxed agents.
+If the plugin is not reachable, say so and stop before attempting any FM operation. Read `agent/docs/SANDBOXED_ENVIRONMENT.md` when running in a container or on non-macOS — it covers reaching the plugin on the macOS host via `host.docker.internal`.
 
 # Local development context
 
@@ -65,25 +65,20 @@ If `PROJECT.md` exists at the project root, read it at session start. It contain
 
 This project is designed to create FileMaker objects — in the clipboard-supported fmxmlsnippet format. Developers reference and use the HR (human-readable) format for scripts. The following folders are used.
 
-- _sandbox/_ is where all newly created or in-progress work is stored. **Always organise sandbox files into a subfolder named after the solution** — e.g. `agent/sandbox/MySolution/MyScript.fmscript`. The solution name comes from `CONTEXT.json["solution"]` or the plugin `/api/context`. Never write files directly into the sandbox root.
-- _xml_parsed/_ is the XML output from the FileMaker solution. See **Context system** below.
+- _sandbox/_ is where all newly created or in-progress work is stored. **Always organise sandbox files into a subfolder named after the solution** — e.g. `agent/sandbox/MySolution/MyScript.fmscript`. The solution name comes from the plugin `/api/context`. Never write files directly into the sandbox root.
 - _catalogs/_ contains the step catalog (`step-catalog-en.json`) — a structured index of all FileMaker script steps with parameter definitions, types, enums, and HR signatures. This is the primary reference for step XML structure.
 - _snippet_examples/_ is an **archival** reference folder. The step catalog is the single source of truth for step structure. Read snippet_examples only when the catalog's `notes` field is insufficient.
 - _fmlint/_ is the FMLint linter package. Run via `python3 -m agent.fmlint` to validate fmxmlsnippet XML, human-readable scripts, or standalone calculation files (`.fmfn`).
-- Context is everything in FileMaker. Depending on the enviorment and available tools, there are different ways of deriving context. See **Context system** below.
-    1. Use the Plugin API
-    2. _CONTEXT.json_ is the primary source of IDs, names, relationships, and other metadata for the current task. 
-        - _context/_ contains pre-extracted index files — a secondary lookup source.
-
+- Context is everything in FileMaker. **The plugin API is the only source of context** — IDs, names, relationships, and task metadata. `agent/CONTEXT.json` is written by the plugin as a cached snapshot; it is never hand-authored and is not a fallback when the plugin is down. See **Context system** below.
 
 
 # Context system
 
-Multiple sources of context are available about the FileMaker solution. Always start with the most efficient source.
+**The plugin is the only source of context.** There is no offline fallback. If the plugin is unreachable, stop and tell the developer rather than guessing at IDs or working from stale data.
 
-## Plugin API (primary)
+## Plugin API
 
-**Use the plugin when `AGFM_PLUGIN_TOKEN` is set in `.env.local`** — it is always live and requires no Push Context step. The URL is resolved automatically by `agfm_bridge.py` from `AGFM_PLUGIN_PORT` (default 8766) or `AGFM_PLUGIN_URL` if set.
+`AGFM_PLUGIN_TOKEN` must be set in `.env.local`. The URL is resolved automatically by `agfm_bridge.py` from `AGFM_PLUGIN_PORT` (default 8766) or `AGFM_PLUGIN_URL` if set.
 
 ```bash
 TOKEN=$AGFM_PLUGIN_TOKEN
@@ -106,32 +101,17 @@ curl -s -H "Authorization: Bearer $TOKEN" -X POST $URL/api/query \
 
 `/api/query` is asynchronous — it returns `{"id": "eval-N-...", "queued": true}`. Poll `GET $URL/api/eval/:id` until `complete: true`.
 
-`/api/context` returns the same schema as `CONTEXT.json`: `task`, `current_layout`, `tables` (with fields), `layouts`, `scripts`, `value_lists`. All IDs are ready to use directly in fmxmlsnippet output.
+`/api/context` returns: `task`, `current_layout`, `tables` (with fields), `layouts`, `scripts`, `value_lists`. All IDs are ready to use directly in fmxmlsnippet output.
 
 **Always verify context before starting work** — check `solution`, `current_layout.name`, and `task` match the developer's request. If anything looks wrong (wrong file, wrong layout, no task), say so and ask the developer to navigate to the correct layout in FileMaker before proceeding. Call `POST /api/context/refresh` if the context appears stale, then re-fetch.
 
-## CONTEXT.json (fallback when plugin unavailable)
+## CONTEXT.json
 
-`agent/CONTEXT.json` is generated by FileMaker's Push Context script. Use it only when the plugin is not reachable. It has the same schema as `/api/context` but may be stale.
-
-**When CONTEXT.json does not exist or is stale and the plugin is unavailable**, ask the developer to navigate to the relevant layout in FileMaker and run the **Push Context** script.
-
-## Index files (secondary fallback)
-
-`agent/context/{solution}/*.index` files cover the entire solution. Use these only when the plugin is unavailable and CONTEXT.json lacks the needed object.
-
-- `fields.index` — every field across all tables
-- `relationships.index` — the relationship graph
-- `layouts.index` — all layouts with name, ID, base TO, and folder path
-- `scripts.index` — all scripts with name, ID, and folder path
-- `table_occurrences.index` — TO-to-base-table mapping
-- `value_lists.index` — value list names, sources, and values
-
-Search with grep: `grep "Invoices Details" "agent/context/SolutionApp/layouts.index"`
+`agent/CONTEXT.json` is a cached snapshot written by the plugin — same schema as `/api/context`. It exists so context survives between calls, not as an offline substitute. Prefer a live `/api/context` call; refresh the file via the plugin, never by hand.
 
 ## Reading existing script content
 
-When asked to copy, reference, or modify an existing script, use the first available method:
+When asked to copy, reference, or modify an existing script:
 
 **Discovery system loaded (fastest — no Script Workspace interaction):**
 
@@ -146,7 +126,7 @@ If discovery is not loaded, load it first:
 python3 agent/scripts/agfm_bridge.py save-as-xml --load
 ```
 
-**Plugin available — navigate + read (fallback when discovery not loaded):**
+**Navigate + read (when discovery is not loaded):**
 
 Use `POST /api/ui/script/navigate` to open a script by name, then `GET /api/ui/script` to read its steps.
 
@@ -166,20 +146,7 @@ for i, s in enumerate(d.get('steps', [])):
 "
 ```
 
-
-**Plugin unavailable (fallback):**
-
-`agent/xml_parsed/scripts_sanitized/{SolutionName}/` contains human-readable script files — but only for solutions that have been exported. If the folder doesn't exist for the current solution, there is no local copy; ask the developer.
-
-## xml_parsed (last resort)
-
-Only fall back to grepping `agent/xml_parsed/` if neither the plugin, CONTEXT.json, nor index files have the needed information.
-
-- ALWAYS use grep to search — never read full file contents
-- Prefer `scripts_sanitized/` for understanding script logic over `scripts/` XML
-- `scripts/` contains Save As XML (SaXML) format — use `agent/scripts/fm_xml_to_snippet.py` to convert to fmxmlsnippet when needed
-- `custom_menus/` and `custom_menu_sets/` contain one XML file per custom menu/set
-- Do NOT read `xml_parsed/layouts/` unless analyzing layout objects — layout XML is extremely verbose and rarely needed; layout IDs and names are available via the plugin or `layouts.index`
+If the plugin is unreachable, there is no local copy of the script — ask the developer.
 
 ## Discovery system
 
@@ -229,12 +196,12 @@ The agentic-fm plugin interface (`agfm_bridge.py`) and OData-based automation ar
 
 ## Scripts
 
-**Always write scripts as human-readable (`.fmscript`).** This is the required format regardless of plugin availability — readable, diffable, and auto-converted to XML by `deploy.py` via `/api/hr-to-xml` before deployment or bundling.
+**Always write scripts as human-readable (`.fmscript`).** This is the required format — readable, diffable, and auto-converted to XML by `agfm_bridge.py` via `/api/hr-to-xml` before deployment or bundling.
 
 Note: HR→XML conversion requires the plugin. If the plugin is unavailable at deploy time, the `.fmscript` file is still the correct output — hold deployment until the plugin is reachable.
 
-- **Always use `.fmscript` as the file extension** — never `.xml` or `.txt`. The deploy script detects `.fmscript` to trigger automatic HR→XML conversion.
-- Use the simplified fmxmlsnippet syntax from the step catalog, NOT the verbose XML format found in xml_parsed/scripts.
+- **Always use `.fmscript` as the file extension** — never `.xml` or `.txt`. `agfm_bridge.py` detects `.fmscript` to trigger automatic HR→XML conversion.
+- Use the simplified fmxmlsnippet syntax from the step catalog, NOT the verbose Save As XML (SaXML) format.
 - Line numbers always reference the human-readable script, never the raw XML.
 - Scripts should be written in a testable way with clear inputs and outputs where possible
 
@@ -259,7 +226,7 @@ Custom Functions are stored in the Custom Function space of FileMaker. Written t
 
 - XML comments within snippet_examples are for reference only — never include them in output.
 
-- Line numbers always reference the human-readable script (`scripts_sanitized/`), never the raw XML.
+- Line numbers always reference the human-readable script, never the raw XML.
 
 # Core workflow
 
@@ -277,44 +244,30 @@ Custom Functions are stored in the Custom Function space of FileMaker. Written t
 
 **MANDATORY: After writing or updating a file within agent/sandbox/:**
 
-6. Lint: `python3 agent/scripts/agfm_bridge.py lint agent/sandbox/<filename>` (falls back to local fmlint automatically). Fix any ERROR-severity diagnostics before presenting to the user; review WARNING-severity.
+6. Lint: `python3 agent/scripts/agfm_bridge.py lint agent/sandbox/<filename>` (falls back to the local `agent/fmlint/` package automatically). Fix any ERROR-severity diagnostics before presenting to the user; review WARNING-severity.
 7. **Deploy confirmation — ALWAYS pause and wait for the developer to signal readiness.** The developer may be actively using FileMaker while waiting for you to prepare work. Any FM-touching operation (script deploy, bridge upgrade, save-as-xml, AX automation) will interfere if they are not ready. After lint passes, output a clear pause message and wait:
 
    > Ready to deploy **MyScript** → FileMaker. Send **g** when you're ready.
 
    Accepted responses: `g`, `go`, `y`, `yes` (case-insensitive). Anything else cancels. Do NOT use AskUserQuestion — just wait for a chat reply. This pause applies to ALL live-FM operations, not just script deploys.
-8. Deploy — check if `AGFM_PLUGIN_TOKEN` is set in `.env.local` to decide which path to use:
+8. Deploy via `agfm_bridge.py` — the plugin is the only deploy path, so `AGFM_PLUGIN_TOKEN` must be set in `.env.local`:
 
-**`AGFM_PLUGIN_TOKEN` present — use `agfm_bridge.py`:**
 ```bash
 # Existing script — replace steps
-python3 agent/scripts/agfm_bridge.py deploy agent/sandbox/MyScript.fmscript "My Script"
+python3 agent/scripts/agfm_bridge.py deploy agent/sandbox/MySolution/MyScript.fmscript "My Script"
 
 # New script — create directly via plugin (no paste required)
-python3 agent/scripts/agfm_bridge.py bundle agent/sandbox/MyScript.fmscript --names "My Script"
+python3 agent/scripts/agfm_bridge.py bundle agent/sandbox/MySolution/MyScript.fmscript --names "My Script"
 
 # Surgical edits
-python3 agent/scripts/agfm_bridge.py patch agent/sandbox/mypatch.json
+python3 agent/scripts/agfm_bridge.py patch agent/sandbox/MySolution/mypatch.json
 ```
 
-**`AGFM_PLUGIN_TOKEN` absent — use `deploy.py` (Tier 1 → 2 → 3):**
-```bash
-python3 agent/scripts/deploy.py agent/sandbox/MyScript.fmscript "My Script"
-# or for new scripts:
-python3 agent/scripts/deploy.py --bundle agent/sandbox/MyScript.fmscript --names "My Script"
-```
+**If deploy fails, stop and ask the developer.** Do not retry with different flags or clipboard workarounds. Ask what they see and wait for their guidance.
 
-When `deploy.py` falls back to Tier 1 (manual paste), present instructions in this exact format:
+If the plugin is unreachable, do not attempt a workaround — the `.fmscript` file is still the correct deliverable. Say the plugin is down and hold deployment.
 
-> The script is on your clipboard. To install it:
->
-> 1. Open **Script Name** in Script Workspace
-> 2. **⌘A** — select all existing steps and delete
-> 3. **⌘V** — paste
-
-**If deploy fails, stop and ask the developer.** Do not retry with different flags, tiers, or clipboard workarounds. Ask what they see and wait for their guidance.
-
-**Patch file format** (for `agfm_bridge.py patch` or `deploy.py --patch`):
+**Patch file format** (for `agfm_bridge.py patch`):
 ```json
 {
   "script": "Script Name",
@@ -331,13 +284,11 @@ When `deploy.py` falls back to Tier 1 (manual paste), present instructions in th
 Two kinds of lookup are needed: **solution-specific references** (layout, field, script IDs) and **step structure** (XML elements and attributes).
 
 1. Is it a step structure question? → Grep the step catalog. Done.
-2. Is the plugin reachable?
+2. Everything else goes through the plugin:
    - For IDs/context: `GET /api/context` for current layout; `POST /api/query` for full schema.
    - For script content: check `GET /api/discovery/status` — if `hasData: true`, use `discovery-query script_body` instead of navigate + read.
    - For cross-solution analysis (impact, references, who-calls-what): discovery queries.
-3. Plugin unavailable? → Check `agent/CONTEXT.json` if present.
-4. Still missing? → Search the appropriate `agent/context/{solution}/*.index` file.
-5. Last resort → Grep `agent/xml_parsed/`. Never read entire files.
+3. Plugin unreachable? → Stop and tell the developer. There is no offline lookup path.
 
 ## Step catalog
 
@@ -390,32 +341,14 @@ grep -A 60 '"name": "Step Name"' "agent/catalogs/step-catalog-en.json"
 
 FileMaker objects are transferred via the macOS clipboard using proprietary binary descriptor classes — **not** plain text. Never use `pbpaste` or `pbcopy`; they corrupt multi-byte UTF-8 characters. Scripts must be converted from HR to XML before being written to the clipboard.
 
-## Priority order
-
-Check for `AGFM_PLUGIN_TOKEN` in `.env.local`:
-
-- **Token present** → use `agfm_bridge.py` for all clipboard and deploy operations.
-- **Token absent** → use `deploy.py` (Tier 1 → 2 → 3 via companion server / AppleScript).
-
-## agfm_bridge.py (token present)
+Use `agfm_bridge.py` for all clipboard operations — it talks to the plugin, which owns the FM clipboard:
 
 ```bash
 # Write XML file to FM clipboard
-python3 agent/scripts/agfm_bridge.py clipboard-write agent/sandbox/MyScript.xml
+python3 agent/scripts/agfm_bridge.py clipboard-write agent/sandbox/MySolution/MyScript.xml
 
 # Read FM clipboard contents
 python3 agent/scripts/agfm_bridge.py clipboard-read
-```
-
-## deploy.py (token absent)
-
-`deploy.py` selects the correct tier automatically:
-
-- **Tier 2/3** — native macOS: companion server + AppleScript
-- **Tier 1** — no AppleScript available: companion server, manual paste
-
-```bash
-python3 agent/scripts/deploy.py agent/sandbox/MyScript.fmscript "Script Name"
 ```
 
 
@@ -429,14 +362,17 @@ Custom functions fall into three categories:
 2. **Functional code** — general-purpose utility logic with no field references (e.g. `FormatPhone ( phoneNumber )`). Safe to call from any context.
 3. **Solution-specific code** — contain references to fields or table occurrences. Before using one, verify the script will be running on a layout whose base TO supports the referenced fields.
 
-When the CONTEXT includes a `custom_functions` section, prefer it. Otherwise, check:
+When the CONTEXT includes a `custom_functions` section, use it. Otherwise query the plugin's discovery system:
 
-- `xml_parsed/custom_functions_sanitized/` — human-readable calculation text
-- `xml_parsed/custom_function_calcs/` — XML calculation definitions
+```bash
+python3 agent/scripts/agfm_bridge.py discovery-query detail --text "CustomFunctionName"
+```
+
+If discovery is not loaded, load it with `agfm_bridge.py save-as-xml --load`. If the plugin is unreachable, ask the developer which custom functions exist — do not invent them.
 
 # Custom menus
 
-Custom menus are a distinct object type from scripts with a different clipboard format and XML wrapper. **Before creating or modifying any custom menu XML, use the `menu-lookup` skill** to extract the real UUIDs. Without these, FileMaker silently ignores the paste. Full details in `agent/docs/CUSTOM_MENUS.md`.
+Custom menus are a distinct object type from scripts with a different clipboard format and XML wrapper. **Before creating or modifying any custom menu XML, use the `menu-lookup` skill** to extract the real UUIDs from the plugin. Without these, FileMaker silently ignores the paste. Full details in `agent/docs/CUSTOM_MENUS.md`.
 
 # Library
 
@@ -447,7 +383,7 @@ The `agent/library` folder is a curated collection of reusable fmxmlsnippet code
 **Integration rules:**
 
 - Extract inner `<Step>` elements only (not the `<Script>` wrapper) unless specifically requested
-- Replace placeholder references with real values from CONTEXT.json
+- Replace placeholder references with real values from the plugin context
 - Do not remove structural or purpose comments embedded in library code
 
 # References
@@ -458,14 +394,13 @@ The `agent/library` folder is a curated collection of reusable fmxmlsnippet code
 - **Function reference**: `agent/docs/filemaker/functions/` — official FM function docs (not guaranteed present). Validate function names against this folder when writing calculations. Do not invent function names.
 - **Schema guidance**: `agent/docs/SCHEMA_GUIDANCE.md` — complete param type → XML mapping reference
 - **Documentation conventions**: When writing docs, use generic placeholder names (`SolutionApp`, `SolutionData`) instead of real solution names. Exception: when the context is explicitly about a specific solution.
-- **Sandboxed environments**: `agent/docs/SANDBOXED_ENVIRONMENT.md` — setup and operation guide for agents running in sandboxed, containerized, or virtualized environments (Codex, Claude Code, Docker, etc.). Read this if you detect you are not running natively on macOS.
+- **Plugin API**: `agent/docs/PLUGIN.md` — the full endpoint reference and the only path to FileMaker
+- **Sandboxed environments**: `agent/docs/SANDBOXED_ENVIRONMENT.md` — reaching the plugin from a container or non-macOS host. Read this if you detect you are not running natively on macOS.
 - **Base Elements Plugin**: use the `be-plugin` skill when writing calculations or scripts that need plugin functions (file I/O, regex, crypto, SMTP, clipboard, shell, XML, PDF, zip, etc.). The skill is self-contained.
 
 # Constraints
 
-- XML within _xml_parsed/_ is NEVER modified — only referenced.
-- When an existing script in _xml_parsed/_ is referenced for modification, copy it into _sandbox/_.
+- When an existing script is referenced for modification, pull it from the plugin and write the working copy into _sandbox/{Solution}/_.
 - XML within _snippet_examples/_ is NEVER modified. Prompt the user if changes seem needed.
-- Index files in _context/_ are NEVER manually edited — regenerated by `fmcontext.sh`.
-- _CONTEXT.json_ is generated by FileMaker — never manually created or modified by AI.
+- _CONTEXT.json_ is written by the plugin — never manually created or modified by AI.
 - _step-catalog-en.json_ is maintained via `agent/catalogs/UPDATING_CATALOGS.md`. See `agent/docs/SCHEMA_GUIDANCE.md` for the param type → XML mapping reference.

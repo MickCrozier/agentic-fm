@@ -1,11 +1,13 @@
 ---
 name: multi-script-scaffold
-description: Implements the Untitled Placeholder Technique for multi-script systems. Guides the developer through creating N placeholder scripts in FM, captures their IDs via Push Context, then generates all scripts with correct Perform Script wiring in one pass. Use when the user wants to scaffold a set of interdependent scripts. Triggers on phrases like "multi-script", "scaffold scripts", "placeholder technique", "untitled placeholder", or "build a script system".
+description: Scaffolds interdependent multi-script systems. Creates N named scripts via the plugin, captures their real IDs from live context, then generates all script bodies with correct Perform Script wiring in one pass. Use when the user wants to scaffold a set of interdependent scripts. Triggers on phrases like "multi-script", "scaffold scripts", "placeholder technique", "untitled placeholder", or "build a script system".
 ---
 
 # Multi-Script Scaffold
 
-Implements the Untitled Placeholder Technique: create N placeholders → capture IDs → generate all scripts with correct wiring → deploy → rename.
+Two-pass scaffold: create N named script shells → capture their real IDs from live context → generate all bodies with correct inter-script wiring → deploy.
+
+The second pass exists because `Perform Script` steps need the numeric ID of their target, and FileMaker only assigns an ID once the script exists.
 
 ---
 
@@ -29,27 +31,43 @@ Confirm this with the developer before proceeding.
 
 ---
 
-## Step 2: Read CONTEXT.json
+## Step 2: Fetch live context
 
-Read `agent/CONTEXT.json`. Extract:
-- `solution` — for resolving automation config
-- `scripts` — check if any of the target scripts already exist (by name); if so, note their IDs — those scripts do NOT need placeholders
-- `current_layout` — for context during generation
+```bash
+python3 agent/scripts/agfm_bridge.py context
+```
 
-Identify how many **new** placeholders are needed (exclude any scripts that already exist in CONTEXT.json).
+Extract:
+- `solution` — the sandbox subfolder name, and the key for any OData config
+- `scripts` — check whether any target script already exists (by name); if so, note its ID — it does not need creating
+- `current_layout` — context during generation
+
+Identify how many **new** scripts must be created (excluding any that already exist).
 
 ---
 
-## Step 3: Instruct placeholder creation (Tier 1/2) or auto-create (Tier 3)
+## Step 3: Create the script shells
 
-Read `agent/config/automation.json` to determine the active deployment tier.
+The plugin creates scripts with their **final names** directly, so there is no `Untitled` placeholder or rename step. Pause for the developer's go-ahead first — this writes into their live file.
 
-### Tier 1 or Tier 2
+> I'm about to create **N** empty scripts in your Script Workspace: {list names}. Send **g** when you're ready.
 
-Tell the developer:
+Then create them as empty shells so FileMaker assigns each a real ID:
 
-> In FileMaker Script Workspace, click the **+** button **N** times. FileMaker will name each one `New Script`.
-> **Before running Push Context**, rename each placeholder to its final name:
+```bash
+python3 agent/scripts/agfm_bridge.py bundle \
+  agent/sandbox/{Solution}/ScriptA.fmscript \
+  agent/sandbox/{Solution}/ScriptB.fmscript \
+  --names "Script Name A" "Script Name B"
+```
+
+Write each `.fmscript` as a single `# (comment)` step at this stage — the real bodies come in Step 5, once every ID is known.
+
+### Manual fallback
+
+If the developer prefers to create them by hand, tell them:
+
+> In FileMaker Script Workspace, click **+** N times and rename each one:
 >
 > | New Script # | Rename to |
 > |---|---|
@@ -57,56 +75,39 @@ Tell the developer:
 > | 2nd | Script Name B |
 > | … | … |
 >
-> Once all N scripts are renamed, run **Push Context** (Scripts menu → agentic-fm → Push Context) with the task description:
-> `"Scaffold: [brief description]"`
->
-> **Why rename first?** FileMaker names every new script `New Script`. Push Context keys scripts by name — if multiple scripts share the same name, only the last one's ID is captured.
-
-Wait for the developer to confirm Push Context has run.
-
-### Tier 3
-
-Confirm with the developer before proceeding:
-
-> I'll use AppleScript to create **N** placeholder scripts in the Script Workspace with their final names, then run Push Context automatically. Ready to proceed?
-
-If confirmed, trigger placeholder creation via `POST {companion_url}/trigger` with:
-```json
-{ "fm_app_name": "...", "script": "AGFMScriptBridge", "parameter": "{\"script\": \"...\", \"parameter\": \"...\"}" }
-```
-(Consult `SKILL_INTERFACES.md` for the full Tier 3 AppleScript path. At Tier 3, AppleScript creates scripts with their final names directly — no rename step needed.)
+> Rename before saving — FileMaker names every new script `New Script`, and the context keys scripts by name, so identical names collapse to one entry.
 
 ---
 
-## Step 4: Re-read CONTEXT.json (capture placeholder IDs)
+## Step 4: Re-fetch context (capture the real IDs)
 
-After the developer confirms Push Context has run, re-read `agent/CONTEXT.json`.
+```bash
+python3 agent/scripts/agfm_bridge.py context
+```
 
-Locate the newly created `Untitled`, `Untitled 2`, … `Untitled N` scripts in the `scripts` object and extract their IDs.
+Read the `scripts` object and extract the ID for each newly created script. Build the map:
 
-Build the assignment map — which placeholder ID maps to which target script:
+| Script name | ID |
+|---|---|
+| Process Invoice | 301 |
+| Invoice - Validate | 302 |
+| Invoice - Save | 303 |
 
-| Placeholder | ID | Will become |
-|---|---|---|
-| Untitled | 301 | Process Invoice |
-| Untitled 2 | 302 | Invoice - Validate |
-| Untitled 3 | 303 | Invoice - Save |
-
-Confirm the mapping with the developer if there is any ambiguity (e.g. more Untitled scripts than expected).
+If any expected script is missing from the context, stop and tell the developer — do not guess an ID.
 
 ---
 
 ## Step 5: Generate all scripts
 
-With all IDs resolved, generate every script as fmxmlsnippet XML written to `agent/sandbox/`.
+With all IDs resolved, generate every script as a human-readable `.fmscript` written to `agent/sandbox/{Solution}/`.
 
-**Naming convention**: `{Script Name}.xml` (spaces replaced with underscores or hyphens, developer preference).
+**Naming convention**: `{Script Name}.fmscript`.
 
 Rules:
-1. Use the real numeric IDs from the placeholder map for all `<Script id="N" name="..."/>` references in Perform Script steps.
+1. Use the real numeric IDs from the Step 4 map for all `<Script id="N" name="..."/>` references in Perform Script steps.
 2. Follow all conventions in `agent/docs/CODING_CONVENTIONS.md`.
 3. Grep the step catalog for every step type used.
-4. Validate each file with `python3 agent/scripts/validate_snippet.py agent/sandbox/<file>.xml` before proceeding to deployment.
+4. Lint each file with `python3 agent/scripts/agfm_bridge.py lint agent/sandbox/{Solution}/<file>.fmscript` before proceeding to deployment.
 
 Fix any validation errors before continuing.
 
@@ -114,59 +115,47 @@ Fix any validation errors before continuing.
 
 ## Step 6: Webviewer output (if available)
 
-Check webviewer availability:
-```bash
-curl -s --max-time 2 -o /dev/null -w "%{http_code}" http://localhost:8080
-```
+Push each script to the plugin's preview surface so the developer can review it before deployment:
 
-If reachable (HTTP 200), push each script as a `preview` payload:
 ```bash
-curl -s -X POST http://local.hub:8765/webviewer/push \
+curl -s -X POST -H "Authorization: Bearer $AGFM_PLUGIN_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"type": "preview", "content": "<HR script text>"}'
+  -d '{"type": "preview", "content": "<HR script text>"}' \
+  "http://localhost:${AGFM_PLUGIN_PORT:-8766}/api/preview"
 ```
 
-Push scripts sequentially so the developer can review each in Monaco before deployment begins.
-
-If not reachable, output each script in HR format to the terminal.
+Push scripts sequentially so each can be reviewed in turn. If the preview surface isn't in use, output each script in HR format to the terminal instead.
 
 ---
 
 ## Step 7: Deploy
 
-Deploy each script using `agent/scripts/deploy.py`, targeting its corresponding placeholder by script name.
+Pause for the developer's go-ahead, then deploy each script body in turn:
 
-**Tier 1**: For each script:
 ```bash
-python3 agent/scripts/deploy.py agent/sandbox/<Script Name>.xml "<Placeholder Name>"
+python3 agent/scripts/agfm_bridge.py deploy agent/sandbox/{Solution}/<Script Name>.fmscript "<Script Name>"
 ```
-Present instructions in the standard format:
 
-> The script is on your clipboard. To install it:
->
-> 1. Open **Untitled [N]** in Script Workspace
-> 2. **⌘A** — select all existing steps
-> 3. **⌘V** — paste
-
-Repeat for each script. Present all paste instructions up front so the developer can work through them in sequence without waiting.
-
-**Tier 2**: `deploy.py` auto-pastes into each placeholder. Confirm success for each before moving to the next.
-
-**Tier 3**: `deploy.py` handles everything. Report result per script.
+Confirm success for each before moving to the next, and report the result per script. If any deploy fails, stop and ask the developer — do not continue through the remaining scripts.
 
 ---
 
 ## Step 8: Final verification (optional)
 
-Suggest running a context refresh after renaming to confirm all script IDs are correctly wired:
+Re-fetch context and confirm every `Perform Script` reference resolves to the intended target:
 
-> Once you've renamed all scripts, run **Push Context** again and I can verify the IDs match the wiring in the generated scripts.
+```bash
+python3 agent/scripts/agfm_bridge.py context
+python3 agent/scripts/agfm_bridge.py discovery-query broken
+```
+
+`broken` lists any references the solution cannot resolve — it should come back empty.
 
 ---
 
 ## Notes
 
-- **Always confirm** the placeholder-to-script mapping before generating code — a wrong assignment means all Perform Script calls in that script will target the wrong script.
-- If the developer has already created scripts in a prior session and knows the IDs, skip Steps 3–4 and use those IDs directly.
-- Scripts with no inter-script dependencies can be generated without placeholders — use existing IDs from CONTEXT.json directly.
+- **Always confirm** the name-to-ID map before generating code — a wrong assignment means all Perform Script calls in that script will target the wrong script.
+- If the scripts already exist from a prior session, skip Steps 3–4 and read their IDs from `GET /api/context`.
+- Scripts with no inter-script dependencies can be generated in one pass — take existing IDs straight from `GET /api/context`.
 - The webviewer push is per-script, not a batch — send one preview per script so the developer can review them in sequence.

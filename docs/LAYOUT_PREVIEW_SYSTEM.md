@@ -10,8 +10,8 @@ How the agent designs, previews, and produces FileMaker layout objects. This doc
                                     ┌─────────────────────────┐
                                     │   FileMaker Solution    │
                                     │                         │
-                                    │  xml_parsed/themes/     │──── Theme XML (CSS + metadata)
-                                    │  xml_parsed/layouts/    │──── Layout XML (objects + positions)
+                                    │  SaXML export: themes/  │──── Theme XML (CSS + metadata)
+                                    │  FM clipboard (XML2)    │──── Layout XML (objects + positions)
                                     └─────────────────────────┘
                                                 │
                                     ┌───────────┴───────────┐
@@ -80,7 +80,9 @@ How the agent designs, previews, and produces FileMaker layout objects. This doc
 
 **Tool**: `agent/scripts/extract_theme.py`
 
-FileMaker themes define the visual language of a solution — fonts, colors, borders, padding, icon styles. The extraction tool reads the theme XML from `xml_parsed/themes/{solution}/` and produces web-usable output files in `agent/context/{solution}/`.
+FileMaker themes define the visual language of a solution — fonts, colors, borders, padding, icon styles. The extraction tool reads the theme XML from a SaXML export's `themes/` directory and produces web-usable output files in `agent/context/{solution}/`.
+
+Produce the export first with `python3 agent/scripts/agfm_bridge.py save-as-xml`.
 
 ### Usage
 
@@ -253,7 +255,15 @@ curl -s -X POST -H "Content-Type: application/json" \
     "styles": "/* theme-web.css content */",
     "repo_path": "/path/to/repo"
   }' \
-  http://localhost:8765/webviewer/push
+  > agent/config/.agent-output.json
+```
+
+The webviewer polls `/api/agent-output` and picks the payload up from there. To render the preview inside FileMaker instead, POST the same payload to the plugin's preview surface:
+
+```bash
+curl -s -X POST -H "Authorization: Bearer $AGFM_PLUGIN_TOKEN" \
+  -H 'Content-Type: application/json' -d @- \
+  "http://localhost:${AGFM_PLUGIN_PORT:-8766}/api/preview"
 ```
 
 - `content` — the HTML layout mock, using FM theme class names as CSS classes
@@ -316,7 +326,7 @@ The agent translates the approved HTML into `XML2` fmxmlsnippet format:
 - CSS class names become `<LocalCSS name="...">`
 - Field references resolve from CONTEXT.json (TO ID + field ID)
 - Script references for buttons resolve from CONTEXT.json
-- The `XML2` clipboard class is used — `clipboard.py` auto-detects it from `<LayoutObject` elements
+- The `XML2` clipboard class is used — the plugin auto-detects it from `<LayoutObject` elements
 
 The developer creates the layout shell in FM (name, base TO), then pastes the XML2 objects in Layout Mode.
 
@@ -354,6 +364,6 @@ This path is recommended for new solutions, complex UI interactions, or solution
 
 - **The agent cannot create layout containers** — only the objects on them. The developer must create the layout in FM first (name, base TO, dimensions).
 - **The agent must only suggest styles that exist in `theme-classes.json`** — creating new theme classes requires manual work in FM's Theme editor.
-- **Layout XML in `xml_parsed/layouts/` is read-only** — never modified by the agent.
+- **Layout XML is read via the FM clipboard** — the plugin cannot switch to Layout Mode or copy objects, so the developer must select all (⌘A) and copy (⌘C) in Layout Mode first, then the agent reads it with `agfm_bridge.py clipboard-read`.
 - **The preview is approximate** — FM renders objects through its own engine; the web preview uses CSS approximations. Pixel-perfect fidelity is not the goal; design decision fidelity is.
 - **SVG icons in layout objects** are decoded from base64 for the preview but the agent does not generate new icon data — buttons in XML2 output use empty `<IconData>` unless the developer provides icon content.

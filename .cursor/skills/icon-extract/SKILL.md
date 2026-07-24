@@ -20,9 +20,9 @@ The developer may provide input in one of three ways:
 python3 agent/scripts/fm_icon_extract.py agent/sandbox/<filename>.xml --json
 ```
 
-**B) Clipboard** — the developer says the layout object is on the clipboard. Read it via the companion server:
+**B) Clipboard** — the developer says the layout object is on the clipboard. Read it via the plugin:
 ```bash
-curl -s http://local.hub:8765/clipboard | python3 -c "
+python3 agent/scripts/agfm_bridge.py clipboard-read | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
 if data.get('success'):
@@ -35,15 +35,12 @@ else:
 "
 ```
 
-If the companion server is not reachable, try the Docker-internal hostname:
-```bash
-curl -s http://host.docker.internal:8765/clipboard | python3 -c "..."
-```
+`agfm_bridge.py` resolves the plugin host automatically, including from inside a container.
 
 If neither works, instruct the developer:
 > Please run this command to save the clipboard content:
 > ```
-> python3 agent/scripts/clipboard.py read agent/sandbox/_clipboard_input.xml
+> python3 agent/scripts/agfm_bridge.py clipboard-read > agent/sandbox/_clipboard_input.xml
 > ```
 
 Then proceed with the saved file.

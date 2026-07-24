@@ -4,427 +4,159 @@ Instructions for AI agents running inside a sandboxed, containerized, or virtual
 
 ---
 
-## When to use this guide
+## The short version
 
-This guide applies when **any** of the following are true:
+**The agentic-fm plugin is the only interface to FileMaker.** It always runs on the macOS host, next to FileMaker Pro — never inside your sandbox. Your environment only determines *how you reach it*, not *what you can do*.
 
-- A user pastes a URL or says "set this up" / "install this" without further instructions
-- You detect you are running in a sandboxed or virtualized environment (see detection below)
-- The user mentions Codex, Claude Code sandbox, a container, or a VM
-- You are running on Linux but the project clearly targets macOS + FileMaker Pro
+Everything reduces to one question:
 
-If the developer is working interactively on macOS with FileMaker Pro open, use the standard `QUICKSTART.md` and `/setup` skill instead.
+```bash
+python3 agent/scripts/agfm_bridge.py status
+```
+
+- **Succeeds** → you have full capability. Ignore the rest of this document; work exactly as `QUICKSTART.md` describes.
+- **Fails** → you cannot touch FileMaker at all. Fix reachability (below) before doing anything else.
+
+There is no degraded mode, no AppleScript fallback, and no offline copy of the solution. If the plugin is unreachable you can still write and lint `.fmscript` files, but you cannot read context, resolve IDs, or deploy.
 
 ---
 
 ## Step 1: Detect your environment
 
-Run these checks silently before presenting any setup plan. The results determine which setup path to follow.
+Run these checks silently before presenting any setup plan.
 
 ```bash
 # What OS?
-uname -s          # "Darwin" = macOS, "Linux" = likely sandboxed
+uname -s          # "Darwin" = macOS host, "Linux" = sandboxed
 
 # Am I in a container?
 test -f /.dockerenv && echo "DOCKER" || echo "NOT_DOCKER"
-cat /proc/1/cgroup 2>/dev/null | grep -qi "docker\|containerd\|sandbox" && echo "CONTAINERIZED" || echo "NOT_CONTAINERIZED"
+grep -qi "docker\|containerd\|sandbox" /proc/1/cgroup 2>/dev/null && echo "CONTAINERIZED" || echo "NOT_CONTAINERIZED"
 
-# Can I execute AppleScript? (macOS-only capability)
-command -v osascript &>/dev/null && echo "OSASCRIPT_AVAILABLE" || echo "NO_OSASCRIPT"
+# Is the token configured?
+grep -q AGFM_PLUGIN_TOKEN .env.local 2>/dev/null && echo "TOKEN_SET" || echo "NO_TOKEN"
 
-# Can I reach the companion server?
-# In a Docker dev container, localhost:8765 refers to the container, NOT the macOS host.
-# The companion server must run on the macOS host — use host.docker.internal to reach it.
-curl -s -o /dev/null -w "%{http_code}" http://localhost:8765/health 2>/dev/null || echo "NO_COMPANION_LOCAL"
-curl -s -o /dev/null -w "%{http_code}" http://host.docker.internal:8765/health 2>/dev/null || echo "NO_COMPANION_DOCKER"
-# If you are in Docker and NO_COMPANION_DOCKER: the companion server is not running on the host.
-# Ask the developer to start it: python3 agent/scripts/companion_server.py
-
-# Is Rust/Cargo available? (needed to compile fm-xml-export-exploder on Linux)
-command -v cargo &>/dev/null && echo "CARGO_AVAILABLE" || echo "NO_CARGO"
-
-# Is fm-xml-export-exploder already installed?
-command -v fm-xml-export-exploder &>/dev/null && echo "EXPLODER_FOUND" || echo "NO_EXPLODER"
-test -x ~/bin/fm-xml-export-exploder && echo "EXPLODER_IN_BIN" || true
-
-# Is the repo already populated with parsed XML?
-test -d agent/xml_parsed && ls agent/xml_parsed/ 2>/dev/null | head -1 && echo "XML_PARSED_POPULATED" || echo "XML_PARSED_EMPTY"
+# Can I reach the plugin?
+python3 agent/scripts/agfm_bridge.py status
 ```
 
-Based on the results, classify your environment:
-
-| Condition | Environment Type | Setup Path |
-|-----------|-----------------|------------|
-| `uname` = Darwin, `osascript` available | **Native macOS** | Use standard QUICKSTART.md |
-| `uname` = Darwin, no `osascript` | **macOS sandbox** (e.g. Seatbelt) | Full-access path below |
-| `uname` = Linux, host reachable | **Sandboxed with host access** | Full-access path below |
-| `uname` = Linux, host not reachable | **Isolated sandbox** | Limited path below |
+| Condition | What it means | Action |
+|-----------|---------------|--------|
+| `status` succeeds | Plugin reachable | Proceed normally |
+| `NO_TOKEN` | `.env.local` missing or incomplete | Ask the developer for the plugin token |
+| Linux/Docker + connection refused | Wrong host — `localhost` is the container | Set `AGFM_PLUGIN_URL` (below) |
+| Darwin + connection refused | Plugin not running | Ask the developer to start it |
+| 401 / 403 | Token mismatch | Ask the developer to re-copy the token |
 
 ---
 
-## Step 2: Determine your access level
+## Step 2: Reaching the plugin
 
-AI desktop apps (Codex, Claude Code, etc.) typically offer permission levels. The user may have granted:
+### Configuration
 
-- **Full access** — you can execute commands on the host, start background processes, install binaries, access the network. The project folder is shared between host and sandbox.
-- **Limited/sandboxed** — you can read/write files in the project directory but cannot start persistent processes on the host or access the network freely.
+`agfm_bridge.py` resolves the plugin URL in this order:
 
-**Ask the user if unclear.** A simple question like: "Do I have full system access, or am I restricted to this project folder?" saves significant trial and error.
+1. `AGFM_PLUGIN_URL` — full URL, used as-is (e.g. `http://host.docker.internal:8766`)
+2. `AGFM_PLUGIN_PORT` — port only; the host is inferred:
+   - Native macOS → `http://localhost:{port}`
+   - Docker / non-Darwin → `http://host.docker.internal:{port}`
+3. Default port **8766** when neither is set
+
+Authentication is `Authorization: Bearer $AGFM_PLUGIN_TOKEN`, read from `.env.local`.
+
+### Per-environment settings
+
+| Environment | `.env.local` |
+|-------------|--------------|
+| **Native macOS** | `AGFM_PLUGIN_TOKEN=…` (port defaults to 8766) |
+| **Docker on macOS** | `AGFM_PLUGIN_TOKEN=…` — host is inferred automatically |
+| **Docker, non-standard networking** | Add `AGFM_PLUGIN_URL=http://host.docker.internal:8766` explicitly |
+| **Remote VM / no route to host** | Not supported — the plugin must be reachable |
+
+### Common failure: VS Code port forwarding
+
+If `devcontainer.json` forwards port 8766, VS Code intercepts connections from the container and routes them back *into* the container, creating a loop that hangs with no response. Remove 8766 from `forwardPorts` and set `"onAutoForward": "ignore"` in `portsAttributes`. A container rebuild is required.
+
+### Verify manually
+
+```bash
+TOKEN=$AGFM_PLUGIN_TOKEN
+URL=${AGFM_PLUGIN_URL:-http://host.docker.internal:${AGFM_PLUGIN_PORT:-8766}}
+curl -s -H "Authorization: Bearer $TOKEN" "$URL/api/health"
+```
 
 ---
 
-## Full-Access Setup Path
+## Step 3: What to tell the developer
 
-When you have full access to the host (or are running natively), you can set up the entire project autonomously. This is the path for Codex "full access" mode or similar.
+When you cannot reach the plugin, be specific about what you checked:
 
-### 2a. Install fm-xml-export-exploder
-
-This Rust binary parses FileMaker XML exports. It is required for the Explode XML workflow.
-
-**On macOS (host or full-access sandbox):**
-
-```bash
-mkdir -p ~/bin
-
-# Download the latest release binary for macOS
-# Check https://github.com/bc-m/fm-xml-export-exploder/releases/latest for the current URL
-# Bleeding-edge: https://github.com/petrowsky/fm-xml-export-exploder/releases
-curl -L -o ~/bin/fm-xml-export-exploder "<release-url-for-macos>"
-chmod +x ~/bin/fm-xml-export-exploder
-```
-
-On macOS, the first run may be blocked by Gatekeeper (unsigned binary). In a sandbox with full access, this restriction is typically bypassed. If you encounter it, run:
-
-```bash
-xattr -d com.apple.quarantine ~/bin/fm-xml-export-exploder
-```
-
-**On Linux (sandbox/container):**
-
-No pre-built Linux binary is distributed. You have two options:
-
-1. **Compile from source** (if Rust toolchain is available):
-   ```bash
-   # Install Rust if not present
-   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-   source "$HOME/.cargo/env"
-
-   # Clone and build
-   git clone https://github.com/bc-m/fm-xml-export-exploder.git /tmp/fm-xml-export-exploder
-   cd /tmp/fm-xml-export-exploder
-   cargo build --release
-   mkdir -p ~/bin
-   cp target/release/fm-xml-export-exploder ~/bin/
-   chmod +x ~/bin/fm-xml-export-exploder
-   cd -
-   ```
-
-2. **Skip and use pre-populated data** — if `agent/xml_parsed/` is already populated (e.g. the developer ran Explode XML on the host before handing the project to you), the binary is not needed for code generation. See the Limited Path below.
-
-**Verify:**
-
-```bash
-~/bin/fm-xml-export-exploder --version
-```
-
-The `fmparse.sh` script finds the binary via `FM_XML_EXPLODER_BIN` environment variable or PATH lookup. Set it if the binary is not in `~/bin/` or PATH:
-
-```bash
-export FM_XML_EXPLODER_BIN="$HOME/bin/fm-xml-export-exploder"
-```
-
-### 2b. Verify Python 3 and xmllint
-
-```bash
-python3 --version       # Required — all core scripts use Python 3 stdlib only
-xmllint --version       # Required by fmcontext.sh for index generation
-```
-
-If missing on Linux:
-
-```bash
-# Debian/Ubuntu
-apt-get update && apt-get install -y python3 libxml2-utils
-
-# Alpine
-apk add python3 libxml2-utils
-```
-
-### 2c. Start the companion server
-
-The companion server is a lightweight Python HTTP server (stdlib only, no dependencies) that bridges between FileMaker and the agent toolchain.
-
-> **Docker dev container**: The companion server **must run on the macOS host machine**, not inside the container. The agent inside the container reaches it via `host.docker.internal:8765`. If the health check at `host.docker.internal:8765/health` fails, ask the developer to open a **Terminal on their Mac** and run:
+> **I can't reach the agentic-fm plugin, so I can't read your solution or deploy anything.**
 >
-> ```bash
-> cd /path/to/agentic-fm && python3 agent/scripts/companion_server.py
-> ```
+> I'm running in a container, so `localhost` reaches the container rather than your Mac. I tried `host.docker.internal:8766` and got connection refused.
 >
-> Replace `/path/to/agentic-fm` with the actual path to the cloned repo on the Mac (e.g. `~/Developer/agentic-fm`). Keep that Terminal window open — the server runs in the foreground. Verify it is up by checking the health endpoint from inside the container:
+> Could you check:
+> 1. The agentic-fm plugin is running on your Mac
+> 2. `.env.local` in this repo has a matching `AGFM_PLUGIN_TOKEN`
 >
-> ```bash
-> curl -s http://host.docker.internal:8765/health
-> ```
+> Once it's up I can pick up where we left off — I don't need you to export or push anything.
+
+Do **not** offer to work from stale local data, install `fm-xml-export-exploder`, or route through AppleScript. None of those paths exist any more.
+
+---
+
+## What works without the plugin
+
+| Capability | Status |
+|-----------|--------|
+| Read the step catalog (`agent/catalogs/`) | Works |
+| Read coding conventions and the knowledge base | Works |
+| Read the snippet library (`agent/library/`) | Works |
+| Write `.fmscript` / `.fmfn` to `agent/sandbox/{Solution}/` | Works |
+| Run FMLint locally (`python3 -m agent.fmlint <file>`) | Works — structural checks only |
+| Convert HR → XML locally (`agent/scripts/hr_to_xml.py`) | Works — emits `id="0"` placeholders |
+| Read solution context, IDs, schema | **Blocked** |
+| Read existing script bodies | **Blocked** |
+| Discovery queries (references, orphans, impact) | **Blocked** |
+| Clipboard read/write | **Blocked** |
+| Deploy, bundle, patch | **Blocked** |
+| Evaluate calculations, run scripts, read the Data Viewer | **Blocked** |
+
+You can write speculative code against the catalog and conventions, but it will contain no real field, layout, or script IDs. Say so plainly rather than presenting it as finished work.
+
+---
+
+## One-time FileMaker setup
+
+These steps require the developer to interact with FileMaker Pro directly. They are the same regardless of where you are running.
+
+> **FileMaker setup required:**
 >
-> Do not attempt to start the companion inside the container — it cannot run AppleScript or access the macOS clipboard from there.
-
-For native macOS or full-host-access sandboxes, start it in the background:
-
-```bash
-python3 agent/scripts/companion_server.py &
-```
-
-**Port:** 8765 (default). Override with `--port N`.
-
-**Binding:** By default binds to `0.0.0.0` (all interfaces). For a Docker dev container this is required — Docker routes `host.docker.internal` through the Docker Desktop VM network (`192.168.65.x`), which cannot reach a `127.0.0.1`-only listener on the host.
-
-> **⚠ VS Code port forwarding conflict:** If `devcontainer.json` includes `"forwardPorts": [8765]` or `"onAutoForward": "silent"` for port 8765, VS Code will intercept connections from the container and route them back into the container — creating a loop that causes requests to hang with no response. The fix is to remove 8765 from `forwardPorts` and set `"onAutoForward": "ignore"` in `portsAttributes`. A container rebuild is required after this change.
-
-> **⚠ Security warning — binding to 0.0.0.0**
+> 1. **Install the Context custom function** — File > Manage > Custom Functions > New. Name: `Context`, parameter: `task` (Text). Paste the contents of `filemaker/Context.fmfn`.
 >
-> Binding to `0.0.0.0` exposes the companion server on **all network interfaces**, including any public-facing ones. An agent must **never** do this automatically. Before using `COMPANION_BIND_HOST=0.0.0.0`:
->
-> 1. **Probe the current IP** and verify it falls within an RFC 1918 / RFC 4193 private range:
->    - `10.0.0.0/8`
->    - `172.16.0.0/12`
->    - `192.168.0.0/16`
+> 2. **Install `AGFM_Bridge`** — once the plugin is reachable, this is one command:
 >    ```bash
->    # Check all non-loopback IPv4 addresses
->    ip -4 addr show scope global 2>/dev/null | grep -oP 'inet \K[\d.]+' || \
->      ifconfig 2>/dev/null | grep -oP 'inet (\d+\.){3}\d+' | grep -oP '[\d.]+'
+>    python3 agent/scripts/agfm_bridge.py bridge-upgrade
 >    ```
->    If **any** interface has a public (non-private-range) IP, **do not bind to 0.0.0.0**.
 >
-> 2. **Ask the user for explicit confirmation**, e.g.:
->    > "The companion server needs to listen on all interfaces (`0.0.0.0`) so the container/VM can reach it. Your network interfaces are on private IPs (e.g. `192.168.1.x`). This is safe on a local network but **should not be used on public or untrusted networks**. Proceed?"
+> 3. **Optional scripts** — open `filemaker/agentic-fm.fmp12` and copy the **agentic-fm** script folder into your solution for `ModifySchema` (DDL) and the OData bridge scripts.
 >
-> 3. Only after both checks pass, start with:
->    ```bash
->    COMPANION_BIND_HOST=0.0.0.0 python3 agent/scripts/companion_server.py &
->    ```
+> 4. **Navigate to a layout** and confirm with `python3 agent/scripts/agfm_bridge.py context`.
 
-**Verify it is running:**
+---
+
+## Verify the full setup
 
 ```bash
-curl -s http://localhost:8765/health
-```
+# Plugin reachable, FM version, bridge availability, discovery state
+python3 agent/scripts/agfm_bridge.py status
 
-### 2d. Remaining FileMaker-side setup
-
-The following steps require the developer to interact with FileMaker Pro directly. Present them clearly:
-
-> **FileMaker setup required** — these steps must be done manually in FileMaker Pro:
->
-> 1. **Install the Context custom function** — File > Manage > Custom Functions > New. Name: `Context`, parameter: `task` (Text). Paste contents of `filemaker/Context.fmfn`.
->
-> 2. **Install companion scripts** — Open `filemaker/agentic-fm.fmp12`, copy the **agentic-fm** script folder, paste into your solution's Script Workspace.
->
-> 3. **Set the repo path** — Run **Get agentic-fm path** from Scripts menu. Select this repo's root folder.
->
-> 4. **Run Explode XML** — From Scripts menu, run **Explode XML**. This populates `agent/xml_parsed/`.
->
-> 5. **Push Context** — Navigate to your target layout, run **Push Context**, enter a task description. This writes `agent/CONTEXT.json`.
->
-> After these steps, the agent can generate FileMaker scripts autonomously.
-
-### 2e. Verify the full setup
-
-```bash
-# Companion server responding
-# In a Docker dev container, use host.docker.internal instead of localhost:
-curl -s http://localhost:8765/health        # native macOS / full-access sandbox
-curl -s http://host.docker.internal:8765/health  # Docker dev container
-
-# XML data populated
-ls agent/xml_parsed/scripts_sanitized/ | head -5
-
-# Context available
-test -f agent/CONTEXT.json && python3 -c "import json; d=json.load(open('agent/CONTEXT.json')); print('Context:', d.get('task','(no task)'))"
+# Context resolving to the expected solution and layout
+python3 agent/scripts/agfm_bridge.py context
 
 # FMLint working
 python3 -m agent.fmlint --help
 ```
-
----
-
-## Limited (Filesystem-Only) Setup Path
-
-When you are in a restricted sandbox with no host access and no network, you can still generate FileMaker code — but you depend on pre-populated data. The shared project folder is your communication channel.
-
-### What works without host access
-
-| Capability | Status | Notes |
-|-----------|--------|-------|
-| Read `agent/CONTEXT.json` | Works | If pre-populated by the developer on the host |
-| Read `agent/xml_parsed/` | Works | If Explode XML was run on the host beforehand |
-| Read index files (`agent/context/`) | Works | If fmcontext.sh was run on the host |
-| Generate fmxmlsnippet XML | Works | Write to `agent/sandbox/` |
-| Run FMLint validation | Works | `python3 -m agent.fmlint agent/sandbox/<file>` |
-| Read step catalog | Works | `agent/catalogs/step-catalog-en.json` |
-| Read coding conventions | Works | `agent/docs/CODING_CONVENTIONS.md` |
-| Clipboard operations | Does not work | Requires macOS NSPasteboard or osascript |
-| Deploy Tier 2/3 | Does not work | Requires AppleScript on macOS host |
-| Run Explode XML | Does not work | Requires fm-xml-export-exploder + companion server |
-| Start companion server usefully | Limited | No osascript = no `/trigger` or `/clipboard` endpoints |
-
-### The filesystem bridge workflow
-
-In this mode, the project folder mounted into your sandbox IS the communication channel between you and the host:
-
-```
-Developer (macOS host)                    Agent (sandbox)
-─────────────────────                     ──────────────
-1. Runs Explode XML in FileMaker
-   → populates agent/xml_parsed/    ──→   Reads xml_parsed/
-
-2. Runs Push Context in FileMaker
-   → writes agent/CONTEXT.json      ──→   Reads CONTEXT.json
-
-                                          3. Generates fmxmlsnippet XML
-                                          → writes agent/sandbox/script.xml
-
-4. Reads agent/sandbox/script.xml   ←──
-   Pastes into FileMaker manually
-```
-
-### What to tell the developer
-
-When you detect you are in a limited sandbox:
-
-> **I'm running in a sandboxed environment without direct access to your macOS host.** I can generate FileMaker scripts, but I need you to handle the FileMaker-side operations:
->
-> **Before I can help:**
-> 1. Follow the setup in `QUICKSTART.md` on your Mac (install fm-xml-export-exploder, companion scripts, custom function)
-> 2. Start the companion server — open a Terminal on your Mac and run:
->    ```bash
->    cd /path/to/agentic-fm && python3 agent/scripts/companion_server.py
->    ```
->    Replace `/path/to/agentic-fm` with the actual repo path (e.g. `~/Developer/agentic-fm`). Keep the Terminal window open.
-> 3. Run **Explode XML** in FileMaker to populate `agent/xml_parsed/`
-> 4. Run **Push Context** on the layout you're working on
->
-> **After that, I can:**
-> - Read your solution's structure, scripts, schema, and relationships
-> - Generate new scripts and calculations as fmxmlsnippet XML
-> - Validate output with FMLint
-> - Write files to `agent/sandbox/` for you to paste into FileMaker
->
-> **To paste my output into FileMaker**, the agent uses `deploy.py` which automatically routes through the companion server on your Mac:
-> ```bash
-> python3 agent/scripts/deploy.py agent/sandbox/<filename>.xml
-> ```
-> Then switch to FileMaker's Script Workspace and press **Cmd+V**.
->
-> Note: `clipboard.py` requires `osascript` and cannot run inside the container. Use `deploy.py` instead — it detects the container environment and routes automatically.
->
-> **Preferred path — agentic-fm plugin:** When `AGFM_PLUGIN_TOKEN` is set in `.env.local`, use `agfm_bridge.py` for all deploy and clipboard operations (navigate → insert → save, no AppleScript). The URL is taken from `AGFM_PLUGIN_URL` if set; otherwise constructed from `AGFM_PLUGIN_PORT` (default 8766) using the appropriate host for the environment.
->
-> **Fallback — companion server (Tiers 1–3):** If `AGFM_PLUGIN_TOKEN` is not set, use `deploy.py` — it falls back to the companion server for clipboard/paste operations.
-
----
-
-## Companion server and network topology
-
-The agentic-fm **plugin** (port 8766) is the primary integration point for deploy, clipboard, and context operations. The **companion server** (`agent/scripts/companion_server.py`, port 8767) is the fallback for AppleScript-based Tier 2/3 operations. Network topology:
-
-| Scenario | Plugin (8766) from agent | Companion (8767) from agent |
-|----------|--------------------------|-----------------------------|
-| **Native macOS** | `localhost:8766` | `localhost:8767` |
-| **Agent in Docker on macOS** | `host.docker.internal:8766` | `host.docker.internal:8767` |
-| **FMS in Docker, agent on host** | `localhost:8766` | `localhost:8767` |
-| **Full-access sandbox** | `localhost:8766` | `localhost:8767` |
-| **Restricted sandbox** | Not reachable (use filesystem) | Not reachable (use filesystem) |
-
-**Key environment variable:** `COMPANION_BIND_HOST` controls the bind address. Default is `127.0.0.1`. Can be set to `0.0.0.0` when the companion needs to accept connections from containers or VMs — but **only on private networks (RFC 1918) and only with explicit user confirmation**. See the security warning in §2c above.
-
-**Key config file:** `agent/config/automation.json` — the `companion_url` field can be set to `http://host.docker.internal:8765` for Docker scenarios.
-
----
-
-## Platform-specific limitations
-
-### macOS-only components
-
-These components require macOS and cannot run on Linux:
-
-| Component | macOS requirement | What it does |
-|-----------|-------------------|-------------|
-| `clipboard.py` | NSPasteboard (PyObjC) or osascript | Read/write FileMaker clipboard format |
-| `deploy.py` Tier 2/3 | osascript (AppleScript) | Automated paste into Script Workspace |
-| `/trigger` endpoint | osascript | Execute AppleScript commands remotely |
-| AX layout/script reading | Accessibility API (AXUIElement) | Read Script Workspace and layout objects |
-
-### Cross-platform components
-
-These work on any OS with Python 3:
-
-| Component | What it does |
-|-----------|-------------|
-| `companion_server.py` (core) | HTTP server, `/explode`, `/context`, `/lint`, `/health` |
-| `fmparse.sh` | Shell script — cross-platform if fm-xml-export-exploder binary exists |
-| `fmcontext.sh` | Index generation from xml_parsed (requires xmllint) |
-| `deploy.py` Tier 1 | File-based output only (no clipboard) |
-| `python3 -m agent.fmlint` | XML and HR script validation |
-| All code generation | Reading catalogs, CONTEXT.json, writing fmxmlsnippet XML |
-
----
-
-## Quick-start script for autonomous agents
-
-If you are an agent tasked with setting up this project and you have full access, run through this checklist in order:
-
-```
-1. Detect environment (Step 1 above)
-2. Check Python 3 exists → install if missing
-3. Check xmllint exists → install if missing
-4. Check fm-xml-export-exploder exists → install if missing (compile from source on Linux)
-5. Start companion server — **on the macOS host**, not inside any container
-   - In a Docker dev container: check `host.docker.internal:8765/health`; if down, ask developer to run `python3 agent/scripts/companion_server.py` on their Mac
-   - On native macOS or full-host-access sandbox: start it directly with `python3 agent/scripts/companion_server.py &`
-6. Check if agent/xml_parsed/ is populated
-   → If yes: ready to generate code
-   → If no: tell developer to run Explode XML in FileMaker
-7. Check if agent/CONTEXT.json exists
-   → If yes: read task description, begin work
-   → If no: tell developer to run Push Context in FileMaker
-8. Read agent/docs/CODING_CONVENTIONS.md before generating any code
-9. Scan agent/docs/knowledge/MANIFEST.md for task-relevant knowledge docs
-10. Generate code → validate with FMLint → write to agent/sandbox/
-```
-
-For Tier 1 deployment (all platforms), load the clipboard via the companion server
-and present paste instructions:
-
-```bash
-curl -s -X POST http://host.docker.internal:8765/clipboard \
-  -H "Content-Type: application/json" \
-  -d "{\"xml\": $(python3 -c "import json; print(json.dumps(open('agent/sandbox/<filename>.xml').read()))")}"
-```
-
-> The script is on your clipboard. To install it:
->
-> 1. Open the target script in Script Workspace
-> 2. **Cmd+A** — select all existing steps
-> 3. **Cmd+V** — paste
-
-Note: Do not instruct the developer to run `clipboard.py` on their Mac unless the companion server is unavailable —
-the agent can load the clipboard directly via `host.docker.internal:8765`.
-
----
-
-## Exposing services from the sandbox
-
-If your sandbox environment supports exposing ports (e.g. Docker with `-p`, or a desktop app with port forwarding settings), and the developer wants the FileMaker plugin to communicate directly with services you run:
-
-1. **Companion server**: Bind to all interfaces with `COMPANION_BIND_HOST=0.0.0.0` — **only after verifying all host IPs are in RFC 1918 private ranges and getting explicit user confirmation** (see §2c security warning)
-2. **Expose port 8765** through whatever mechanism the sandbox provides
-3. **Update FileMaker scripts**: The developer may need to change companion URLs in their FM scripts from `localhost:8765` to the exposed address (or configure `automation.json`)
-4. **Webviewer dev server**: If using the webviewer, expose port 8080 similarly
-
-Consult your sandbox platform's documentation for port exposure. For example:
-- Docker: `-p 8765:8765` flag
-- Codex desktop: Check the access/permissions panel for port forwarding options
-- Claude Code: Network access must be enabled; `host.docker.internal` may work for outbound
 
 ---
 
@@ -433,71 +165,17 @@ Consult your sandbox platform's documentation for port exposure. For example:
 ```
 User says "set this up"
   │
-  ├─ Am I on macOS with full access?
-  │   └─ YES → Follow QUICKSTART.md steps autonomously
-  │            Install binary, start companion, guide FM setup
+  ├─ agfm_bridge.py status succeeds?
+  │   └─ YES → Full capability. Follow QUICKSTART.md.
   │
-  ├─ Am I on Linux with full host access?
-  │   └─ YES → Full-access path above
-  │            Compile exploder from source (or download if macOS host)
-  │            Start companion, guide FM setup
+  ├─ No token in .env.local?
+  │   └─ Ask the developer for the plugin's bearer token.
   │
-  ├─ Am I on Linux with network to host?
-  │   └─ YES → Start companion locally (limited — no osascript)
-  │            Use host.docker.internal:8765 if host companion exists
-  │            Generate code via filesystem
+  ├─ Connection refused from a container?
+  │   └─ Set AGFM_PLUGIN_URL=http://host.docker.internal:8766
+  │      Check devcontainer.json isn't forwarding 8766.
   │
-  └─ Am I completely isolated?
-      └─ YES → Filesystem-only bridge
-               Tell developer what to run on their Mac
-               Generate code, write to agent/sandbox/
-               Provide clipboard.py paste command
+  └─ Still unreachable?
+      └─ Tell the developer exactly what you tried.
+         Do not fabricate IDs or work from stale data.
 ```
-
----
-
-## Plugin mode (when available)
-
-If `AGFM_PLUGIN_TOKEN` is set in `.env.local`, the agentic-fm plugin can handle clipboard writes and deployment directly — without needing the companion server or AppleScript. See `agent/docs/PLUGIN.md` for details.
-
-### Port discovery
-
-The plugin port is configured via `.env.local`. `agfm_bridge.py` resolves the URL in this order:
-
-1. `AGFM_PLUGIN_URL` — full URL, used as-is if present (e.g. `http://localhost:8766`)
-2. `AGFM_PLUGIN_PORT` — port only; `agfm_bridge.py` constructs the URL:
-   - Native macOS → `http://localhost:{port}`
-   - Docker / non-Darwin → `http://host.docker.internal:{port}`
-3. Default port **8766** is used if `AGFM_PLUGIN_PORT` is also absent
-
-Minimal `.env.local` for plugin mode:
-
-```bash
-AGFM_PLUGIN_PORT=8766        # optional — defaults to 8766
-AGFM_PLUGIN_TOKEN=your-token
-```
-
-### Verify reachability
-
-Use `agfm_bridge.py` — it resolves the URL automatically from the environment:
-
-```bash
-python3 agent/scripts/agfm_bridge.py status
-```
-
-To probe manually, resolve the URL in the same order `agfm_bridge.py` uses:
-
-```bash
-TOKEN=${AGFM_PLUGIN_TOKEN}
-# AGFM_PLUGIN_URL takes precedence if set; otherwise build from port
-if [ -n "$AGFM_PLUGIN_URL" ]; then
-  URL=$AGFM_PLUGIN_URL
-else
-  PORT=${AGFM_PLUGIN_PORT:-8766}
-  # use host.docker.internal inside a container, localhost otherwise
-  URL=http://localhost:${PORT}
-fi
-curl -s -H "Authorization: Bearer $TOKEN" $URL/api/health
-```
-
-If the plugin is reachable, use `agfm_bridge.py` instead of `clipboard.py` / `deploy.py` for all deploy and clipboard operations.

@@ -5,7 +5,7 @@ description: Generate FileMaker print/PDF layout objects as fmxmlsnippet XML2 cl
 
 # Print Layout
 
-Generate layout objects for a FileMaker print/PDF layout. Output is `fmxmlsnippet type="LayoutObjectList"` in the correct clipboard XML format, deployed via `clipboard.py write --class XML2`.
+Generate layout objects for a FileMaker print/PDF layout. Output is `fmxmlsnippet type="LayoutObjectList"` in the correct clipboard XML format, deployed via `agfm_bridge.py clipboard-write`.
 
 ---
 
@@ -14,7 +14,7 @@ Generate layout objects for a FileMaker print/PDF layout. Output is `fmxmlsnippe
 Read `agent/CONTEXT.json`:
 - `current_layout` — target layout name, ID, and base TO
 - `tables` — fields with IDs available in this context
-- Related TOs and their field IDs (from `agent/context/{solution}/*.index` if not in CONTEXT.json)
+- Related TOs and their field IDs (from `GET /api/context`, or `POST /api/query` against `FileMaker_Fields`)
 
 Read theme data:
 ```bash
@@ -252,7 +252,7 @@ The `FullCSS` string must match the solution's theme exactly. The most reliable 
 
 1. In FileMaker Layout Mode, create a sample field with the target style applied
 2. Copy it (⌘C)
-3. Run: `python3 agent/scripts/clipboard.py read agent/sandbox/sample.xml`
+3. Run: `python3 agent/scripts/agfm_bridge.py clipboard-read > agent/sandbox/sample.xml`
 4. Extract the `<FullCSS>` content from the output
 
 Alternatively, derive it from `theme.css` base styles + class overrides from `theme-classes.json`.
@@ -263,7 +263,7 @@ Alternatively, derive it from `theme.css` base styles + class overrides from `th
 
 ```bash
 python3 agent/sandbox/{LayoutName}-gen.py
-python3 agent/scripts/clipboard.py write --class XML2 agent/sandbox/{LayoutName}-objects.xml
+python3 agent/scripts/agfm_bridge.py clipboard-write agent/sandbox/{LayoutName}-objects.xml
 ```
 
 Paste instructions:

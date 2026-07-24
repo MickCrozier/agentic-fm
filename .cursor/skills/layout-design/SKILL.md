@@ -9,14 +9,13 @@ Generate layout objects from a design brief or a specification produced by `layo
 
 ---
 
-## Step 1: Determine the automation tier
+## Step 1: Confirm the plugin is reachable
 
-Read `agent/config/automation.json` and check `project_tier` (preferred) or `default_tier`:
+```bash
+python3 agent/scripts/agfm_bridge.py status
+```
 
-- **Tier 1** — layout objects go to clipboard with paste instructions
-- **Tier 2/3** — agent can deploy via companion server automation
-
-Also read `companion_url` and `webviewer_url` from `automation.json` — these are needed for preview pushes and deployment.
+The plugin is the only path to FileMaker. If it is unreachable, say so and stop — do not fall back to stale data or manual workarounds.
 
 ---
 
@@ -135,15 +134,15 @@ Apply theme class names as CSS classes on each element so the theme CSS styles t
 
 ### Push to webviewer
 
-Send the preview HTML to the webviewer via the companion server:
+Send the preview HTML to the plugin's preview surface:
 
 ```bash
 curl -s -X POST -H "Content-Type: application/json" \
   -d '{"type": "layout-preview", "content": "<html content>"}' \
-  {companion_url}/webviewer/push
+  "http://localhost:${AGFM_PLUGIN_PORT:-8766}/api/preview"
 ```
 
-If the companion server is not reachable, fall back to writing the preview HTML to `agent/sandbox/{layout-name}-preview.html` and instruct the developer to open it in a browser.
+If the plugin is unreachable, fall back to writing the preview HTML to `agent/sandbox/{Solution}/{layout-name}-preview.html` and instruct the developer to open it in a browser.
 
 ---
 
@@ -183,10 +182,10 @@ Generate XML2-formatted layout objects. The developer must have already created 
 
 #### XML2 structure reference
 
-Before generating XML2, read an existing layout from `xml_parsed/layouts/` to understand the solution's XML2 structure:
+Before generating XML2, read an existing layout's structure. Ask the developer to open it in Layout Mode, select all (⌘A) and copy (⌘C), then:
 
 ```bash
-ls agent/xml_parsed/layouts/{solution}/ 2>/dev/null | head -5
+python3 agent/scripts/agfm_bridge.py clipboard-read | head -50
 ```
 
 Read one layout file to use as a structural reference for object types, attribute patterns, and nesting.
@@ -211,12 +210,12 @@ After generating XML2:
    python3 agent/scripts/validate_snippet.py agent/sandbox/{layout-name}-objects.xml
    ```
 3. Fix any validation errors
-4. Deploy per the current tier:
+4. Deploy:
 
-   **Tier 1** — load to clipboard and present paste instructions:
+   Load to clipboard and present paste instructions — layout objects must be pasted by the developer in Layout Mode:
 
    ```bash
-   python3 agent/scripts/clipboard.py write agent/sandbox/{layout-name}-objects.xml
+   python3 agent/scripts/agfm_bridge.py clipboard-write agent/sandbox/{layout-name}-objects.xml
    ```
 
    > The layout objects are on your clipboard. To install them:
@@ -225,7 +224,7 @@ After generating XML2:
    > 2. **⌘V** — paste the objects onto the layout
    > 3. Adjust positions as needed — objects are placed at their designed coordinates
 
-   **Tier 2/3** — deploy via `agent/scripts/deploy.py` if layout paste automation is supported.
+   The plugin cannot switch to Layout Mode or paste layout objects, so this step is always manual.
 
 ### Web Viewer path
 
@@ -262,11 +261,11 @@ After deployment, provide guidance based on the output path:
 
 ## Constraints
 
-- The agent **cannot create the layout container** — only objects on it. The developer must create the layout in FM first and run Push Context.
+- The agent **cannot create the layout container** — only objects on it. The developer must create the layout in FM first and navigate to it.
 - All field references must resolve to real IDs from plugin context (or CONTEXT.json fallback) — never use placeholder or invented IDs.
 - All style class names must come from `theme-classes.json` — never invent class names. If no class fits, use the closest match and note the limitation.
 - FM layouts are **not responsive** — all objects use fixed pixel positions. The preview must reflect this (no flexbox, no percentage widths).
 - Portal child objects are positioned relative to the portal, not the layout.
-- The `XML2` clipboard class is auto-detected by `clipboard.py` from `<LayoutObject` elements.
+- The `XML2` clipboard class is auto-detected by `agfm_bridge.py` from `<LayoutObject` elements.
 - Conditional formatting rules cannot be included in XML2 clipboard paste — note any conditional formatting in the spec for manual application.
-- Tab controls and slide controls have complex nesting — read an existing example from `xml_parsed/layouts/` before generating these object types.
+- Tab controls and slide controls have complex nesting — have the developer copy an existing example from Layout Mode and read it via `agfm_bridge.py clipboard-read` before generating these object types.

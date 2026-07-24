@@ -1,8 +1,17 @@
 # Clipboard Interaction
 
-FileMaker does not use plain text for clipboard objects. When you copy scripts, steps, fields, custom functions, or other objects in FileMaker, they are placed on the macOS clipboard as proprietary binary descriptor classes — not as readable text. Converting between those classes and the fmxmlsnippet XML format that this project uses requires AppleScript.
+FileMaker does not use plain text for clipboard objects. When you copy scripts, steps, fields, custom functions, or other objects in FileMaker, they are placed on the macOS clipboard as proprietary binary descriptor classes — not as readable text.
+
+**Use the plugin for all clipboard I/O.** `agfm_bridge.py clipboard-read` and `clipboard-write` handle the class detection and encoding for you, on the macOS host and inside a dev container alike:
+
+```bash
+python3 agent/scripts/agfm_bridge.py clipboard-read
+python3 agent/scripts/agfm_bridge.py clipboard-write agent/sandbox/{Solution}/MyScript.xml
+```
 
 **Do not use `pbpaste` or `pbcopy` for FileMaker objects.** Both tools silently corrupt multi-byte UTF-8 characters (such as `≠`, `≤`, `≥`, `¶`) that are common in FileMaker calculations.
+
+The rest of this document is background on the underlying format — useful when debugging a paste that FileMaker silently ignores.
 
 ---
 
@@ -43,47 +52,54 @@ When accessing the clipboard via the macOS Pasteboard API directly (e.g. via PyO
 
 ---
 
-## Using clipboard.py
+## Using agfm_bridge.py
 
-A Python helper script is provided at `agent/scripts/clipboard.py`. It handles both read and write directions and auto-detects the correct class code from the XML content.
+All clipboard I/O goes through the plugin. `agfm_bridge.py` handles both directions and the plugin auto-detects the correct class code from the XML content.
 
-### Read: FM objects on clipboard → XML file
+### Read: FM objects on clipboard → XML
 
 After copying objects in FileMaker (`⌘C`), run:
 
 ```bash
 # Print to stdout
-python3 agent/scripts/clipboard.py read
+python3 agent/scripts/agfm_bridge.py clipboard-read
 
-# Save directly to the sandbox
-python3 agent/scripts/clipboard.py read agent/sandbox/myscript.xml
+# Save into the sandbox
+python3 agent/scripts/agfm_bridge.py clipboard-read > agent/sandbox/{Solution}/myscript.xml
 ```
 
 ### Write: XML file → FM objects on clipboard
 
-After generating or editing a snippet, send it to the clipboard so it can be pasted into FileMaker (`⌘V`):
+To place a snippet on the clipboard for a manual paste into FileMaker (`⌘V`):
 
 ```bash
-# Class is auto-detected from the XML content
-python3 agent/scripts/clipboard.py write agent/sandbox/myscript.xml
-
-# Override the class explicitly if needed
-python3 agent/scripts/clipboard.py write agent/sandbox/myscript.xml --class XMSC
+python3 agent/scripts/agfm_bridge.py clipboard-write agent/sandbox/{Solution}/myscript.xml
 ```
 
-Auto-detection reads the first XML element inside the fmxmlsnippet wrapper and maps it to the correct class (e.g. `<Step>` → `XMSS`, `<CustomFunction>` → `XMFN`).
+Class detection reads the first XML element inside the fmxmlsnippet wrapper and maps it to the correct class (e.g. `<Step>` → `XMSS`, `<CustomFunction>` → `XMFN`).
+
+For **scripts**, prefer `deploy` / `bundle` / `patch` over a clipboard write — they insert the steps directly and skip the manual paste entirely.
+
+### Other clipboard endpoints
+
+| Endpoint | Use |
+|---|---|
+| `POST /api/clipboard/digest` | Re-digest the current clipboard when a read decodes badly |
+| `GET /api/clipboard/history` | List snapshot-store entries |
+| `POST /api/clipboard/promote` | Promote a historical snapshot back to active |
+| `POST /api/clipboard/inspect` | Read a sub-region of a large snapshot (e.g. layout XML) |
 
 ---
 
 ## How it works (low-level)
 
-Understanding the encoding helps when diagnosing issues or working outside of `clipboard.py`.
+Background on the underlying encoding. The plugin does all of this for you — this section is here for diagnosing a paste that FileMaker silently ignores.
 
 ### Reading (FM → XML)
 
 FileMaker stores clipboard data as a record keyed by the full AppleScript class notation: `{«class XMSS»: «data XMSS3C...»}`. The key point is that you must use `«class XMSS»` (not bare `XMSS`) as the property accessor — otherwise AppleScript cannot find the key in the record.
 
-The `clipboard.py` script detects the class, then fetches the value using `osascript -e 'the clipboard as «class XMSS»'`. The `as` coercion form is used rather than `«class XMSS» of (the clipboard)` — the `of` form treats the clipboard as a record and fails when the clipboard's primary type is plain text (which happens when a single text label is copied in Layout Mode). The `as` form locates the requested type regardless of what the primary type is. osascript prints the binary descriptor as:
+A reader must detect the class, then fetch the value as a coercion — e.g. `the clipboard as «class XMSS»`. The `as` coercion form is used rather than `«class XMSS» of (the clipboard)` — the `of` form treats the clipboard as a record and fails when the clipboard's primary type is plain text (which happens when a single text label is copied in Layout Mode). The `as` form locates the requested type regardless of what the primary type is. osascript prints the binary descriptor as:
 
 ```
 «data XMSS3C666D786D6C736E69707065743C...»
@@ -150,20 +166,12 @@ end try
 
 ---
 
-## NSPasteboard / PyObjC fast path
+## NSPasteboard
 
-`clipboard.py` automatically uses a faster, subprocess-free clipboard path when `pyobjc-framework-Cocoa` is installed. Install it into the project venv:
-
-```bash
-pip install pyobjc-framework-Cocoa
-```
-
-When available, all clipboard reads and writes go through `NSPasteboard` directly instead of spawning `osascript` subprocesses. This eliminates:
-- The `osascript` process launch overhead (significant for large snippets)
+The plugin reads and writes the clipboard through `NSPasteboard` directly rather than shelling out. This avoids:
+- Process launch overhead (significant for large snippets)
 - The hex-encode/decode round-trip (`«data XMSS3C...»` → regex → `bytes.fromhex()`)
-- Argument-length pressure from very large hex strings passed on the shell command line
-
-Without PyObjC installed the script falls back to the original `osascript` path automatically — no configuration needed.
+- Argument-length pressure from very large hex strings passed on a command line
 
 ### How NSPasteboard reads FM binary data
 
@@ -207,16 +215,15 @@ The agent cannot copy a layout autonomously — the user must do it in FileMaker
 
 This places the layout XML on the clipboard as class `XML2` (`LayoutObjectList`).
 
-### Reading the clipboard (sandboxed / dev container)
+### Reading the clipboard
 
-In a sandboxed or containerised environment, `clipboard.py` is not available. Read the clipboard via the companion server:
+Read the clipboard through the plugin:
 
 ```bash
-curl -s http://host.docker.internal:8767/clipboard
-# Returns: {"success": true, "xml": "<fmxmlsnippet type=\"LayoutObjectList\">..."}
+python3 agent/scripts/agfm_bridge.py clipboard-read
 ```
 
-The plugin's `/api/clipboard` endpoint does **not** reliably decode layout XML — always use the companion server (port 8767) for layout reads.
+This works identically on the macOS host and inside a dev container — `agfm_bridge.py` resolves the plugin host for you. If the clipboard content does not decode cleanly, re-digest it with `POST /api/clipboard/digest` and read again.
 
 ### Extracting button script actions
 

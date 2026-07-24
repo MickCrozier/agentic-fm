@@ -15,7 +15,7 @@ function agentDir(): string {
 
 /**
  * Resolve the main repo's agent directory.
- * In a git worktree, gitignored dirs (context/, xml_parsed/) only exist
+ * In a git worktree, gitignored dirs (context/, config/) only exist
  * at the main repo root, not in the worktree. This follows the .git
  * worktree link to find the original repo.
  */
@@ -59,7 +59,7 @@ function resolveContextDir(agentDir: string, solution?: string): string {
       .filter(e => e.isDirectory());
   } catch { /* context dir doesn't exist yet */ }
   if (entries.length === 1) return path.join(contextBase, entries[0].name);
-  if (entries.length === 0) throw new Error('agent/context/ is empty — run fmcontext.sh first');
+  if (entries.length === 0) throw new Error('agent/context/ is empty — fetch context with: agfm_bridge.py context');
   throw new Error('Multiple solutions in agent/context/ — specify ?solution= query param');
 }
 
@@ -367,7 +367,7 @@ export function apiMiddleware(): Plugin {
             return;
           }
           try {
-            const results = searchScripts(agent, query);
+            const results = await searchScripts(agent, query);
             res.setHeader('Content-Type', 'application/json');
             res.end(JSON.stringify(results));
           } catch (err) {
@@ -703,22 +703,12 @@ function parseValidationOutput(output: string): string[] {
     .filter(l => l && l.toLowerCase().includes('warning'));
 }
 
-/** Write XML to temp file, call clipboard.py write */
-async function clipboardWrite(agent: string, xml: string): Promise<void> {
-  const tmpFile = path.join(agent, 'sandbox', '.clipboard_tmp.xml');
-  fs.writeFileSync(tmpFile, xml, 'utf-8');
-  try {
-    const { exitCode, stderr } = await spawnPython(agent, [
-      path.join(agent, 'scripts', 'clipboard.py'),
-      'write',
-      tmpFile,
-    ]);
-    if (exitCode !== 0) {
-      throw new Error(stderr || 'clipboard.py write failed');
-    }
-  } finally {
-    try { fs.unlinkSync(tmpFile); } catch { /* ignore */ }
-  }
+/** Write XML to the FileMaker clipboard via the plugin */
+async function clipboardWrite(_agent: string, xml: string): Promise<void> {
+  await pluginFetch('/api/clipboard/write', {
+    method: 'POST',
+    body: JSON.stringify({ xml }),
+  });
 }
 
 /** Read solution name from CONTEXT.json if present */
@@ -729,141 +719,111 @@ function solutionFromContext(agentDir: string): string | undefined {
   } catch { return undefined; }
 }
 
-/** Cached scripts index — avoids re-reading and parsing the file on every search */
-let cachedScriptsIndex: { path: string; mtime: number; rows: string[][] } | null = null;
-
-function getScriptsIndex(main: string, solution: string | undefined): string[][] {
-  const indexPath = path.join(resolveContextDir(main, solution), 'scripts.index');
-  const mtime = fs.statSync(indexPath).mtimeMs;
-  if (cachedScriptsIndex && cachedScriptsIndex.path === indexPath && cachedScriptsIndex.mtime === mtime) {
-    return cachedScriptsIndex.rows;
-  }
-  const data = fs.readFileSync(indexPath, 'utf-8');
-  const rows = parseIndex(data);
-  cachedScriptsIndex = { path: indexPath, mtime, rows };
-  return rows;
+/** Resolve the agentic-fm plugin base URL and bearer token. */
+function pluginConfig(): { url: string; token: string } {
+  const token = process.env.AGFM_PLUGIN_TOKEN ?? '';
+  if (!token) throw new Error('AGFM_PLUGIN_TOKEN not set — the plugin is the only source of script data');
+  const url = process.env.AGFM_PLUGIN_URL
+    || `http://localhost:${process.env.AGFM_PLUGIN_PORT || 8766}`;
+  return { url, token };
 }
 
-/** Search scripts.index for matching scripts */
-function searchScripts(
+async function pluginFetch(pathname: string, init?: RequestInit): Promise<unknown> {
+  const { url, token } = pluginConfig();
+  const res = await fetch(`${url}${pathname}`, {
+    ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      ...(init?.headers ?? {}),
+    },
+  });
+  if (!res.ok) throw new Error(`Plugin ${pathname} returned ${res.status}`);
+  return res.json();
+}
+
+/** Full script roster from the plugin: live context first, discovery as backstop. */
+async function scriptRoster(): Promise<{ name: string; id: number; folder: string }[]> {
+  const ctx = await pluginFetch('/api/context') as {
+    scripts?: Record<string, { id?: number }>;
+  };
+  const rows = Object.entries(ctx.scripts ?? {}).map(([name, info]) => ({
+    name,
+    id: Number(info?.id ?? 0),
+    folder: '',
+  }));
+  if (rows.length > 0) return rows;
+
+  // Context can be scoped narrowly — fall back to the discovery roster.
+  const disc = await pluginFetch('/api/discovery/query', {
+    method: 'POST',
+    body: JSON.stringify({ query: 'scripts' }),
+  }) as { results?: { name?: string; id?: number; folder?: string }[] };
+  return (disc.results ?? []).map(r => ({
+    name: r.name ?? '',
+    id: Number(r.id ?? 0),
+    folder: r.folder ?? '',
+  }));
+}
+
+/** Search the plugin's script roster for matches. */
+async function searchScripts(
   _agent: string,
   query: string,
-): { name: string; id: number; folder: string }[] {
-  const main = mainAgentDir();
-  const solution = solutionFromContext(main);
-  const rows = getScriptsIndex(main, solution); // each row: [ScriptName, ScriptID, FolderPath]
+): Promise<{ name: string; id: number; folder: string }[]> {
+  const rows = await scriptRoster();
 
-  const isNumeric = /^\d+$/.test(query);
-
-  if (isNumeric) {
-    // Exact ID match
-    const matches = rows.filter(r => r[1] === query);
-    return matches.map(r => ({ name: r[0], id: Number(r[1]), folder: r[2] ?? '' }));
+  if (/^\d+$/.test(query)) {
+    return rows.filter(r => String(r.id) === query);
   }
 
   const qLower = query.toLowerCase();
   const tokens = qLower.split(/\s+/);
 
-  // Exact name match (case-insensitive)
-  const exact = rows.filter(r => r[0].toLowerCase() === qLower);
-  if (exact.length > 0) {
-    return exact.slice(0, 20).map(r => ({ name: r[0], id: Number(r[1]), folder: r[2] ?? '' }));
-  }
+  const exact = rows.filter(r => r.name.toLowerCase() === qLower);
+  if (exact.length > 0) return exact.slice(0, 20);
 
-  // Contains match: all query tokens present in name
   const contains = rows.filter(r => {
-    const nameLower = r[0].toLowerCase();
+    const nameLower = r.name.toLowerCase();
     return tokens.every(t => nameLower.includes(t));
   });
-
-  return contains.slice(0, 20).map(r => ({ name: r[0], id: Number(r[1]), folder: r[2] ?? '' }));
+  return contains.slice(0, 20);
 }
 
-/** Discover the solution name (first directory under xml_parsed/scripts/) */
-function discoverSolution(): string | null {
-  const main = mainAgentDir();
-  const scriptsDir = path.join(main, 'xml_parsed', 'scripts');
-  if (!fs.existsSync(scriptsDir)) return null;
-  const entries = fs.readdirSync(scriptsDir, { withFileTypes: true });
-  const dir = entries.find(e => e.isDirectory());
-  return dir?.name ?? null;
-}
-
-/**
- * Find a script file by ID using filesystem search.
- * Folder paths in scripts.index don't include the ` - ID <n>` suffixes
- * that appear in actual directory names, so we search by filename pattern.
- */
-function findScriptFile(baseDir: string, scriptId: string, ext: string): string | null {
-  const suffix = `- ID ${scriptId}${ext}`;
-
-  function search(dir: string): string | null {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        const found = search(full);
-        if (found) return found;
-      } else if (entry.name.endsWith(suffix)) {
-        return full;
-      }
-    }
-    return null;
-  }
-
-  return search(baseDir);
-}
-
-/** Load a script's HR text and convert SaXML to fmxmlsnippet */
+/** Load a script's HR text from the plugin, plus its fmxmlsnippet form. */
 async function loadScript(
-  agent: string,
+  _agent: string,
   scriptId: string,
-  _scriptName: string,
+  scriptName: string,
 ): Promise<{ hr?: string; xml?: string; name?: string }> {
-  const main = mainAgentDir();
-  const solution = discoverSolution();
-  if (!solution) throw new Error('No solution found in xml_parsed/scripts/');
-
-  const sanitizedDir = path.join(main, 'xml_parsed', 'scripts_sanitized', solution);
-  const scriptsDir = path.join(main, 'xml_parsed', 'scripts', solution);
-
-  const hrFile = findScriptFile(sanitizedDir, scriptId, '.txt');
-  const xmlFile = findScriptFile(scriptsDir, scriptId, '.xml');
-
-  const result: { hr?: string; xml?: string; name?: string } = {};
-
-  if (hrFile) {
-    result.hr = fs.readFileSync(hrFile, 'utf-8');
-    // Extract script name from filename: "Name - ID 123.txt"
-    const baseName = path.basename(hrFile, '.txt');
-    const nameMatch = baseName.match(/^(.+?)\s*-\s*ID\s+\d+$/);
-    if (nameMatch) result.name = nameMatch[1].trim();
+  // Resolve the name from the ID when the caller only supplied an ID.
+  let name = scriptName;
+  if (!name) {
+    const rows = await scriptRoster();
+    name = rows.find(r => String(r.id) === scriptId)?.name ?? '';
   }
+  if (!name) throw new Error(`Script ID ${scriptId} not found`);
 
-  if (xmlFile) {
-    try {
-      const { stdout, exitCode, stderr } = await spawnPython(agent, [
-        path.join(agent, 'scripts', 'fm_xml_to_snippet.py'),
-        xmlFile,
-      ]);
-      if (exitCode === 0 && stdout.trim()) {
-        result.xml = stdout;
-      } else if (stderr) {
-        console.warn('fm_xml_to_snippet.py warnings:', stderr);
-        if (stdout.trim()) result.xml = stdout;
-      }
-    } catch {
-      // Conversion failed — still return HR if we have it
-    }
+  const result: { hr?: string; xml?: string; name?: string } = { name };
 
-    if (!result.name) {
-      const baseName = path.basename(xmlFile, '.xml');
-      const nameMatch = baseName.match(/^(.+?)\s*-\s*ID\s+\d+$/);
-      if (nameMatch) result.name = nameMatch[1].trim();
-    }
-  }
+  // HR body — discovery is the fastest path and needs no Script Workspace.
+  const body = await pluginFetch('/api/discovery/query', {
+    method: 'POST',
+    body: JSON.stringify({ query: 'script_body', scriptName: name }),
+  }) as { body?: string; content?: string; results?: { body?: string }[] };
+  result.hr = body.body ?? body.content ?? body.results?.[0]?.body;
 
-  if (!result.hr && !result.xml) {
-    throw new Error(`Script ID ${scriptId} not found in xml_parsed`);
+  if (!result.hr) throw new Error(`No body returned for script "${name}"`);
+
+  // fmxmlsnippet form — convert the HR we just fetched.
+  try {
+    const conv = await pluginFetch('/api/hr-to-xml', {
+      method: 'POST',
+      body: JSON.stringify({ hr: result.hr }),
+    }) as { xml?: string };
+    if (conv.xml) result.xml = conv.xml;
+  } catch {
+    // Conversion failed — still return HR.
   }
 
   return result;
@@ -881,20 +841,9 @@ function compareVersions(a: string, b: string): number {
   return 0;
 }
 
-/** Call clipboard.py read, return XML */
-async function clipboardRead(agent: string): Promise<string> {
-  const tmpFile = path.join(agent, 'sandbox', '.clipboard_read_tmp.xml');
-  try {
-    const { exitCode, stderr } = await spawnPython(agent, [
-      path.join(agent, 'scripts', 'clipboard.py'),
-      'read',
-      tmpFile,
-    ]);
-    if (exitCode !== 0) {
-      throw new Error(stderr || 'clipboard.py read failed');
-    }
-    return fs.readFileSync(tmpFile, 'utf-8');
-  } finally {
-    try { fs.unlinkSync(tmpFile); } catch { /* ignore */ }
-  }
+/** Read FileMaker objects from the clipboard via the plugin, return XML */
+async function clipboardRead(_agent: string): Promise<string> {
+  const res = await pluginFetch('/api/clipboard') as { xml?: string };
+  if (!res.xml) throw new Error('No FileMaker objects on the clipboard');
+  return res.xml;
 }

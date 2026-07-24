@@ -404,16 +404,16 @@ If any relationship uses compound join conditions (multiple field pairs), list e
 
 After all relationships are created:
 
-1. [ ] Run **Explode XML** to refresh `xml_parsed/` with the new relationship graph
-2. [ ] Run **Push Context** on the primary layout to refresh `CONTEXT.json`
-3. [ ] Verify relationships in `agent/context/{solution}/relationships.index`
+1. [ ] Navigate to the primary layout and refresh context: `agfm_bridge.py context`
+2. [ ] Reload the discovery index: `agfm_bridge.py save-as-xml --load`
+3. [ ] Verify the relationships appear in the refreshed context
 ```
 
 ### Step 3: Present the checklist
 
 Show the developer the relationship checklist and the file path. Remind them:
 
-> Relationships cannot be created via any external API — this is a FileMaker platform limitation. Use this checklist to create them manually in Manage Database > Relationships. After completing the relationships, run **Explode XML** to refresh the agent's context.
+> Relationships cannot be created via any external API — this is a FileMaker platform limitation. Use this checklist to create them manually in Manage Database > Relationships. After completing the relationships, refresh the agent's context with `agfm_bridge.py context`.
 
 ---
 

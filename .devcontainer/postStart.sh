@@ -1,16 +1,7 @@
 #!/usr/bin/env bash
 # Runs every time the dev container starts.
 
-CLIPBOARD_SERVER_URL="${CLIPBOARD_SERVER_URL:-http://host.docker.internal:8767}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-
-# ---------------------------------------------------------------------------
-# Start companion server in the background
-# ---------------------------------------------------------------------------
-
-echo "Starting companion server..."
-nohup python3 "$REPO_ROOT/agent/scripts/companion_server.py" > /tmp/companion_server.log 2>&1 &
-echo "  Companion server started (log: /tmp/companion_server.log)"
 
 # ---------------------------------------------------------------------------
 # Start webviewer and layout editor
@@ -24,15 +15,19 @@ setsid bash -c "npm run dev --prefix '$REPO_ROOT/layout-editor-app' > /tmp/layou
 echo "  Layout editor started on :8081 (log: /tmp/layout_editor.log)"
 
 # ---------------------------------------------------------------------------
-# Check host clipboard server
+# Check the agentic-fm plugin on the macOS host
 # ---------------------------------------------------------------------------
-echo "Checking host clipboard server at $CLIPBOARD_SERVER_URL..."
-if curl -sf --max-time 3 "$CLIPBOARD_SERVER_URL/health" > /dev/null 2>&1; then
-    echo "  ✓ Host clipboard server is reachable"
+echo "Checking agentic-fm plugin..."
+if python3 "$REPO_ROOT/agent/scripts/agfm_bridge.py" status > /dev/null 2>&1; then
+    echo "  ✓ Plugin is reachable"
 else
     echo ""
-    echo "  ⚠  Host clipboard server not reachable at $CLIPBOARD_SERVER_URL"
-    echo "     Start it on your Mac with:"
-    echo "       python3 agent/scripts/host_clipboard_server.py"
+    echo "  ⚠  agentic-fm plugin not reachable"
+    echo "     The plugin is the only path to FileMaker — nothing FM-related will work without it."
+    echo ""
+    echo "     1. Make sure the plugin is running on your Mac"
+    echo "     2. Check AGFM_PLUGIN_TOKEN is set in .env.local"
+    echo "     3. From a container, localhost is the container itself — if the connection"
+    echo "        is refused, set AGFM_PLUGIN_URL=http://host.docker.internal:8766"
     echo ""
 fi

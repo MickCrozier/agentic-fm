@@ -6,8 +6,9 @@ When the plugin is available (AGFM_PLUGIN_URL + AGFM_PLUGIN_TOKEN in .env.local)
 this module is the single entry point for all FM operations: context sync, SQL
 queries, HR→XML conversion, script deployment, clipboard, linting, and DDL.
 
-deploy.py remains for non-plugin fallbacks (Tier 1/2/3 via companion/AppleScript).
-Use agfm_bridge when the plugin is reachable; deploy.py otherwise.
+The plugin is the only supported path to FileMaker — there is no AppleScript or
+companion-server fallback. If the plugin is unreachable, no FM operation is
+possible; report that rather than attempting a workaround.
 
 CLI usage:
     python3 agent/scripts/agfm_bridge.py status

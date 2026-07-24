@@ -29,8 +29,8 @@ The skill uses three possible data sources, in order of preference:
 Use `POST /api/query` to fetch TOs, relationships, and fields directly from the live solution:
 
 ```bash
-TOKEN=$(grep AGFM_PLUGIN_TOKEN /workspaces/agentic-fm/.env.local | cut -d= -f2)
-URL=$(grep AGFM_PLUGIN_URL /workspaces/agentic-fm/.env.local | cut -d= -f2)
+TOKEN=$AGFM_PLUGIN_TOKEN
+URL=http://localhost:${AGFM_PLUGIN_PORT:-8766}   # host.docker.internal inside a container
 
 # All TOs with base table mapping
 curl -s -H "Authorization: Bearer $TOKEN" -X POST "$URL/api/query" \
@@ -47,24 +47,24 @@ Both queries are async — poll `GET $URL/api/eval/:id` until `complete: true`. 
 
 Note: `/api/query` exposes TOs (not base tables) — group TOs by identical field sets to infer base tables, same as the OData path.
 
-### 2. Exploded XML index files (secondary)
+### 2. Discovery index (secondary)
 
-When `agent/context/{solution}/` exists with index files:
+When the discovery index is loaded (`agfm_bridge.py save-as-xml --load`):
 
-- `table_occurrences.index` — TO-to-base-table mapping (columns: `TOName|TOID|BaseTableName|BaseTableID`)
-- `relationships.index` — all relationships between TOs (columns: `LeftTO|LeftTOID|RightTO|RightTOID|JoinType|JoinFields|CascadeCreate|CascadeDelete`)
-- `fields.index` — all fields per base table (columns: `TableName|TableID|FieldName|FieldID|DataType|FieldType|AutoEnter|Flags`)
+- `discovery-query detail --type table` — base tables and their fields
+- `discovery-query cross_file` — cross-file references and external data sources
+- `discovery-query layouts` — layouts with their base TOs
 
-### 3. OData `$metadata` endpoint (fallback)
+### 3. OData `$metadata` endpoint (server-hosted files)
 
-When index files are not available but `agent/config/automation.json` has an `odata` block for the solution:
+When the plugin is unavailable but `agent/config/automation.json` has an `odata` block for the solution:
 
 - Fetch `{base_url}/{database}/$metadata` with Basic auth
 - Parse `EntityType` elements for fields and types
 - Parse `NavigationProperty` and `NavigationPropertyBinding` for relationships
 - **Infer base tables** by grouping EntityTypes with identical field sets (same field names in same order = same base table). OData exposes TOs, not base tables — this heuristic resolves the mapping.
 
-If none of the three sources are available, instruct the developer to either ensure the plugin is running, run **Explode XML**, or configure OData access.
+If the plugin is unreachable, say so and stop — ask the developer to start it, or configure OData access for a server-hosted file.
 
 ## Workflow
 
@@ -73,8 +73,8 @@ If none of the three sources are available, instruct the developer to either ens
 **Try the plugin first** — check if it is reachable and query all TOs and fields in parallel (two async queries, poll both):
 
 ```bash
-TOKEN=$(grep AGFM_PLUGIN_TOKEN /workspaces/agentic-fm/.env.local | cut -d= -f2)
-URL=$(grep AGFM_PLUGIN_URL /workspaces/agentic-fm/.env.local | cut -d= -f2)
+TOKEN=$AGFM_PLUGIN_TOKEN
+URL=http://localhost:${AGFM_PLUGIN_PORT:-8766}   # host.docker.internal inside a container
 curl -s -H "Authorization: Bearer $TOKEN" -X POST "$URL/api/query" \
   -H "Content-Type: application/json" -d '{"sql": "SELECT TableName, TableID FROM FileMaker_Tables"}'
 curl -s -H "Authorization: Bearer $TOKEN" -X POST "$URL/api/query" \
@@ -83,19 +83,14 @@ curl -s -H "Authorization: Bearer $TOKEN" -X POST "$URL/api/query" \
 
 Also fetch `/api/context` for the solution name. If the plugin returns data, proceed directly to Step 2.
 
-**Index file fallback** — if plugin is unavailable, list subdirectories under `agent/context/`:
+**Discovery fallback** — if the layout-scoped context is too narrow, load the discovery index and query it:
 
-- If one subfolder exists, use it automatically and read all three index files in parallel.
-- If multiple exist, ask the developer which solution, then read index files.
-- If none exist, fall back to OData.
+```bash
+python3 agent/scripts/agfm_bridge.py save-as-xml --load
+python3 agent/scripts/agfm_bridge.py discovery-query detail --type table
+```
 
-**Index files (read in parallel once solution name is known):**
-
-- `agent/context/{solution}/table_occurrences.index`
-- `agent/context/{solution}/relationships.index`
-- `agent/context/{solution}/fields.index`
-
-**OData path:**
+**OData path (server-hosted files, no plugin session):**
 
 1. Fetch `$metadata` from the OData endpoint (single request contains everything)
 2. From the single response, extract in one analytical pass:
@@ -372,4 +367,4 @@ User: "Extract the ERD for this solution"
 User: "Show me the ERD"
 
 1. No index files, no OData config
-2. Report: "I need either exploded XML or OData access to extract the ERD. Would you like to run **Explode XML** to generate the index files, or configure OData in `automation.json`?"
+2. Report: "I need the plugin running to extract the ERD. Could you start it? Alternatively I can use OData if you configure it in `automation.json`."

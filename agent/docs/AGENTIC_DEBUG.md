@@ -2,14 +2,18 @@
 
 ## Purpose
 
-FileMaker script execution is opaque to the agent — the agent cannot trigger scripts or observe runtime state directly. The **Agentic-fm Debug** script bridges this gap by writing runtime debug output to `agent/debug/output.json`, a file the agent can read directly without the developer needing to copy/paste anything.
+FileMaker script execution is opaque from the outside. The plugin closes that gap: the agent can run a script (`POST /api/performscript`) and read back the variables it left behind (`GET /api/ui/dataviewer`) without the developer copying anything by hand.
 
 ## How it works
 
-1. The failing script (or a temporary modification of it) calls **Agentic-fm Debug** via `Perform Script`, passing a JSON payload as the script parameter
-2. Agentic-fm Debug sends that payload to the companion server's `/debug` endpoint
-3. The companion server writes `agent/debug/output.json`
-4. The agent reads the file and analyzes the output
+1. The failing script (or a temporary instrumented copy of it) writes its runtime state into a `$$DEBUG` global variable
+2. The agent runs the script via `POST /api/performscript` — or asks the developer to run it, if it has side effects
+3. The agent reads `$$DEBUG` back via `GET /api/ui/dataviewer`
+4. The agent analyzes the output and proposes a fix
+
+> **One at a time.** Concurrent `/api/performscript` calls deadlock FileMaker. Run one, poll `/api/eval/:id` until `complete: true`, then run the next.
+>
+> **Pause first.** Running a script touches the developer's live file. Ask before triggering, and wait for a go-ahead.
 
 ## Critical: `Get ( LastError )` resets the error state
 
@@ -19,7 +23,7 @@ Additionally, `Perform Script` resets `Get ( LastError )` to 0 when it successfu
 
 ## Script design
 
-The script accepts a single parameter: a JSON object with any keys the calling script wants to expose. It forwards that object to the companion server along with metadata (timestamp, calling script name).
+The **Agentic-fm Debug** script accepts a single parameter: a JSON object with any keys the calling script wants to expose. It appends that object — plus metadata (timestamp, calling script name) — to the `$$DEBUG` global, which the agent then reads through the Data Viewer endpoint.
 
 **Script parameter format** (passed by the calling script):
 ```json
@@ -38,7 +42,8 @@ The script accepts a single parameter: a JSON object with any keys the calling s
 
 **Agentic-fm Debug script steps (HR format):**
 ```
-# PURPOSE: Write runtime debug state to agent/debug/output.json for agent inspection.
+# PURPOSE: Append runtime debug state to $$DEBUG for agent inspection via
+# GET /api/ui/dataviewer.
 # Called by other scripts via Perform Script with a JSON parameter.
 #
 # $errorContext capture is a safety net for edge cases only (e.g., errors within
@@ -62,14 +67,14 @@ Set Variable [ $payload ; JSONSetElement ( "{}" ;
     [ "lastErrorLocation" ; JSONGetElement ( $errorContext ; "lastErrorLocation" ) ; JSONString ]
 ) ]
 
-Insert from URL [ Verify SSL Certificates: OFF ; With dialog: OFF ; Target: $response ;
-    "http://127.0.0.1:8765/debug" ;
-    "-X POST -H \"Content-Type: application/json\" -d " & Quote ( $payload ) ]
-
-If [ Get ( LastError ) ≠ 0 ]
-    Show Custom Dialog [ "Agentic-fm Debug" ; "Companion server not running. Start it with:¶¶python3 agent/scripts/companion_server.py" ]
-End If
+# Append this entry to the $$DEBUG array — the agent reads it via /api/ui/dataviewer
+Set Variable [ $$DEBUG ; JSONSetElement (
+    If ( JSONGetElementType ( $$DEBUG ; "" ) = JSONArray ; $$DEBUG ; "[]" ) ;
+    [ "[+]" ; $payload ; JSONRaw ]
+) ]
 ```
+
+Reset it between runs with `Set Variable [ $$DEBUG ; "[]" ]` at the top of the script under test, so stale entries don't confuse the diagnosis.
 
 ## Calling convention: how to instrument a script
 
@@ -95,7 +100,7 @@ Perform Script [ "Agentic-fm Debug" ; Parameter: JSONSetElement ( "{}" ;
 
 ### Interpreting the output
 
-The output in `agent/debug/output.json` contains two sources of error data:
+Each `$$DEBUG` entry contains two sources of error data:
 - **`vars.errData`** — captured by the calling script. **This is the authoritative error data.** Use this for diagnosis.
 - **Top-level `lastError`/`lastErrorLocation`** — captured by the debug script itself. Always 0/empty because `Perform Script` resets the error state. Kept as a safety net for edge cases.
 
@@ -129,38 +134,27 @@ Set Error Capture [ Off ]
 
 The `$errData.lastErrorLocation` will contain the line number of the `Set Field []` step.
 
-## Companion server endpoint
+## Reading the output
 
-Add a `/debug` endpoint to `companion_server.py` that writes the received JSON to `agent/debug/output.json`:
-
-```python
-elif self.path == "/debug":
-    self._handle_debug()
+```bash
+TOKEN=$AGFM_PLUGIN_TOKEN
+PORT=${AGFM_PLUGIN_PORT:-8766}
+curl -s -H "Authorization: Bearer $TOKEN" "http://localhost:${PORT}/api/ui/dataviewer"
 ```
 
-```python
-def _handle_debug(self):
-    try:
-        body = self._read_body()
-        payload = json.loads(body)
-    except (ValueError, OSError) as exc:
-        self._send_json({"success": False, "error": str(exc)}, status=400)
-        return
+The response lists the Data Viewer's current variables and Watch expressions. Pull the `$$DEBUG` entry and parse its JSON.
 
-    debug_dir = os.path.join(os.path.dirname(__file__), "..", "debug")
-    os.makedirs(debug_dir, exist_ok=True)
-    output_path = os.path.join(debug_dir, "output.json")
+If `$$DEBUG` is not visible, add it as a Watch expression in **Tools > Data Viewer > Watch**, or evaluate it directly:
 
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2, ensure_ascii=False)
-
-    log.info("Debug output written to agent/debug/output.json")
-    self._send_json({"success": True, "path": output_path})
+```bash
+curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"calculation": "$$DEBUG"}' "http://localhost:${PORT}/api/eval"
+# then poll /api/eval/:id until complete: true
 ```
 
-## Using $$DEBUG as a quick alternative
+## Using $$DEBUG without the helper script
 
-For a one-off diagnostic without creating the Agentic-fm Debug script, collect state into a `$$DEBUG` global:
+For a one-off diagnostic, skip **Agentic-fm Debug** entirely and set the global inline:
 
 ```filemaker
 Set Variable [ $$DEBUG ; JSONSetElement ( "{}" ;
@@ -170,15 +164,16 @@ Set Variable [ $$DEBUG ; JSONSetElement ( "{}" ;
 ) ]
 ```
 
-Then retrieve it from the Data Viewer (Tools > Data Viewer) and paste the JSON value to the agent. This is less convenient than the file-write approach but requires no script or server changes.
+Read it back the same way. This gives you a single snapshot rather than an appended trail.
 
 ## Agent workflow
 
 When the agent needs runtime debug information:
 
 1. The agent uses the `fm-debug` skill (`.claude/skills/fm-debug/SKILL.md`)
-2. The skill instructs the developer to run the appropriate script
-3. Once the developer confirms, the agent reads `agent/debug/output.json` directly
-4. The agent analyzes the output and proposes a fix
+2. It deploys an instrumented copy of the script via `agfm_bridge.py` — after pausing for the developer's go-ahead
+3. It runs the script via `POST /api/performscript`, or asks the developer to run it if the script has side effects
+4. It reads `$$DEBUG` back via `GET /api/ui/dataviewer`
+5. It analyzes the output and proposes a fix
 
-The agent cannot trigger FileMaker scripts. The developer must always run them manually.
+Everything here requires the plugin. If it is unreachable, the agent can still write the instrumented script — it just cannot deploy, run, or read results until the plugin is back.

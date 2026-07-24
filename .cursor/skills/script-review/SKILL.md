@@ -13,7 +13,7 @@ Perform a thorough code review of a FileMaker script and every script it calls. 
 
 ## Step 1: Locate the target script
 
-Use the `script-lookup` skill to find the script if not already identified. Read the human-readable version from `agent/xml_parsed/scripts_sanitized/`.
+Use the `script-lookup` skill to find the script if not already identified. Pull the script body from the plugin: `agfm_bridge.py discovery-query script_body --script "<Name>"`.
 
 ---
 
@@ -28,7 +28,7 @@ Before analysing any logic, build the full picture of every script involved. The
 Grep the entry script's sanitized text for every `Perform Script` line at once. Extract all target script names from the results.
 
 ```bash
-grep -i "Perform Script" "agent/xml_parsed/scripts_sanitized/{solution}/{path}.txt"
+python3 agent/scripts/agfm_bridge.py discovery-query dependencies --script "{ScriptName}"
 ```
 
 This returns lines like:
@@ -53,16 +53,16 @@ for name, info in d.get('scripts', {}).items():
 
 **Index fallback (if plugin unavailable):**
 ```bash
-grep -E "Subscript A|Subscript B|Subscript C" "agent/context/{solution}/scripts.index"
+python3 agent/scripts/agfm_bridge.py discovery-query scripts
 ```
 
 From the results, extract `ScriptName` and `ScriptID`. Derive the sanitized file path using a glob (folder path not available from plugin):
 
 ```bash
-find "agent/xml_parsed/scripts_sanitized/{solution}" -name "*ID {ScriptID}*" -type f | head -1
+python3 agent/scripts/agfm_bridge.py discovery-query script_locate --script "{ScriptName}"
 ```
 
-Or with folder path from the index: `agent/xml_parsed/scripts_sanitized/{solution}/{FolderPath}*/{ScriptName} - ID {ScriptID}.txt`
+`script_locate` returns the script's file and folder path.
 
 ### 2c. Parallel-read ALL subscripts
 
@@ -95,7 +95,7 @@ Before starting the review, present the resolved call tree so the developer can 
 
 Flag these edge cases:
 - **Calculated names** — `Perform Script By Name` references cannot be statically resolved. Flag them so the developer can clarify which scripts may be called.
-- **Missing scripts** — `Perform Script` references to scripts not found in `scripts_sanitized/` may be in a different solution file or deleted. Flag them.
+- **Missing scripts** — `Perform Script` references the plugin cannot resolve may be in a different solution file or deleted. Flag them. `discovery-query broken` lists them all.
 - **Cycles** — scripts already visited are noted but not re-loaded.
 
 ---
@@ -193,7 +193,7 @@ Things the script does well (acknowledge good patterns):
 - Consistent variable naming
 ```
 
-**Line number references** must always refer to the human-readable (`scripts_sanitized`) version, never the XML.
+**Line number references** must always refer to the human-readable script, never the XML.
 
 ---
 
@@ -203,7 +203,7 @@ There are two distinct XML formats in this project. They are **not interchangeab
 
 | Format | Location | Usable as output? |
 |---|---|---|
-| FileMaker "Save As XML" export | `agent/xml_parsed/scripts/` | **No** — read-only reference only |
+| FileMaker "Save As XML" export | SaXML export dir (`agfm_bridge.py save-as-xml`) | **No** — read-only reference only |
 | FileMaker clipboard / fmxmlsnippet | `agent/scripts/` or `agent/sandbox/` | **Yes** — this is the output format |
 
 When applying review findings as code changes, follow the refactoring workflow:

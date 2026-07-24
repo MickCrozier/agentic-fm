@@ -1,6 +1,6 @@
 ---
 name: script-test
-description: Generate a companion verification script that exercises a target script with known inputs and asserts expected outputs. Uses the fm-debug infrastructure to report pass/fail results back to the agent. At Tier 1 the developer runs the test script manually. At Tier 3 the agent deploys, runs, and reads results autonomously. Triggers on phrases like "test this script", "write a test", "verification script", "assert results", or "prove this works".
+description: Generate a paired verification script that exercises a target script with known inputs and asserts expected outputs. Uses the fm-debug infrastructure to report pass/fail results back to the agent. The agent deploys the test script, runs it via the plugin, and reads results back automatically. Triggers on phrases like "test this script", "write a test", "verification script", "assert results", or "prove this works".
 ---
 
 # Script Test
@@ -9,18 +9,19 @@ Generate a FileMaker test script that exercises a target script with known input
 
 ---
 
-## Step 1: Determine the automation tier
+## Step 1: Confirm the plugin is reachable
 
-Read `agent/config/automation.json` and check `project_tier` (preferred) or `default_tier`.
+```bash
+python3 agent/scripts/agfm_bridge.py status
+```
 
-- **Tier 1** — test script goes to clipboard; the developer runs it manually and the agent reads `agent/debug/output.json`
-- **Tier 3** — the agent deploys the test script, runs it via the companion, and reads results autonomously
+The plugin is the only path to FileMaker. If it is unreachable, say so and stop — do not fall back to stale data or manual workarounds.
 
 ---
 
 ## Step 2: Understand the target script
 
-Identify the script to test. Read the human-readable version from `agent/xml_parsed/scripts_sanitized/` and determine:
+Identify the script to test. Pull its body from the plugin (`agfm_bridge.py discovery-query script_body --script "<Name>"`) and determine:
 
 1. **Parameter format** — what does it expect? (JSON, plain text, empty)
 2. **Exit Script result** — what does it return? (JSON, value, empty)
@@ -149,7 +150,7 @@ curl -s -H "Authorization: Bearer $(grep AGFM_PLUGIN_TOKEN /workspaces/agentic-f
 import sys, json; d=json.load(sys.stdin)
 for n,i in d.get('scripts',{}).items(): print(f\"{i.get('id')}|{n}\")
 "
-# Fallback: grep "Agentic-fm Debug\|ScriptName" "agent/context/{solution}/scripts.index"
+# Fallback: agfm_bridge.py discovery-query scripts
 ```
 
 ### Validate
@@ -162,13 +163,13 @@ python3 agent/scripts/validate_snippet.py agent/sandbox/Test_{ScriptName}.xml
 
 ## Step 5: Deploy and run
 
-### Tier 3 (autonomous)
+### Autonomous (default)
 
-1. **Deploy the test script** — load clipboard via `POST {companion_url}/clipboard`, create the script via Tier 3 raw AppleScript (Cmd+N → Rename → Cmd+V → Cmd+S)
-2. **Run the test** — `POST {companion_url}/trigger` with `{ "fm_app_name": "...", "script": "Test_{ScriptName}", "target_file": "SolutionName" }`
+1. **Deploy the test script** — `agfm_bridge.py bundle <file> --names "<Test Name>"` creates it directly via the plugin
+2. **Run the test** — `POST /api/performscript` with `{"scriptName": "Test_{ScriptName}"}`, then poll `/api/eval/:id` until `complete: true`
 3. **Read results** — wait 2–3 seconds, then read `agent/debug/output.json`
 
-### Tier 1 (developer-assisted)
+### Developer-assisted (tests with side effects)
 
 Present the test script on the clipboard:
 
@@ -232,8 +233,7 @@ JSON when Get(FoundCount) = 0.
 
 After testing is complete:
 
-- **Tier 3**: optionally delete the test script from Script Workspace (or leave it for future regression testing — ask the developer)
-- **Tier 1**: inform the developer they can delete the test script if no longer needed
+- Ask the developer whether to delete the test script or leave it in place for future regression testing
 
 If a bug was found, suggest using `script-debug` or `script-refactor` to fix it.
 

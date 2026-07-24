@@ -14,7 +14,7 @@ FileMaker assigns internal numeric IDs to every object (scripts, fields, tables,
 
 - **Never cite a script ID as a stable identifier** in documentation or plan files. IDs are only meaningful within the specific file they were assigned in.
 - **Reference scripts by name** in documentation. If an ID must be cited (e.g., in a build log), always qualify it with the file name: "AGFMEvaluation (ID 16 in agentic-fm.fmp12)".
-- **When verifying IDs**, grep the `xml_parsed/scripts_sanitized/{solution}/` directory — filenames include the ID: `AGFMEvaluation - ID 16.txt`.
+- **When verifying IDs**, read them from the plugin: the `scripts` section of `GET /api/context`, or `agfm_bridge.py discovery-query scripts`.
 
 ## The same principle applies to all FM objects
 

@@ -141,8 +141,8 @@ All endpoints are served by the Vite dev middleware in `server/api.ts`. The `age
 | GET    | `/api/steps`                            | Lists all snippet XML files from `snippet_examples/steps/`                                                      |
 | GET    | `/api/snippet/:category/:step`          | Returns XML content of a specific snippet file                                                                  |
 | POST   | `/api/validate`                         | Runs `validate_snippet.py` on posted XML; returns `{valid, errors, warnings}`                                   |
-| POST   | `/api/clipboard/write`                  | Writes posted XML to macOS clipboard via `clipboard.py write`                                                   |
-| POST   | `/api/clipboard/read`                   | Reads FM objects from macOS clipboard via `clipboard.py read`                                                   |
+| POST   | `/api/clipboard/write`                  | Writes posted XML to the FileMaker clipboard via the plugin                                                     |
+| POST   | `/api/clipboard/read`                   | Reads FM objects from the FileMaker clipboard via the plugin                                                    |
 | POST   | `/api/convert/hr-to-xml`                | Stub (conversion is client-side; exists for headless use)                                                       |
 | POST   | `/api/convert/xml-to-hr`                | Stub (conversion is client-side; exists for headless use)                                                       |
 | GET    | `/api/scripts/search?q=<query>`         | Searches `scripts.index` by ID, exact name, or token match; returns top 20                                      |
@@ -254,9 +254,9 @@ The two interaction modes use fundamentally different context delivery strategie
 | Knowledge base                  | Selective: scans MANIFEST, reads only matching docs | All docs injected wholesale              |
 | Step catalog                    | Grepped per-step (~60 lines each)                   | All known HR signatures injected         |
 | Index files (`context/*.index`) | Grepped on demand                                   | Not available                            |
-| `xml_parsed/`                   | Grepped on demand                                   | Not available                            |
+| Discovery index (plugin)        | Queried on demand                                   | Not available                            |
 | Script validation               | Runs `validate_snippet.py` subprocess               | Via `/api/validate` endpoint             |
-| Clipboard                       | Runs `clipboard.py` subprocess                      | Via `/api/clipboard` endpoints           |
+| Clipboard                       | Via the plugin (`agfm_bridge.py`)                   | Via `/api/clipboard` endpoints           |
 | Token cost                      | Variable — only what's needed, when needed          | Fixed upfront injection on every request |
 | Output format                   | fmxmlsnippet XML → written to `agent/sandbox/`      | HR script text → converted client-side   |
 | Multi-step workflows            | Full agentic tool use                               | Single-turn chat                         |
@@ -301,8 +301,8 @@ There are two distinct paths by which CONTEXT.json can reach the client, and the
 
 | Path                 | How it works                                                                                                                | When it fires                                                                            |
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| **Direct JS bridge** | FileMaker's `Perform JavaScript in Web Viewer` step calls `window.pushContext(json)` → `setContext()` in App.tsx            | When the Push Context companion script calls into the webviewer directly                 |
-| **File on disk**     | Push Context writes `CONTEXT.json` to disk; the client polls `/api/context` and detects the change via JSON hash comparison | When the script runs in a separate window, or via any other process that writes the file |
+| **Direct JS bridge** | FileMaker's `Perform JavaScript in Web Viewer` step calls `window.pushContext(json)` → `setContext()` in App.tsx            | When an in-FileMaker script pushes context into the webviewer directly                   |
+| **File on disk**     | The plugin writes `CONTEXT.json` to disk; the client polls `/api/context` and detects the change via JSON hash comparison   | The normal path — any context refresh through the plugin                                 |
 
 Polling (path 2) is the reliable fallback. Vite's HMR WebSocket and `import.meta.hot` custom events are **not reliable inside a FileMaker WebKit webviewer** — the WebSocket connection may not deliver custom broadcast events in that environment. Any feature that needs to react to server-side file changes should use HTTP polling rather than WebSocket/HMR events.
 
@@ -325,7 +325,7 @@ The following functions are registered on `window` by `App.tsx` at mount time, m
 
 | Function                               | Purpose                                                                                                                                                                                       |
 | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `window.pushContext(json)`             | Receives CONTEXT.json directly from the Push Context companion script                                                                                                                         |
+| `window.pushContext(json)`             | Receives context JSON pushed directly from an in-FileMaker script                                                                                                                             |
 | `window.loadScript(content)`           | Loads an existing script's HR text into the editor                                                                                                                                            |
 | `window.onClipboardReady()`            | FileMaker notifies the webviewer after a clipboard write completes                                                                                                                            |
 | `window.triggerAppAction(actionId)`    | Routes toolbar actions from custom menu items (e.g. `agfm.newScript`, `agfm.validate`, `agfm.clipboard`, `agfm.loadScript`, `agfm.toggleXmlPreview`, `agfm.toggleChat`, `agfm.toggleLibrary`) |
@@ -409,14 +409,14 @@ npm run build        # outputs to webviewer/dist/
 
 ## Path Resolution
 
-If a feature for the webviewer is being worked on within a git worktree, gitignored directories (`agent/context/`, `agent/xml_parsed/`) exist only in the main repository, not in the worktree copy. The `mainAgentDir()` function in `server/api.ts` handles this transparently:
+If a feature for the webviewer is being worked on within a git worktree, gitignored directories (`agent/context/`, `agent/config/`) exist only in the main repository, not in the worktree copy. The `mainAgentDir()` function in `server/api.ts` handles this transparently:
 
 1. Reads `.git` at the repo root
 2. If `.git` is a _file_ (worktree indicator), parses the `gitdir:` path
 3. Follows `<gitdir>/../..` to find the main repo root
 4. Returns `<main-repo>/agent/`
 
-Any endpoint that reads context or xml_parsed data uses `mainAgentDir()`. Endpoints that write (sandbox, autosave) use the local `agentDir()` so worktree writes don't bleed into the main repo.
+Any endpoint that reads context or config data uses `mainAgentDir()`. Endpoints that write (sandbox, autosave) use the local `agentDir()` so worktree writes don't bleed into the main repo.
 
 Index files are organized under `agent/context/{solution}/` subfolders. The `resolveContextDir()` helper in `server/api.ts` resolves the correct subfolder — auto-detecting when only one solution exists, or using the `?solution=` query parameter in multi-solution setups.
 
@@ -455,7 +455,7 @@ The fixed runtime options (`value`, `language`, `theme`, `automaticLayout`) rema
 
 The agent output channel allows a CLI/IDE agent (e.g. Claude Code) to push results into the webviewer for review without the developer switching windows. This enables a workflow where the developer requests a script via the CLI, the agent writes the result, and the webviewer displays it for inspection, diffing, and clipboard deployment.
 
-- **CLI side**: The companion server's `POST /webviewer/push` endpoint writes output to `agent/config/.agent-output.json`
+- **CLI side**: The agent writes its output payload to `agent/config/.agent-output.json`
 - **Server side**: `GET /api/agent-output` serves the file; `DELETE /api/agent-output` clears it
 - **Client side**: `AgentOutputPanel.tsx` polls for output and displays it with a diff editor, preview pane, and result metadata
 

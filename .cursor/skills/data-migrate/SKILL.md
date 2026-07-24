@@ -60,9 +60,9 @@ If the format is not recognized, ask the developer to describe the structure or 
 
 Use the same schema discovery as `data-seed` (Step 2), in order of preference:
 
-1. **CONTEXT.json** -- tables and fields with types
-2. **Index files** -- `agent/context/{solution}/fields.index`
-3. **OData `$metadata`** -- fetch and parse EntityType elements
+1. **Plugin context** -- `GET /api/context` for tables and fields with types
+2. **Plugin SQL** -- `agfm_bridge.py query "SELECT ... FROM FileMaker_Fields"` for anything out of scope
+3. **OData `$metadata`** -- fetch and parse EntityType elements (server-hosted files only)
 
 Identify the target table. If the developer has not specified which FM table to import into:
 

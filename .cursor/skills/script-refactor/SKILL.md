@@ -1,6 +1,6 @@
 ---
 name: script-refactor
-description: Analyse an existing FileMaker script and produce an improved version — better error handling, cleaner variable naming, consolidation of repeated logic — while preserving observable behaviour. At Tier 1 the refactored script is placed on the clipboard for manual paste. At Tier 3 the agent can autonomously deploy the replacement into Script Workspace. Triggers on phrases like "refactor", "improve this script", "clean up script", "modernise script", or "optimize script".
+description: Analyse an existing FileMaker script and produce an improved version — better error handling, cleaner variable naming, consolidation of repeated logic — while preserving observable behaviour. The refactored script is deployed into Script Workspace through the plugin, after the developer signals readiness. Triggers on phrases like "refactor", "improve this script", "clean up script", "modernise script", or "optimize script".
 ---
 
 # Script Refactor
@@ -9,12 +9,13 @@ Analyse an existing script, identify improvements, and produce a refactored vers
 
 ---
 
-## Step 1: Determine the automation tier
+## Step 1: Confirm the plugin is reachable
 
-Read `agent/config/automation.json` and check `project_tier` (preferred) or `default_tier`:
+```bash
+python3 agent/scripts/agfm_bridge.py status
+```
 
-- **Tier 1** — refactored script goes to clipboard with paste instructions
-- **Tier 3** — agent can deploy the refactored script directly into Script Workspace, replacing the original
+The plugin is the only path to FileMaker. If it is unreachable, say so and stop — do not fall back to stale data or manual workarounds.
 
 ---
 
@@ -22,12 +23,12 @@ Read `agent/config/automation.json` and check `project_tier` (preferred) or `def
 
 If the developer has not already identified the script, use the `script-lookup` skill to find it.
 
-Once identified, read the human-readable version from `agent/xml_parsed/scripts_sanitized/` to understand the current logic. Also check if an fmxmlsnippet version already exists in `agent/sandbox/`.
+Once identified, pull its body from the plugin (`agfm_bridge.py discovery-query script_body --script "<Name>"`) to understand the current logic. Also check if an fmxmlsnippet version already exists in `agent/sandbox/`.
 
 If neither exists, convert the SaXML version to fmxmlsnippet:
 
 ```bash
-python3 agent/scripts/fm_xml_to_snippet.py "agent/xml_parsed/scripts/{solution}/{path}.xml" "agent/sandbox/{ScriptName}.xml"
+python3 agent/scripts/fm_xml_to_snippet.py "<saxml-export-dir>/scripts/{path}.xml" "agent/sandbox/{Solution}/{ScriptName}.xml"
 ```
 
 Use the plugin (`GET /api/context`) for field/layout/script references. Fall back to `agent/CONTEXT.json` or index files if plugin is unavailable.
@@ -45,7 +46,7 @@ Before analysing logic, build the full picture of every script involved. The goa
 Grep the entry script's sanitized text for every `Perform Script` line at once. Extract all target script names from the results.
 
 ```bash
-grep -i "Perform Script" "agent/xml_parsed/scripts_sanitized/{solution}/{path}.txt"
+python3 agent/scripts/agfm_bridge.py discovery-query dependencies --script "{ScriptName}"
 ```
 
 This returns lines like:
@@ -70,12 +71,12 @@ for name, info in d.get('scripts', {}).items():
 
 **Index fallback (if plugin unavailable):**
 ```bash
-grep -E "Subscript A|Subscript B|Subscript C" "agent/context/{solution}/scripts.index"
+python3 agent/scripts/agfm_bridge.py discovery-query scripts
 ```
 
 From the results, derive the sanitized file path using a glob:
 ```bash
-find "agent/xml_parsed/scripts_sanitized/{solution}" -name "*ID {ScriptID}*" -type f | head -1
+python3 agent/scripts/agfm_bridge.py discovery-query script_locate --script "{ScriptName}"
 ```
 
 ### 3c. Parallel-read ALL subscripts
@@ -106,7 +107,7 @@ Call tree: [Script Name]
 
 Flag these edge cases:
 - **Calculated names** — `Perform Script By Name` references cannot be statically resolved. Ask the developer to clarify.
-- **Missing scripts** — references to scripts not found in `scripts_sanitized/` may be in a different solution file or deleted. Flag them.
+- **Missing scripts** — references the plugin cannot resolve may be in a different solution file or deleted. Flag them. `discovery-query broken` lists them all.
 - **Cycles** — scripts already visited are noted but not re-loaded.
 
 ---
@@ -183,7 +184,7 @@ Work from the fmxmlsnippet base in `agent/sandbox/`. Apply only the targeted cha
 
 Follow all output rules from CLAUDE.md:
 - Steps only within `<fmxmlsnippet type="FMObjectList">` — no `<Script>` wrapper
-- Use step catalog for step structure, not xml_parsed verbose format
+- Use the step catalog for step structure, not the verbose SaXML format
 - Validate all field/layout/script references against the plugin (`GET /api/context`), or CONTEXT.json/index files if plugin unavailable
 
 Run the validator:
@@ -208,7 +209,7 @@ Use `snippet_to_hr.py` to convert the refactored fmxmlsnippet to HR:
 python3 agent/scripts/snippet_to_hr.py agent/sandbox/{ScriptName}.xml --raw
 ```
 
-The original HR is already available in `agent/xml_parsed/scripts_sanitized/`.
+Save the original HR into `agent/sandbox/{Solution}/` before refactoring so you can revert.
 
 ### Terminal output (always)
 
@@ -216,21 +217,21 @@ Present a concise summary in the terminal listing each change with the relevant 
 
 ### Webviewer hint
 
-Check if the companion server is reachable:
+Check if the plugin is reachable:
 
 ```bash
-curl -s --max-time 2 -o /dev/null -w "%{http_code}" {companion_url}/status
+python3 agent/scripts/agfm_bridge.py status
 ```
 
-If reachable (HTTP 200 or 404), append this note after the terminal summary:
+If reachable, append this note after the terminal summary:
 
 > The webviewer is available — ask to "show the diff in the webviewer" for a side-by-side visual comparison.
 
 **Do not push the diff automatically.** Only push when the developer explicitly asks. To push:
 
-1. Read the original HR from `scripts_sanitized/`
+1. Read the original HR from the copy you saved in `agent/sandbox/{Solution}/`
 2. Generate the refactored HR via `snippet_to_hr.py --raw`
-3. POST the diff payload to the companion:
+3. POST the diff payload to the plugin's preview surface:
 
 ```bash
 python3 -c "
@@ -245,24 +246,26 @@ payload = json.dumps({
 })
 sys.stdout.write(payload)
 " "{original_hr_path}" "{refactored_hr_path}" \
-  | curl -s -X POST -H 'Content-Type: application/json' -d @- {companion_url}/webviewer/push
+  | curl -s -X POST -H "Authorization: Bearer $AGFM_PLUGIN_TOKEN" \
+      -H 'Content-Type: application/json' -d @- \
+      "http://localhost:${AGFM_PLUGIN_PORT:-8766}/api/preview"
 ```
 
 ---
 
 ## Step 8: Deploy
 
-### Tier 3 (autonomous)
+### Deploying the refactored script
 
 After developer approval:
 
-1. Load clipboard via `POST {companion_url}/clipboard`
-2. Deploy via `deploy.py` or direct companion calls:
-   - For an existing script: use Tier 2 mechanics (open script tab via Agentic-fm Paste, AXPress tab, Cmd+A → Delete → Cmd+V) to replace the content
-   - Alternatively: `POST {companion_url}/trigger` with raw AppleScript to open the script tab and paste
-3. Confirm deployment succeeded
+1. Pause and wait for the developer to signal readiness
+2. Deploy via `agfm_bridge.py`:
+   - Existing script: `agfm_bridge.py deploy <file> "<Script Name>"` replaces all steps in one call
+   - Small edits only: `agfm_bridge.py patch <patch.json>`
+3. Confirm deployment succeeded. If it fails, stop and ask the developer — do not retry with different flags.
 
-### Tier 1 (developer-assisted)
+### If the plugin is unreachable
 
 Present paste instructions:
 

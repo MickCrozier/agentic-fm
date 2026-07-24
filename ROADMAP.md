@@ -13,12 +13,12 @@ The core script workflow is production-ready:
 - **Script generation** — write complete, validated scripts from a plain-English description, scoped to your solution's real field and layout IDs
 - **Script review** — deep code review of a script and all subscripts it calls, with specific, actionable feedback
 - **Script preview** — review the logic in human-readable form before committing to XML output
-- **Debug loop** — close the feedback loop after paste: runtime state flows back to the agent automatically via the companion server, no copy/paste required
+- **Debug loop** — close the feedback loop after deploy: runtime state flows back to the agent automatically through the plugin, no copy/paste required
 - **Custom functions** — generate and paste custom functions directly into Manage Custom Functions
 - **Custom menus** — locate, create, and modify custom menus and menu sets with correct UUIDs
 - **Library** — a developer managed and curated collection of proven, reusable script patterns (error handling, API requests, transaction wrappers, timeout loops, and more) that the agent draws on rather than generating from scratch
 - **Multi-script scaffold** — guide the Untitled placeholder technique for complex multi-script systems: calculate how many placeholders are needed, capture their real IDs, generate all scripts in one pass with correct inter-script wiring, then walk through the renames
-- **Deployment module** — tiered deployment via `deploy.py`: Tier 1 (manual clipboard paste), Tier 2 (AGFMPaste via OData), Tier 3 (future full automation)
+- **Deployment** — direct deployment through the plugin via `agfm_bridge.py`: replace an existing script, create a new one, or apply surgical step-level patches, all without a manual paste
 
 ---
 
@@ -28,7 +28,7 @@ The core script workflow is production-ready:
 
 - **Script refactor** — analyse an existing script and produce an improved version with better error handling, cleaner variable naming, and consolidated logic — while preserving observable behaviour
 - **Script modernizer** — identify older development patterns and suggest modernised replacements, with risk assessment for each change. Examples: replacing multi-step `Commit Record` loops with `Open Transaction / Commit Transaction`; replacing global-field-plus-GTRR navigation with the newer `Go to List of Records` approach
-- **Script test** — generate a companion verification script that exercises a target script and reports pass/fail back to the agent via the debug server
+- **Script test** — generate a paired verification script that exercises a target script and reports pass/fail back to the agent through the plugin
 - **Implementation plan** — structured planning before generation: decompose requirements, identify dependencies, and confirm the approach before writing a line of code
 
 ---
