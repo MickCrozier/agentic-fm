@@ -316,6 +316,20 @@ function findScriptFile(root, solution, scriptName) {
 }
 
 
+async function formatAndSave(doc) {
+  try {
+    const edits = await vscode.commands.executeCommand('vscode.executeFormatDocumentProvider', doc.uri, {});
+    if (edits && edits.length) {
+      const edit = new vscode.WorkspaceEdit();
+      edit.set(doc.uri, edits);
+      await vscode.workspace.applyEdit(edit);
+      await doc.save();
+    }
+  } catch {
+    // Formatting is a nicety, not a correctness requirement — never block on failure.
+  }
+}
+
 async function openScriptFile(root, solution, scriptName) {
   const targetDir = path.join(root, 'agent', 'sandbox', solution || 'Unknown');
   const targetPath = path.join(targetDir, scriptName + '.fmscript');
@@ -336,6 +350,7 @@ async function openScriptFile(root, solution, scriptName) {
             const res = JSON.parse(stdout.trim());
             const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(res.path || targetPath));
             await vscode.window.showTextDocument(doc, { preview: false, viewColumn: vscode.ViewColumn.One });
+            await formatAndSave(doc);
             activateVSCode();
             vscode.window.showInformationMessage(`Fetched "${res.scriptName || scriptName}" (${res.stepCount} steps)`);
           } catch {
@@ -1007,9 +1022,11 @@ window.addEventListener('message', event => {
 
 // ─── fmscript formatter ───────────────────────────────────────────────────────
 
-const BLOCK_OPEN   = new Set(['If', 'Else If', 'Else', 'Loop', 'While']);
-const BLOCK_CLOSE  = new Set(['End If', 'End Loop', 'End While']);
-const BLOCK_MIDDLE = new Set(['Else If', 'Else']);
+const BLOCK_OPEN     = new Set(['If', 'Else If', 'Else', 'Loop', 'While']);
+const BLOCK_OPEN_INC = new Set(['If', 'Loop', 'While']); // pure openers — indent increases for following lines
+const BLOCK_CLOSE    = new Set(['End If', 'End Loop', 'End While']);
+const BLOCK_MIDDLE   = new Set(['Else If', 'Else']);
+const STEP_INDENT    = '  '; // 2 spaces per nesting level, per CODING_CONVENTIONS.md
 
 function stepKeyword(trimmed) {
   if (!trimmed) return null;
@@ -1019,8 +1036,9 @@ function stepKeyword(trimmed) {
   for (const kw of controls) {
     if (trimmed === kw || trimmed.startsWith(kw + ' [')) return kw;
   }
-  // General step: capital-letter word(s) followed by ' [' or end of line
-  if (/^[A-Z][A-Za-z]*(?:\s[A-Za-z]+)*\s*(?:\[|$)/.test(trimmed)) return trimmed.split(' [')[0].trimEnd();
+  // General step: capital-letter word(s) followed by ' [' or end of line.
+  // Words may contain internal '/' or '-' (e.g. "Go to Record/Request/Page", "Set Multi-User").
+  if (/^[A-Z][A-Za-z/-]*(?:\s[A-Za-z][A-Za-z/-]*)*\s*(?:\[|$)/.test(trimmed)) return trimmed.split(' [')[0].trimEnd();
   return null;
 }
 
@@ -1045,6 +1063,7 @@ function tokenizeFmcalc(src) {
     if (c === '"') {
       let j = i + 1;
       while (j < n) {
+        if (src[j] === '\\') { j += 2; continue; } // backslash-escaped char (e.g. \") — not a string terminator
         if (src[j] === '"') { if (src[j + 1] === '"') { j += 2; continue; } j++; break; }
         j++;
       }
@@ -1077,20 +1096,10 @@ function formatFmcalc(text, topLevelArgs = false) {
   const TAB = '    ';
   let pos = 0;
 
+  const PRINT_WIDTH = 100; // matches CODING_CONVENTIONS.md: single-line where it fits, one-arg-per-line otherwise
+
   function peek(off) { return toks[pos + (off || 0)] || { t: 'eof' }; }
   function eat() { return toks[pos++] || { t: 'eof' }; }
-
-  // Does the block starting at pos (immediately after '(' or '[') contain a ';' at depth 1?
-  function blockHasSemi() {
-    let d = 1;
-    for (let j = pos; j < toks.length; j++) {
-      const tt = toks[j].t;
-      if (tt === '(' || tt === '[') d++;
-      else if (tt === ')' || tt === ']') { d--; if (d === 0) return false; }
-      else if (tt === ';' && d === 1) return true;
-    }
-    return false;
-  }
 
   // Format ';'-separated argument list. Stops before ')' or ']' without consuming it.
   function fmtArgList(depth) {
@@ -1124,26 +1133,35 @@ function formatFmcalc(text, topLevelArgs = false) {
           parts.push(`${t.v}::${fld.v || ''}`);
         } else if (peek().t === '(') {
           eat(); // (
-          const expand = blockHasSemi();
-          const args = fmtArgList(expand ? depth + 1 : depth);
-          if (peek().t === ')') eat();
-          if (args.length === 0) {
+          const snapshot = pos;
+          const inlineArgs = fmtArgList(depth);
+          if (inlineArgs.length === 0) {
+            if (peek().t === ')') eat();
             parts.push(`${t.v} ()`);
-          } else if (!expand) {
-            parts.push(`${t.v} ( ${args.join(' ; ')} )`);
           } else {
-            const ind = TAB.repeat(depth + 1);
-            const close = TAB.repeat(depth);
-            parts.push(`${t.v} (\n${ind}${args.join(` ;\n${ind}`)}\n${close})`);
+            const singleLine = `${t.v} ( ${inlineArgs.join(' ; ')} )`;
+            if (!singleLine.includes('\n') && singleLine.length + depth * TAB.length <= PRINT_WIDTH) {
+              if (peek().t === ')') eat();
+              parts.push(singleLine);
+            } else {
+              pos = snapshot; // reparse args at one deeper indent for the exploded layout
+              const args = fmtArgList(depth + 1);
+              if (peek().t === ')') eat();
+              const ind = TAB.repeat(depth + 1);
+              const close = TAB.repeat(depth);
+              parts.push(`${t.v} (\n${ind}${args.join(` ;\n${ind}`)}\n${close})`);
+            }
           }
         } else {
           parts.push(t.v);
         }
       } else if (t.t === '[') {
+        // Label/value/type triples stay on a single line regardless of length (per CODING_CONVENTIONS.md),
+        // unless a nested construct was already forced onto multiple lines.
         const args = fmtArgList(depth + 1);
         if (peek().t === ']') eat();
         const single = `[ ${args.join(' ; ')} ]`;
-        if (!single.includes('\n') && single.length <= 72) {
+        if (!single.includes('\n')) {
           parts.push(single);
         } else {
           const ind = TAB.repeat(depth + 1);
@@ -1261,17 +1279,31 @@ function formatFmscript(text) {
     return false;
   }
 
-  while (i < lines.length) {
-    const line = lines[i];
-    const trimmed = line.trim();
+  let blockDepth = 0;
 
-    if (!trimmed || trimmed.startsWith('#')) { out.push(line); i++; continue; }
+  while (i < lines.length) {
+    const rawLine = lines[i];
+    const trimmed = rawLine.trim();
+
+    if (!trimmed) { out.push(''); i++; continue; }
+
+    // Reindent this step's first line to match its control-flow nesting depth.
+    const kw = stepKeyword(trimmed);
+    let lineDepth = blockDepth;
+    if (kw && BLOCK_CLOSE.has(kw)) { blockDepth = Math.max(0, blockDepth - 1); lineDepth = blockDepth; }
+    else if (kw && BLOCK_MIDDLE.has(kw)) { lineDepth = Math.max(0, blockDepth - 1); }
+    if (kw && BLOCK_OPEN_INC.has(kw)) blockDepth++;
+
+    const indent = STEP_INDENT.repeat(lineDepth);
+    const line = indent + trimmed;
+
+    if (trimmed.startsWith('#')) { out.push(line); i++; continue; }
 
     const bIdx = firstBracket(line);
     if (bIdx === -1) { out.push(line); i++; continue; }
 
     // Accumulate continuation lines until the top-level bracket closes
-    const leadingTab = line.match(/^(\t*)/)[1];
+    const leadingTab = indent;
     let raw = line;
     let depth = depthChange(line);
     i++;
@@ -1412,10 +1444,13 @@ async function fetchCurrentScript(uri) {
       execFile(
         'python3', ['agent/scripts/agfm_bridge.py', 'fetch-script', scriptName, '--out', filePath],
         { cwd: root },
-        (err, _stdout, stderr) => {
+        async (err, _stdout, stderr) => {
           resolve();
-          if (err) vscode.window.showErrorMessage(`Fetch failed: ${(stderr || err.message).trim()}`);
-          else { activateVSCode(); vscode.window.showInformationMessage(`Fetched "${scriptName}" ✓`); }
+          if (err) { vscode.window.showErrorMessage(`Fetch failed: ${(stderr || err.message).trim()}`); return; }
+          const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
+          await formatAndSave(doc);
+          activateVSCode();
+          vscode.window.showInformationMessage(`Fetched "${scriptName}" ✓`);
         }
       );
     })
