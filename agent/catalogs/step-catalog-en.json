@@ -5394,18 +5394,20 @@
     "selfClosing": false,
     "params": [
       {
-        "xmlElement": "Calculation",
-        "type": "calculation",
-        "hrLabel": null,
-        "required": false
-      },
-      {
         "xmlElement": "Script",
         "type": "script",
         "hrLabel": null,
         "required": false,
         "omitWhenEmpty": true,
-        "note": "Present-driven: the unspecified target (<Script id=\"0\" name=\"\"/>) is omitted to match FM, which drops the empty <Script> on paste."
+        "note": "Present-driven: the unspecified target (<Script id=\"0\" name=\"\"/>) is omitted to match FM, which drops the empty <Script> on paste. Listed first to match the advertised hrSignature order (script name is the leading positional token)."
+      },
+      {
+        "xmlElement": "Calculation",
+        "type": "calculation",
+        "hrLabel": "Parameter",
+        "required": false,
+        "omitWhenEmpty": true,
+        "note": "The script parameter. hrLabel \"Parameter\" makes the label pass claim `Parameter: value` on compile and the calc-label emit print `Parameter:` on decompile; omitWhenEmpty drops the <Calculation> when no parameter is given (mirrors Perform Script on Server id 164)."
       }
     ],
     "hrSignature": "[ \"ScriptName\" ; Parameter: value ]",
