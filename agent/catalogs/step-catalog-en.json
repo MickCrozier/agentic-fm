@@ -4472,7 +4472,7 @@
         "required": false
       }
     ],
-    "hrSignature": "[ Name: \"name\" ; Style: Document ]",
+    "hrSignature": "[ Name: \"name\" ; Style: Document|Floating Document|Dialog|Card ; Controls: Close, Resize ]",
     "monacoSnippet": null,
     "blockPair": null,
     "status": "complete",
