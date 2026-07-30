@@ -8071,8 +8071,8 @@
         "note": "repeatGroup: up to 3 <InputField UsePasswordCharacter><Field/ or $var><Label><Calculation></InputField>. field = Table::Field ref or $variable; FM always serializes a <Field>."
       }
     ],
-    "hrSignature": "[ \"Title\" ; \"Message\" ]",
-    "monacoSnippet": "Show Custom Dialog [ \"${1:Title}\" ; \"${2:Message}\" ]",
+    "hrSignature": "[ Title: \"title\" ; Message: \"message\" ]",
+    "monacoSnippet": "Show Custom Dialog [ Title: \"${1:title}\" ; Message: \"${2:message}\" ]",
     "blockPair": null,
     "status": "complete",
     "helpUrl": "https://help.claris.com/en/pro-help/content/show-custom-dialog.html",
