@@ -1011,12 +1011,12 @@
       {
         "xmlElement": "Option",
         "type": "boolean",
-        "hrLabel": "Delete Entry",
+        "hrLabel": "Delete",
         "xmlAttr": "state",
         "required": false,
         "defaultValue": "False",
         "flagStyle": true,
-        "notes": "True = delete the entry (omit Value); False = set/update. Mutually exclusive with Value."
+        "notes": "True = delete the entry (omit Value); False = set/update. Mutually exclusive with Value. FM renders the flag as the bare label 'Delete' (live-verified 2026-07-31)."
       },
       {
         "xmlElement": "Calculation",
@@ -1024,9 +1024,10 @@
         "hrLabel": "Value",
         "wrapperElement": "Value",
         "required": false,
-        "notes": "Set mode only. Mutually exclusive with Delete Entry (Option state=True)."
+        "notes": "Set mode only. Mutually exclusive with Delete (Option state=True)."
       }
-    ]
+    ],
+    "hrSignature": "[ <name> ; Instance ID: <calc> ; Value: <calc> ; Delete ]"
   },
   {
     "name": "Configure Prompt Template",
