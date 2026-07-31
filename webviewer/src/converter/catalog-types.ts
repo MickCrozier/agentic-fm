@@ -17,10 +17,11 @@ export interface StepCatalogEntry {
   selfClosing: boolean;
   /** Structured parameter definitions in XML child element order */
   params: StepParam[];
-  /** Human-readable bracket format (null = not yet defined) */
+  /** Human-readable bracket format (null = not yet defined). The Monaco editor
+   *  derives its completion snippet (tab-stops + block scaffold) from this — see
+   *  completion.ts::deriveSnippet. The former per-step `monacoSnippet` field was
+   *  retired in favour of this single source. */
   hrSignature: string | null;
-  /** Monaco editor snippet template (null = no snippet) */
-  monacoSnippet: string | null;
   /** Block pairing info for matched steps like If/End If */
   blockPair: StepBlockPair | null;
   /** Catalog entry status: auto-generated, human-reviewed, or complete */
