@@ -4231,11 +4231,7 @@
         "enumValues": [
           "ByName",
           "Current"
-        ],
-        "hrEnumValues": {
-          "ByName": "ByName",
-          "Current": "Current Window"
-        }
+        ]
       },
       {
         "xmlElement": "Calculation",
@@ -4838,11 +4834,7 @@
         "enumValues": [
           "Indefinitely",
           "ForDuration"
-        ],
-        "hrEnumValues": {
-          "Indefinitely": "Indefinitely",
-          "ForDuration": "Duration (seconds)"
-        }
+        ]
       },
       {
         "xmlElement": "Calculation",
@@ -4993,11 +4985,6 @@
           "Data API",
           "None"
         ],
-        "hrEnumValues": {
-          "Query": "Found Set",
-          "Data API": "Found Set as JSON",
-          "None": "Find Request as JSON"
-        },
         "enumStyle": "text"
       },
       {
@@ -5174,11 +5161,6 @@
           "Prompt",
           "Remove"
         ],
-        "hrEnumValues": {
-          "Add": "Add Data",
-          "Prompt": "Send Prompt",
-          "Remove": "Remove Data"
-        },
         "enumStyle": "text"
       },
       {
@@ -5190,9 +5172,6 @@
         "enumValues": [
           "FromText"
         ],
-        "hrEnumValues": {
-          "FromText": "From Text"
-        },
         "note": "Add Data action only. omitWhenEmpty: present-driven so the Prompt action (no DataSource) emits no empty <DataSource>.",
         "omitWhenEmpty": true,
         "enumStyle": "text"
@@ -5555,10 +5534,6 @@
         "hrLabel": null,
         "xmlAttr": "type",
         "required": true,
-        "hrEnumValues": {
-          "Embedded": "From list",
-          "Reference": "By JSON data"
-        },
         "note": "Mirrors OptionsSelectionType — not a separate HR param"
       },
       {
@@ -5599,10 +5574,6 @@
         "hrLabel": "Options specified",
         "parentElement": "PerformSQLQuerybyNaturalLanguage",
         "required": true,
-        "hrEnumValues": {
-          "By List": "From list",
-          "By JSON data": "By JSON data"
-        },
         "enumStyle": "text"
       },
       {
@@ -5621,9 +5592,6 @@
         "parentElement": "PerformSQLQuerybyNaturalLanguage",
         "required": false,
         "note": "Only when OptionsSelectionType is By List",
-        "hrEnumValues": {
-          "By List": "From list"
-        },
         "enumStyle": "text"
       },
       {
@@ -5841,11 +5809,6 @@
         "type": "enum",
         "hrLabel": "Read as",
         "xmlAttr": "value",
-        "hrEnumValues": {
-          "1": "UTF-16",
-          "2": "UTF-8",
-          "3": "Bytes"
-        },
         "required": false,
         "defaultValue": "3"
       }
@@ -6044,11 +6007,6 @@
         "type": "enum",
         "hrLabel": null,
         "xmlAttr": "value",
-        "hrEnumValues": {
-          "CurrentContents": "Current contents",
-          "SerialNumbers": "Serial numbers",
-          "Calculation": null
-        },
         "required": false,
         "defaultValue": "Calculation"
       },
@@ -6235,7 +6193,7 @@
       {
         "xmlElement": "SaveAsType",
         "type": "enum",
-        "hrLabel": "Copy type",
+        "hrLabel": null,
         "xmlAttr": "value",
         "required": false,
         "defaultValue": "Copy",
@@ -6434,7 +6392,7 @@
       {
         "xmlElement": "SaveType",
         "type": "enum",
-        "hrLabel": "Records",
+        "hrLabel": null,
         "xmlAttr": "value",
         "required": false,
         "defaultValue": "BrowsedRecords",
@@ -6737,7 +6695,7 @@
       {
         "xmlElement": "SaveType",
         "type": "enum",
-        "hrLabel": "Records",
+        "hrLabel": null,
         "xmlAttr": "value",
         "required": false,
         "defaultValue": "BrowsedRecords",
@@ -6769,7 +6727,7 @@
       {
         "xmlElement": "ScrollOperation",
         "type": "enum",
-        "hrLabel": "Direction",
+        "hrLabel": null,
         "xmlAttr": "value",
         "required": true,
         "defaultValue": "Home",
@@ -6833,11 +6791,7 @@
         "hrLabel": "Window",
         "xmlAttr": "value",
         "required": true,
-        "defaultValue": "ByName",
-        "hrEnumValues": {
-          "ByName": "Name: <calc>",
-          "Current": "Current Window"
-        }
+        "defaultValue": "ByName"
       },
       {
         "xmlElement": "Calculation",
@@ -7427,7 +7381,7 @@
       {
         "xmlElement": "MultiUser",
         "type": "enum",
-        "hrLabel": "Network access",
+        "hrLabel": null,
         "xmlAttr": "value",
         "required": false,
         "defaultValue": "True",
@@ -7608,14 +7562,7 @@
         "hrLabel": "Action",
         "xmlAttr": "value",
         "required": true,
-        "defaultValue": "GoToURL",
-        "hrEnumValues": {
-          "GoToURL": "Go to URL",
-          "Reset": "Reset",
-          "Reload": "Reload",
-          "GoForward": "Go Forward",
-          "GoBack": "Go Back"
-        }
+        "defaultValue": "GoToURL"
       },
       {
         "xmlElement": "Calculation",
@@ -7652,11 +7599,7 @@
         "hrLabel": "Window",
         "xmlAttr": "value",
         "required": false,
-        "defaultValue": "ByName",
-        "hrEnumValues": {
-          "Current": "Current Window",
-          "ByName": "Of Window"
-        }
+        "defaultValue": "ByName"
       },
       {
         "xmlElement": "Calculation",
@@ -7705,7 +7648,7 @@
       {
         "xmlElement": "Zoom",
         "type": "enum",
-        "hrLabel": "Zoom level",
+        "hrLabel": null,
         "xmlAttr": "value",
         "required": false,
         "defaultValue": "100",
@@ -7877,7 +7820,7 @@
       {
         "xmlElement": "ShowHide",
         "type": "enum",
-        "hrLabel": "Action",
+        "hrLabel": null,
         "xmlAttr": "value",
         "required": false,
         "defaultValue": "Hide",
@@ -7903,7 +7846,7 @@
       {
         "xmlElement": "ShowHide",
         "type": "enum",
-        "hrLabel": "Action",
+        "hrLabel": null,
         "xmlAttr": "value",
         "required": false,
         "defaultValue": "Show",
@@ -7945,7 +7888,7 @@
       {
         "xmlElement": "ShowHide",
         "type": "enum",
-        "hrLabel": "Action",
+        "hrLabel": null,
         "xmlAttr": "value",
         "required": false,
         "defaultValue": "Hide",
@@ -8019,12 +7962,7 @@
         "hrLabel": "Sort order",
         "xmlAttr": "value",
         "required": false,
-        "defaultValue": "SortAscending",
-        "hrEnumValues": {
-          "SortAscending": "Ascending",
-          "SortDescending": "Descending",
-          "SortValueList": "Associated value list"
-        }
+        "defaultValue": "SortAscending"
       },
       {
         "xmlElement": "Field",
@@ -8208,7 +8146,7 @@
       {
         "xmlElement": "UndoRedo",
         "type": "enum",
-        "hrLabel": "Action",
+        "hrLabel": null,
         "xmlAttr": "value",
         "required": false,
         "defaultValue": "Undo",
@@ -8246,7 +8184,7 @@
       {
         "xmlElement": "View",
         "type": "enum",
-        "hrLabel": "View",
+        "hrLabel": null,
         "xmlAttr": "value",
         "required": false,
         "defaultValue": "Cycle",
@@ -8289,11 +8227,7 @@
         "hrLabel": "Write as",
         "xmlAttr": "value",
         "required": false,
-        "defaultValue": "2",
-        "hrEnumValues": {
-          "1": "UTF-16",
-          "2": "UTF-8"
-        }
+        "defaultValue": "2"
       },
       {
         "xmlElement": "AppendLineFeed",
