@@ -7595,19 +7595,21 @@
     "selfClosing": false,
     "params": [
       {
-        "xmlElement": "Action",
-        "type": "enum",
-        "hrLabel": "Action",
-        "xmlAttr": "value",
-        "required": true,
-        "defaultValue": "GoToURL"
-      },
-      {
         "xmlElement": "Calculation",
         "type": "namedCalc",
         "hrLabel": "Object Name",
         "wrapperElement": "ObjectName",
         "required": true
+      },
+      {
+        "xmlElement": "Action",
+        "type": "enum",
+        "hrLabel": "Action",
+        "xmlAttr": "value",
+        "required": true,
+        "defaultValue": "GoToURL",
+        "hrEnumValues": { "GoForward": "Go Forward", "GoBack": "Go Back" },
+        "discriminatorValues": { "GoToURL": { "reveal": ["URL"] } }
       },
       {
         "xmlElement": "Calculation",
@@ -7619,7 +7621,7 @@
         "note": "Only used when Action is GoToURL; omit for all other actions. FM serializes <URL custom=\"True\"> for a calculated URL."
       }
     ],
-    "hrSignature": "[ Action: <GoToURL/Reset/Reload/Go Forward/Go Back> ; Object Name: <calc> ; URL: <calc> ]",
+    "hrSignature": "[ Object Name: <calc> ; URL: <calc> | Action: <Reset/Reload/Go Forward/Go Back> ]",
     "blockPair": null,
     "status": "complete",
     "helpUrl": "https://help.claris.com/en/pro-help/content/set-web-viewer.html"
