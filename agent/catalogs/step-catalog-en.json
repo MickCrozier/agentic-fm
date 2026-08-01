@@ -2141,7 +2141,7 @@
     ],
     "hrSignature": "[ condition ]",
     "blockPair": {
-      "role": "middle",
+      "role": "inner",
       "partners": [
         "Loop",
         "End Loop"
@@ -5612,13 +5612,6 @@
         "parentElement": "PerformSQLQuerybyNaturalLanguage",
         "required": false,
         "note": "Only when OptionsSelectionType is By List",
-        "xmlEnumValues": [
-          "Query",
-          "Query for Data Only",
-          "Get SQL",
-          "Get First SQL Only",
-          "Get DDL"
-        ],
         "enumStyle": "text"
       },
       {
@@ -6195,7 +6188,7 @@
     ],
     "hrSignature": "[ Condition: <calc> ; Error Code: <calc> ; Error Message: <calc> ]",
     "blockPair": {
-      "role": "middle",
+      "role": "inner",
       "partners": [
         "Open Transaction",
         "Commit Transaction"
@@ -6246,12 +6239,6 @@
         "xmlAttr": "value",
         "required": false,
         "defaultValue": "Copy",
-        "xmlEnumValues": [
-          "Copy",
-          "CompactedCopy",
-          "Clone",
-          "SelfContainedCopy"
-        ],
         "hrEnumValues": {
           "Copy": "copy of current file",
           "CompactedCopy": "compacted copy (smaller)",
@@ -6451,10 +6438,6 @@
         "xmlAttr": "value",
         "required": false,
         "defaultValue": "BrowsedRecords",
-        "xmlEnumValues": [
-          "BrowsedRecords",
-          "CurrentRecord"
-        ],
         "hrEnumValues": {
           "BrowsedRecords": "Records being browsed",
           "CurrentRecord": "Current record"
@@ -6758,10 +6741,6 @@
         "xmlAttr": "value",
         "required": false,
         "defaultValue": "BrowsedRecords",
-        "xmlEnumValues": [
-          "BrowsedRecords",
-          "CurrentRecord"
-        ],
         "hrEnumValues": {
           "BrowsedRecords": "Records being browsed",
           "CurrentRecord": "Current record"
@@ -6794,13 +6773,6 @@
         "xmlAttr": "value",
         "required": true,
         "defaultValue": "Home",
-        "xmlEnumValues": [
-          "Home",
-          "End",
-          "PageUp",
-          "PageDown",
-          "ToSelection"
-        ],
         "hrEnumValues": {
           "Home": "Home",
           "End": "End",
@@ -6862,10 +6834,6 @@
         "xmlAttr": "value",
         "required": true,
         "defaultValue": "ByName",
-        "xmlEnumValues": [
-          "ByName",
-          "Current"
-        ],
         "hrEnumValues": {
           "ByName": "Name: <calc>",
           "Current": "Current Window"
@@ -6921,11 +6889,6 @@
         "xmlAttr": "value",
         "required": true,
         "defaultValue": "Text",
-        "xmlEnumValues": [
-          "Text",
-          "File",
-          "Calculation"
-        ],
         "note": "Text = manual text entry; File = open a file/application; Calculation = generated from calculation"
       },
       {
@@ -7195,34 +7158,21 @@
         "type": "enum",
         "hrLabel": null,
         "xmlAttr": "type",
-        "required": false,
-        "xmlEnumValues": [
-          "SMTPEncryptionNone",
-          "SMTPEncryptionTLS",
-          "SMTPEncryptionSSL"
-        ]
+        "required": false
       },
       {
         "xmlElement": "SMTPAuthenticationType",
         "type": "enum",
         "hrLabel": null,
         "xmlAttr": "type",
-        "required": false,
-        "xmlEnumValues": [
-          "SMTPAuthenticationNone",
-          "SMTPAuthenticationPlain"
-        ]
+        "required": false
       },
       {
         "xmlElement": "OAuthProvider",
         "type": "enum",
         "hrLabel": null,
         "xmlAttr": "type",
-        "required": false,
-        "xmlEnumValues": [
-          "OAuthProviderGoogle",
-          "OAuthProviderMicrosoft"
-        ]
+        "required": false
       }
     ],
     "hrSignature": "[ Send via E-mail Client/SMTP Server/OAuth 2.0 ; With dialog/No dialog: <On/Off> ; Attachment path: <path> ; To: useFoundSet=<True/False>, value=<calc> ; CC: … ; BCC: … ; Subject: <calc> ; Message: <calc> ; <SMTP/OAuth fields> ]",
@@ -7328,21 +7278,6 @@
         "xmlAttr": "value",
         "required": true,
         "defaultValue": "US English",
-        "xmlEnumValues": [
-          "US English",
-          "UK English",
-          "US English (Medical)",
-          "Deutsch (Alte Regeln)",
-          "Deutsch (Neue Regeln)",
-          "Schweizerdeutsch",
-          "Español",
-          "Français",
-          "Italiano",
-          "Nederlands",
-          "Português (Brasil)",
-          "Português (Portugal)",
-          "Svenska"
-        ],
         "note": "Special characters encoded as XML entities in XML output"
       },
       {
