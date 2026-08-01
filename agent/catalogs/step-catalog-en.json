@@ -637,31 +637,34 @@
     "selfClosing": false,
     "params": [
       {
+        "xmlElement": "Option",
+        "type": "boolean",
+        "flagStyle": true,
+        "hrLabel": "Skip data entry validation",
+        "xmlAttr": "state",
+        "required": false,
+        "defaultValue": "False"
+      },
+      {
         "xmlElement": "NoInteract",
         "type": "boolean",
-        "hrLabel": null,
+        "invertedHr": true,
+        "hrLabel": "With dialog",
         "xmlAttr": "state",
         "required": false,
         "defaultValue": "True"
       },
       {
-        "xmlElement": "Option",
-        "type": "boolean",
-        "hrLabel": null,
-        "xmlAttr": "state",
-        "required": false,
-        "defaultValue": "False"
-      },
-      {
         "xmlElement": "ESSForceCommit",
         "type": "boolean",
-        "hrLabel": null,
+        "flagStyle": true,
+        "hrLabel": "Force Commit",
         "xmlAttr": "state",
         "required": false,
         "defaultValue": "False"
       }
     ],
-    "hrSignature": "[ With dialog: Off ]",
+    "hrSignature": "[ Skip data entry validation ; With dialog: <On/Off> ; Force Commit ]",
     "blockPair": null,
     "status": "complete",
     "helpUrl": "https://help.claris.com/en/pro-help/content/commit-records-requests.html"
@@ -2989,19 +2992,19 @@
       {
         "xmlElement": "Calculation",
         "type": "namedCalc",
-        "hrLabel": null,
+        "hrLabel": "Object Name",
         "wrapperElement": "ObjectName",
         "required": false
       },
       {
         "xmlElement": "Calculation",
         "type": "namedCalc",
-        "hrLabel": null,
+        "hrLabel": "Repetition",
         "wrapperElement": "Repetition",
         "required": false
       }
     ],
-    "hrSignature": "[ Object Name: \"objectName\" ]",
+    "hrSignature": "[ Object Name: <value> ; Repetition: <value> ]",
     "blockPair": null,
     "status": "complete",
     "helpUrl": "https://help.claris.com/en/pro-help/content/go-to-object.html"
@@ -5944,6 +5947,7 @@
       {
         "xmlElement": "Option",
         "type": "boolean",
+        "flagStyle": true,
         "hrLabel": "Flush cached join results",
         "xmlAttr": "state",
         "required": false,
@@ -5952,6 +5956,7 @@
       {
         "xmlElement": "FlushSQLData",
         "type": "boolean",
+        "flagStyle": true,
         "hrLabel": "Flush cached external data",
         "xmlAttr": "state",
         "required": false,
@@ -7441,14 +7446,12 @@
       {
         "xmlElement": "Calculation",
         "type": "namedCalc",
-        "hrLabel": "Target field name",
         "wrapperElement": "TargetName",
         "required": true
       },
       {
         "xmlElement": "Calculation",
         "type": "namedCalc",
-        "hrLabel": "Calculated result",
         "wrapperElement": "Result",
         "required": false
       }
