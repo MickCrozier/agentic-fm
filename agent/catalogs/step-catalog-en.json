@@ -4858,13 +4858,24 @@
         "enumValues": [
           "Indefinitely",
           "ForDuration"
-        ]
+        ],
+        "discriminatorValues": {
+          "Indefinitely": {
+            "hrToken": "Indefinitely"
+          },
+          "ForDuration": {
+            "reveal": [
+              "Calculation"
+            ]
+          }
+        }
       },
       {
         "xmlElement": "Calculation",
         "type": "calculation",
         "hrLabel": "Duration (seconds)",
-        "required": false
+        "required": false,
+        "omitWhenEmpty": true
       }
     ],
     "hrSignature": "[ Indefinitely | Duration (seconds): <n> ]",
