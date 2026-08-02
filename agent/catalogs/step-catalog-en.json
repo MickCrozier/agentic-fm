@@ -8122,15 +8122,20 @@
       {
         "xmlElement": "SortRecordsByField",
         "type": "enum",
-        "hrLabel": "Sort order",
+        "hrLabel": null,
         "xmlAttr": "value",
         "required": false,
-        "defaultValue": "SortAscending"
+        "defaultValue": "SortAscending",
+        "hrEnumValues": {
+          "SortAscending": "Ascending",
+          "SortDescending": "Descending",
+          "SortValueList": "Associated value list"
+        }
       },
       {
         "xmlElement": "Field",
         "type": "field",
-        "hrLabel": "Field",
+        "hrLabel": null,
         "required": false
       }
     ],
