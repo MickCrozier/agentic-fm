@@ -5583,36 +5583,40 @@
     "params": [
       {
         "xmlElement": "Option",
-        "type": "flagBoolean",
-        "hrLabel": "Parameters enabled",
+        "type": "boolean",
+        "hrLabel": null,
         "xmlAttr": "state",
+        "hrHidden": true,
         "required": false,
         "defaultValue": "False",
-        "note": "state=True shows Parameters field in HR"
+        "note": "Internal 'Parameters enabled' flag; FM renders NO HR token (hrHidden). FM re-canonicalizes Option->True on paste when a Parameters calc is present, so the hidden False default round-trips (Perform Find precedent)."
       },
       {
         "xmlElement": "Stream",
-        "type": "flagBoolean",
+        "type": "boolean",
         "hrLabel": "Stream",
         "xmlAttr": "state",
+        "flagStyle": true,
         "required": false,
-        "defaultValue": "False"
+        "defaultValue": "False",
+        "note": "Bare flag: FM shows 'Stream' only when state=True, nothing when False (flagStyle). Governed companion revealed by both OptionsSelectionType values so it renders after the discriminator group in HR order; always serialized in XML (revealed)."
       },
       {
         "xmlElement": "UniversalPathList",
         "type": "enum",
         "hrLabel": null,
         "xmlAttr": "type",
+        "hrHidden": true,
         "required": true,
-        "note": "Mirrors OptionsSelectionType — not a separate HR param"
+        "defaultValue": "Embedded",
+        "note": "Mirrors OptionsSelectionType (Embedded for By List, Reference for By JSON data); FM derives it on paste. Internal, no HR token (hrHidden)."
       },
       {
         "xmlElement": "Field",
-        "type": "field",
+        "type": "fieldOrVariable",
         "hrLabel": "Response Target",
         "required": false,
-        "omitWhenEmpty": true,
-        "notes": "Sibling before <PerformSQLQuerybyNaturalLanguage>. Dual format: field ref or variable with <Text/>. omitWhenEmpty: present-driven so the unconfigured target emits no <Field>."
+        "note": "Outside the wrapper. Governed companion revealed by both values -> renders 'Response Target: <field|$var>' after the tail. No emitEmptyDefault: FM omits <Field> when unset (unlike Perform RAG Action), so an unconfigured target emits nothing. fieldOrVariable so a $variable target round-trips."
       },
       {
         "xmlElement": "Calculation",
@@ -5644,7 +5648,40 @@
         "hrLabel": "Options specified",
         "parentElement": "PerformSQLQuerybyNaturalLanguage",
         "required": true,
-        "enumStyle": "text"
+        "enumStyle": "text",
+        "defaultValue": "By List",
+        "enumValues": [
+          "By List",
+          "By JSON data"
+        ],
+        "hrEnumValues": {
+          "By List": "From list"
+        },
+        "discriminatorValues": {
+          "By List": {
+            "labeled": true,
+            "reveal": [
+              "Action",
+              "TablesSelectionType",
+              "TableAliases",
+              "Stream",
+              "TemplateName",
+              "Parameters",
+              "Field"
+            ]
+          },
+          "By JSON data": {
+            "labeled": true,
+            "reveal": [
+              "OptionsName",
+              "Stream",
+              "TemplateName",
+              "Parameters",
+              "Field"
+            ]
+          }
+        },
+        "note": "P5.2c-iii labeled-reveal governing discriminator (reuses the Perform RAG Action facet): keeps its own 'Options specified: <mapped>' token AND reveals per-value companions inline. By List -> 'From list' + Action/Data Tables/Tables...; By JSON data -> raw (unmapped) + bare JSON options. The always-present tail (Stream/Prompt Template Name/Parameters/Response Target) is listed in BOTH values' reveal[] so it renders after the discriminator group in FM's HR order while catalog order keeps XML grouping."
       },
       {
         "xmlElement": "Action",
@@ -5652,8 +5689,15 @@
         "hrLabel": "Action",
         "parentElement": "PerformSQLQuerybyNaturalLanguage",
         "required": false,
-        "note": "Only when OptionsSelectionType is By List",
-        "enumStyle": "text"
+        "enumStyle": "text",
+        "enumValues": [
+          "Query",
+          "Query for Data Only",
+          "Get SQL",
+          "Get First SQL Only",
+          "Get DDL"
+        ],
+        "note": "Governed companion revealed by By List only. Plain labeled enum 'Action: <raw value>' (values shown verbatim)."
       },
       {
         "xmlElement": "TablesSelectionType",
@@ -5661,25 +5705,31 @@
         "hrLabel": "Data Tables",
         "parentElement": "PerformSQLQuerybyNaturalLanguage",
         "required": false,
-        "note": "Only when OptionsSelectionType is By List",
-        "enumStyle": "text"
+        "enumStyle": "text",
+        "enumValues": [
+          "By List"
+        ],
+        "hrEnumValues": {
+          "By List": "From list"
+        },
+        "note": "Governed companion revealed by By List only. 'Data Tables: From list'."
       },
       {
         "xmlElement": "TableAliases",
-        "type": "tableList",
+        "type": "flagElement",
         "hrLabel": "Tables...",
         "parentElement": "PerformSQLQuerybyNaturalLanguage",
         "required": false,
-        "note": "Only when OptionsSelectionType is By List. Contains <Table id='' name=''/> children."
+        "note": "Governed companion revealed by By List only. Bare-presence flag: FM renders the literal 'Tables...' token for the table-alias picker; emits an empty <TableAliases/> (FM materializes the alias list). Populated aliases are not surfaced in HR (edge case)."
       },
       {
         "xmlElement": "Calculation",
         "type": "namedCalc",
-        "hrLabel": "JSON options",
+        "hrLabel": null,
         "wrapperElement": "OptionsName",
         "parentElement": "PerformSQLQuerybyNaturalLanguage",
         "required": false,
-        "note": "Only when OptionsSelectionType is By JSON data. Shown as bare calc in HR."
+        "note": "Governed companion revealed by By JSON data only. Bare calc in HR (hrLabel null), e.g. Options specified: By JSON data ; \"json\"."
       },
       {
         "xmlElement": "Calculation",
@@ -5687,7 +5737,8 @@
         "hrLabel": "Prompt Template Name",
         "wrapperElement": "TemplateName",
         "parentElement": "PerformSQLQuerybyNaturalLanguage",
-        "required": false
+        "required": false,
+        "note": "Governed companion revealed by both values (present-driven optional). 'Prompt Template Name: <calc>'."
       },
       {
         "xmlElement": "Calculation",
@@ -5696,7 +5747,7 @@
         "wrapperElement": "Parameters",
         "parentElement": "PerformSQLQuerybyNaturalLanguage",
         "required": false,
-        "note": "Only shown when Option state=True"
+        "note": "Governed companion revealed by both values (present-driven optional). 'Parameters: <calc>'. Its presence drives Option->True (FM re-canonicalizes on paste)."
       },
       {
         "xmlElement": "WebScript",
@@ -5704,10 +5755,10 @@
         "hrLabel": "Web Viewer / Function Name",
         "parentElement": "PerformSQLQuerybyNaturalLanguage",
         "required": false,
-        "notes": "Contains ObjectName (Web Viewer calc), FunctionName (calc), and WebScriptParameters with <P> children."
+        "notes": "Contains ObjectName (Web Viewer calc), FunctionName (calc), and WebScriptParameters with <P> children. Unmodeled subtree (complex): produces no HR token and is preserved structurally only."
       }
     ],
-    "hrSignature": "[ Account Name: <calc> ; Model: <calc> ; Prompt: <calc> ; Options specified: <From list/By JSON data> ; Action: <action> ; Data Tables: From list ; Tables... ; <Stream> ; Prompt Template Name: <calc> ; Parameters: <calc> ; Response Target: <Table::Field/$var> ; Web Viewer: <calc> ; Function Name: <calc> ]",
+    "hrSignature": "[ Account Name: <calc> ; Model: <calc> ; Prompt: <calc> ; Options specified: <From list | By JSON data> ; <By List: Action: <action> ; Data Tables: From list ; Tables...> <By JSON data: <json options>> ; <Stream> ; Prompt Template Name: <calc> ; Parameters: <calc> ; Response Target: <Table::Field | $var> ]",
     "blockPair": null,
     "status": "complete",
     "helpUrl": null
