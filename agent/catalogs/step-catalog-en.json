@@ -5160,20 +5160,21 @@
         "type": "boolean",
         "hrLabel": "Stream",
         "xmlAttr": "state",
-        "flagStyle": true,
         "required": false,
+        "omitWhenEmpty": true,
         "hrEnumValues": {
           "True": "On",
           "False": "Off"
         },
-        "note": "Outside RAGSpace; only present for Send Prompt action"
+        "note": "Outside RAGSpace. Governed companion revealed only by the Send Prompt action (RAGSpaceAction=Prompt). Renders 'Stream: On|Off' (labeled, NOT flagStyle — FM shows both states). omitWhenEmpty: as a governed boolean it is OMITTED for Add/Remove Data (FM drops the <Stream> element outside Send Prompt), unlike the Window family's always-serialized flag."
       },
       {
         "xmlElement": "Field",
-        "type": "field",
+        "type": "fieldOrVariable",
         "hrLabel": "Response Target",
         "required": false,
-        "note": "Outside RAGSpace. FM ALWAYS serializes this empty <Field> target (do NOT omitWhenEmpty — unlike SQL/CRM where FM drops it). The PromptMessage/InputText labels keep the prompt token from positional-stealing into this bare field."
+        "emitEmptyDefault": true,
+        "note": "Outside RAGSpace. Governed companion revealed only by the Send Prompt action (RAGSpaceAction=Prompt). emitEmptyDefault: when revealed but unset FM serializes the empty <Field table=\"\" id=\"0\" name=\"\"/> target; when NOT revealed (Add/Remove Data) the governed-companion emit gate drops it, matching FM. fieldOrVariable so a $variable Response Target round-trips."
       },
       {
         "xmlElement": "RAGAccountName",
@@ -5200,7 +5201,34 @@
           "Prompt",
           "Remove"
         ],
-        "enumStyle": "text"
+        "enumStyle": "text",
+        "hrEnumValues": {
+          "Add": "Add Data",
+          "Prompt": "Send Prompt",
+          "Remove": "Remove Data"
+        },
+        "discriminatorValues": {
+          "Add": {
+            "labeled": true,
+            "reveal": [
+              "DataSource",
+              "InputText"
+            ]
+          },
+          "Prompt": {
+            "labeled": true,
+            "reveal": [
+              "PromptMessage",
+              "AIAccountName",
+              "Model",
+              "Stream",
+              "TemplateName",
+              "Field",
+              "Parameters"
+            ]
+          }
+        },
+        "note": "P5.2c-ii labeled-reveal governing discriminator: keeps its own 'Action: <mapped>' token AND reveals per-value companions inline (FM's HR order interleaves the outside-RAGSpace Stream + Response Target into the RAGSpace companions). Remove Data reveals nothing -> falls through to the plain labeled-enum render 'Action: Remove Data'."
       },
       {
         "xmlElement": "DataSource",
@@ -5211,17 +5239,20 @@
         "enumValues": [
           "FromText"
         ],
-        "note": "Add Data action only. omitWhenEmpty: present-driven so the Prompt action (no DataSource) emits no empty <DataSource>.",
+        "hrEnumValues": {
+          "FromText": "From Text"
+        },
+        "note": "Governed companion revealed only by the Add Data action. Renders 'RAG Data: From Text'. omitWhenEmpty: present-driven so a non-Add action emits no empty <DataSource>.",
         "omitWhenEmpty": true,
         "enumStyle": "text"
       },
       {
         "xmlElement": "InputText",
         "type": "namedCalc",
-        "hrLabel": "Input Text",
+        "hrLabel": null,
         "parentElement": "RAGSpace",
         "required": false,
-        "note": "Add Data action only. Labeled (not bare) so it does not positional-collide with the sibling Response Target field."
+        "note": "Governed companion revealed only by the Add Data action. Renders BARE (live FM shows the input calc with no label, e.g. Action: Add Data ; RAG Data: From Text ; \"text\"). No positional collision with Response Target because the two never coexist (Add reveals InputText, Send Prompt reveals the Field), and the pass-2 governed-companion gate keeps a suppressed sibling from stealing this bare token."
       },
       {
         "xmlElement": "PromptMessage",
@@ -5229,7 +5260,7 @@
         "hrLabel": "Prompt",
         "parentElement": "RAGSpace",
         "required": false,
-        "note": "Send Prompt action only. Labeled (not bare) so it does not positional-collide with the sibling Response Target field."
+        "note": "Governed companion revealed only by the Send Prompt action. Renders 'Prompt: <calc>' (labeled, per live FM)."
       },
       {
         "xmlElement": "AIAccountName",
@@ -5264,7 +5295,7 @@
         "note": "Send Prompt action only"
       }
     ],
-    "hrSignature": "[ RAG Account Name: <name> ; Space ID: <id> ; Action: <Add Data | Send Prompt | Remove Data> ; ... ]",
+    "hrSignature": "[ RAG Account Name: <name> ; Space ID: <id> ; Action: <Add Data | Send Prompt | Remove Data> ; <action companions> ]",
     "blockPair": null,
     "status": "complete",
     "helpUrl": null
