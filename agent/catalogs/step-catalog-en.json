@@ -4953,7 +4953,8 @@
         "xmlAttr": "state",
         "required": false,
         "defaultValue": "False",
-        "note": "Internal flag; True when Parameters is present"
+        "note": "Internal flag; True when Parameters is present",
+        "hrHidden": true
       },
       {
         "xmlElement": "SelectAll",
@@ -4962,13 +4963,8 @@
         "xmlAttr": "state",
         "required": false,
         "defaultValue": "True",
-        "note": "Always True; no HR representation"
-      },
-      {
-        "xmlElement": "Field",
-        "type": "field",
-        "hrLabel": "Response Target",
-        "required": false
+        "note": "Always True; no HR representation",
+        "hrHidden": true
       },
       {
         "xmlElement": "AccountName",
@@ -4992,13 +4988,6 @@
         "required": true
       },
       {
-        "xmlElement": "Parameters",
-        "type": "namedCalc",
-        "hrLabel": "Parameters",
-        "parentElement": "LLMCreateFind",
-        "required": false
-      },
-      {
         "xmlElement": "Action",
         "type": "enum",
         "hrLabel": "Get",
@@ -5009,7 +4998,19 @@
           "Data API",
           "None"
         ],
-        "enumStyle": "text"
+        "enumStyle": "text",
+        "hrEnumValues": {
+          "Query": "Found Set",
+          "Data API": "Found Set as JSON",
+          "None": "Find Request as JSON"
+        }
+      },
+      {
+        "xmlElement": "Parameters",
+        "type": "namedCalc",
+        "hrLabel": "Parameters",
+        "parentElement": "LLMCreateFind",
+        "required": false
       },
       {
         "xmlElement": "PromptTemplateName",
@@ -5018,6 +5019,20 @@
         "parentElement": "LLMCreateFind",
         "required": false,
         "note": "XML element name unconfirmed — likely <PromptTemplateName><Calculation/></PromptTemplateName> inside LLMCreateFind"
+      },
+      {
+        "xmlElement": "Field",
+        "type": "fieldOrVariable",
+        "hrLabel": "Response Target",
+        "required": false,
+        "visibleWhen": {
+          "param": "Action",
+          "values": [
+            "Data API",
+            "None"
+          ]
+        },
+        "emitEmptyDefault": true
       }
     ],
     "hrSignature": "[ Account Name: <name> ; Model: <model> ; Prompt: <prompt> ; Get: <Found Set | Found Set as JSON | Find Request as JSON> ; Parameters: <params> ; Response Target: <field or variable> ; Prompt Template Name: <name> ]",
