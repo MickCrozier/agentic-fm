@@ -5920,7 +5920,8 @@
         "xmlElement": "Calculation",
         "type": "calculation",
         "hrLabel": "File ID",
-        "required": true
+        "required": true,
+        "omitWhenEmpty": true
       },
       {
         "xmlElement": "Calculation",
@@ -5928,7 +5929,16 @@
         "hrLabel": "Amount (bytes)",
         "wrapperElement": "Count",
         "required": false,
-        "hrLabelNote": "Label is \"Amount\" (no unit) when Read as is UTF-16"
+        "hrLabelNote": "Label is \"Amount\" (no unit) when Read as is UTF-16",
+        "hrLabelWhen": [
+          {
+            "param": "DataSourceType",
+            "values": [
+              "1"
+            ],
+            "hrLabel": "Amount"
+          }
+        ]
       },
       {
         "xmlElement": "Field",
@@ -5942,7 +5952,17 @@
         "hrLabel": "Read as",
         "xmlAttr": "value",
         "required": false,
-        "defaultValue": "3"
+        "defaultValue": "3",
+        "enumValues": [
+          "1",
+          "2",
+          "3"
+        ],
+        "hrEnumValues": {
+          "1": "UTF-16",
+          "2": "UTF-8",
+          "3": "Bytes"
+        }
       }
     ],
     "hrSignature": "[ File ID: <value> ; Amount (bytes): <value> ; Target: <field/variable> ; Read as: <UTF-16/UTF-8/Bytes> ]",
