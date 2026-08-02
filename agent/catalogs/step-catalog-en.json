@@ -6149,10 +6149,17 @@
         "xmlElement": "Restore",
         "type": "boolean",
         "hrLabel": "Restore",
+        "hrHidden": true,
         "xmlAttr": "state",
         "required": false,
-        "defaultValue": "True",
-        "notes": "FM serializes <Restore state=...> between NoInteract and With; faithful passthrough."
+        "defaultValue": "False",
+        "notes": "FM always serializes <Restore state=\"False\"> for this step and never renders it in HR (the dialog exposes no Restore control). Hidden: emits the default, never claims an HR token."
+      },
+      {
+        "xmlElement": "Field",
+        "type": "field",
+        "hrLabel": null,
+        "required": true
       },
       {
         "xmlElement": "With",
@@ -6160,35 +6167,36 @@
         "hrLabel": null,
         "xmlAttr": "value",
         "required": false,
-        "defaultValue": "Calculation"
+        "defaultValue": "Calculation",
+        "enumValues": ["CurrentContents", "SerialNumbers", "Calculation"],
+        "discriminatorValues": {
+          "CurrentContents": { "hrToken": "Current contents" },
+          "SerialNumbers": { "hrToken": "Serial numbers" },
+          "Calculation": { "reveal": ["Calculation"] }
+        }
       },
       {
         "xmlElement": "Calculation",
         "type": "calculation",
         "hrLabel": null,
         "required": false,
-        "note": "Present when With value is Calculation; shown directly as the replacement value in HR"
+        "note": "Revealed only when With=Calculation; rendered bare (no label) as the replacement value. Omitted from XML for the Current contents / Serial numbers branches."
       },
       {
         "xmlElement": "SerialNumbers",
         "type": "attrGroup",
         "hrLabel": "Serial numbers",
+        "hrHidden": true,
         "required": false,
         "fields": [
-          { "key": "PerformAutoEnter", "kind": "attr", "xmlAttr": "PerformAutoEnter", "defaultValue": "True" },
+          { "key": "PerformAutoEnter", "kind": "attr", "xmlAttr": "PerformAutoEnter", "defaultValue": "False" },
           { "key": "UpdateEntryOptions", "kind": "attr", "xmlAttr": "UpdateEntryOptions", "defaultValue": "False" },
           { "key": "UseEntryOptions", "kind": "attr", "xmlAttr": "UseEntryOptions", "defaultValue": "True" }
         ],
-        "notes": "Always-present <SerialNumbers> auto-enter option attrs. PerformAutoEnter is the authorable 'Skip auto-enter options' toggle; the other two are stored config, faithful passthrough."
-      },
-      {
-        "xmlElement": "Field",
-        "type": "field",
-        "hrLabel": null,
-        "required": true
+        "notes": "Always-present <SerialNumbers> config attrs. FM never renders them in HR (the 'Serial numbers' HR token comes from the With enum value, not this group). Hidden: emits catalog defaults, never claims an HR token. The auto-enter sub-options are not encoded in FM's HR text, so they are not authorable from HR - the same fidelity FM's own serialization has."
       }
     ],
-    "hrSignature": "[ With dialog: <On/Off> ; Restore: <On/Off> ; <Current contents/Serial numbers/calculation> ; Serial numbers: PerformAutoEnter=<...> ; <Table::Field> ]",
+    "hrSignature": "[ With dialog: <On/Off> ; <Table::Field> ; <calculation | Current contents | Serial numbers> ]",
     "blockPair": null,
     "status": "complete",
     "helpUrl": "https://help.claris.com/en/pro-help/content/replace-field-contents.html"
