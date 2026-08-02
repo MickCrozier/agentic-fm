@@ -8400,7 +8400,8 @@
         "xmlElement": "Calculation",
         "type": "calculation",
         "hrLabel": "File ID",
-        "required": true
+        "required": true,
+        "omitWhenEmpty": true
       },
       {
         "xmlElement": "Field",
@@ -8415,13 +8416,22 @@
         "hrLabel": "Write as",
         "xmlAttr": "value",
         "required": false,
-        "defaultValue": "2"
+        "defaultValue": "2",
+        "enumValues": [
+          "1",
+          "2"
+        ],
+        "hrEnumValues": {
+          "1": "UTF-16",
+          "2": "UTF-8"
+        }
       },
       {
         "xmlElement": "AppendLineFeed",
-        "type": "flagBoolean",
+        "type": "boolean",
         "hrLabel": "Append line feed",
         "xmlAttr": "state",
+        "flagStyle": true,
         "required": false,
         "defaultValue": "False"
       }
