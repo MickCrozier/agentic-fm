@@ -1,5 +1,4 @@
 import type { ParsedLine } from '../parser';
-import type { IdResolver } from '../id-resolver';
 import { registerHrToXml, registerXmlToHr, stepOpen, stepSelfClose, cdata, escXml } from '../step-registry';
 
 // --- # (comment) ---
@@ -255,84 +254,9 @@ registerXmlToHr({
   },
 });
 
-// --- Allow User Abort ---
-registerHrToXml({
-  stepNames: ['Allow User Abort'],
-  toXml(line: ParsedLine): string {
-    const param = (line.params[0] ?? 'Off').trim();
-    const state = param.toLowerCase() === 'on' ? 'True' : 'False';
-    return [
-      stepOpen('Allow User Abort', !line.disabled),
-      `    <Set state="${state}"/>`,
-      '  </Step>',
-    ].join('\n');
-  },
-});
-
-// XML→HR for Allow User Abort is rendered by the catalog grammar engine (not a
-// sanctioned hand-coded exception); only its HR→XML stays hand-coded here.
-
-// --- Set Error Capture ---
-registerHrToXml({
-  stepNames: ['Set Error Capture'],
-  toXml(line: ParsedLine): string {
-    const param = (line.params[0] ?? 'On').trim();
-    const state = param.toLowerCase() === 'on' ? 'True' : 'False';
-    return [
-      stepOpen('Set Error Capture', !line.disabled),
-      `    <Set state="${state}"/>`,
-      '  </Step>',
-    ].join('\n');
-  },
-});
-
-// XML→HR for Set Error Capture is rendered by the catalog grammar engine; only
-// its HR→XML stays hand-coded here.
-
-// --- Perform Script ---
-registerHrToXml({
-  stepNames: ['Perform Script'],
-  toXml(line: ParsedLine, resolver: IdResolver): string {
-    let scriptName = '';
-    let parameter = '';
-
-    // Known FM display tokens that are not the script name (e.g. "From list", "Specified: From list")
-    const listTokens = /^(from list|specified:\s*from list)$/i;
-
-    for (const p of line.params) {
-      const paramMatch = p.match(/^Parameter:\s*(.*)$/i);
-      if (paramMatch) {
-        parameter = paramMatch[1].trim();
-      } else if (!scriptName && !listTokens.test(p.trim())) {
-        scriptName = p.replace(/^"|"$/g, '').trim();
-      }
-    }
-
-    const resolved = resolver.resolveScript(scriptName);
-    const lines = [
-      stepOpen('Perform Script', !line.disabled),
-    ];
-    if (parameter) {
-      lines.push(`    <Calculation>${cdata(parameter)}</Calculation>`);
-    }
-    lines.push(
-      `    <Script id="${resolved.id}" name="${resolved.name}"/>`,
-      '  </Step>',
-    );
-    return lines.join('\n');
-  },
-});
-
-// XML→HR for Perform Script is rendered by the catalog grammar engine; only its
-// HR→XML stays hand-coded here.
-
-// --- Halt Script ---
-registerHrToXml({
-  stepNames: ['Halt Script'],
-  toXml(line: ParsedLine): string {
-    return stepSelfClose('Halt Script', !line.disabled);
-  },
-});
-
-// XML→HR for Halt Script is rendered by the catalog grammar engine (no params);
-// only its HR→XML stays hand-coded here.
+// Allow User Abort, Set Error Capture, Perform Script, and Halt Script are now
+// rendered in BOTH directions by the catalog grammar engine (catalog-emit.ts /
+// catalog-grammar.ts) — their former hand-coders were folded into the engine in
+// P6.3. Only the control-flow set above stays hand-coded (the sanctioned
+// exception): # (comment), If, Else If, Else, End If, Loop, Exit Loop If,
+// End Loop, Exit Script, Set Variable.

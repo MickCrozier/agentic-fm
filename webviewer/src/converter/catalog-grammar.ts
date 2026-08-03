@@ -161,6 +161,8 @@ export interface GrammarParam {
 
 export interface GrammarEntry {
   name: string;
+  /** FileMaker's universal step-type id (the `<Step id="N">` constant), 0 if unknown. */
+  id: number;
   params: GrammarParam[];
   /** Block role (open/close/middle/inner) for control-flow indentation, or null. */
   blockRole: string | null;
@@ -248,6 +250,7 @@ function buildEntry(entry: StepCatalogEntry): GrammarEntry {
   const params = (entry.params as unknown as Record<string, unknown>[]) ?? [];
   return {
     name: entry.name,
+    id: entry.id ?? 0,
     params: params.map(buildParam),
     blockRole: entry.blockPair?.role ?? null,
   };
@@ -270,6 +273,16 @@ export function getGrammarEntry(name: string): GrammarEntry | undefined {
   return grammarRegistry.get(name);
 }
 
+/**
+ * FileMaker's universal step-type id for `name` (the `<Step id="N">` constant),
+ * resolved from the loaded catalog — 0 when the catalog isn't loaded or the name
+ * is unknown. Mirrors the reference converter's `ResolveStepId`; shared so the
+ * HR→XML emit path and control-flow hand-coders write the same real id FM does.
+ */
+export function resolveStepId(name: string): number {
+  return grammarRegistry.get(name)?.id ?? 0;
+}
+
 // ---------------------------------------------------------------------------
 // Discriminator / visibility predicates (mirror the reference + Python port)
 // ---------------------------------------------------------------------------
@@ -277,12 +290,37 @@ export function isGoverningDiscriminator(param: GrammarParam): boolean {
   return param.type === 'enum' && Object.keys(param.discriminatorValues).length > 0;
 }
 
-function isDrivenDiscriminator(entry: GrammarEntry, param: GrammarParam): boolean {
+export function isDrivenDiscriminator(entry: GrammarEntry, param: GrammarParam): boolean {
   if (!param.xmlElement) return false;
   return entry.params.some((q) => q.type === 'layout' && q.discriminator === param.xmlElement);
 }
 
-function governingDiscriminatorFor(
+/** Whether governing discriminator `discrim`'s XML `value` reveals companion `elem`. */
+export function valueRevealsCompanion(
+  discrim: GrammarParam,
+  value: string,
+  elem: string,
+): boolean {
+  const branch = discrim.discriminatorValues[value];
+  if (branch === undefined) return false;
+  return branch.reveal.includes(elem);
+}
+
+/**
+ * Every label a param's HR token may carry — its base hrLabel plus any
+ * `hrLabelWhen` variant labels — longest first (lexicographic tiebreak) with
+ * duplicates removed. Port of the reference `CandidateHrLabels`; the HR parse
+ * matcher tries each so a variant-labeled value round-trips.
+ */
+export function candidateHrLabels(param: GrammarParam): string[] {
+  const labels: string[] = [];
+  if (param.hrLabel) labels.push(param.hrLabel);
+  for (const v of param.hrLabelWhen) if (v.hrLabel) labels.push(v.hrLabel);
+  labels.sort((a, b) => (a.length !== b.length ? b.length - a.length : a < b ? -1 : a > b ? 1 : 0));
+  return labels.filter((l, i) => i === 0 || l !== labels[i - 1]);
+}
+
+export function governingDiscriminatorFor(
   entry: GrammarEntry,
   companion: GrammarParam,
 ): GrammarParam | null {
