@@ -183,7 +183,8 @@ registerXmlToHr({
   xmlStepNames: ['Exit Script'],
   toHR(el: Element): string {
     const calc = el.querySelector('Calculation')?.textContent ?? '';
-    if (calc) return `Exit Script [ Result: ${calc} ]`;
+    // FM's SW label is "Text Result:" — must byte-match snippet_to_hr.py.
+    if (calc) return `Exit Script [ Text Result: ${calc} ]`;
     return 'Exit Script';
   },
 });
@@ -244,12 +245,13 @@ registerHrToXml({
 registerXmlToHr({
   xmlStepNames: ['Set Variable'],
   toHR(el: Element): string {
-    const name = el.querySelector('Name')?.textContent ?? '$var';
+    const name = el.querySelector('Name')?.textContent ?? '';
     const value = el.querySelector('Value > Calculation')?.textContent ?? '';
     const rep = el.querySelector('Repetition > Calculation')?.textContent;
     // Only show repetition suffix for non-default values (> 1 or expressions)
     const repSuffix = rep && rep.trim() !== '1' ? `[${rep.trim()}]` : '';
-    return `Set Variable [ ${name}${repSuffix} ; ${value} ]`;
+    // Keep the explicit "Value:" label — must byte-match snippet_to_hr.py.
+    return `Set Variable [ ${name}${repSuffix} ; Value: ${value} ]`;
   },
 });
 
@@ -267,13 +269,8 @@ registerHrToXml({
   },
 });
 
-registerXmlToHr({
-  xmlStepNames: ['Allow User Abort'],
-  toHR(el: Element): string {
-    const state = el.querySelector('Set')?.getAttribute('state') ?? 'False';
-    return `Allow User Abort [ ${state === 'True' ? 'On' : 'Off'} ]`;
-  },
-});
+// XML→HR for Allow User Abort is rendered by the catalog grammar engine (not a
+// sanctioned hand-coded exception); only its HR→XML stays hand-coded here.
 
 // --- Set Error Capture ---
 registerHrToXml({
@@ -289,13 +286,8 @@ registerHrToXml({
   },
 });
 
-registerXmlToHr({
-  xmlStepNames: ['Set Error Capture'],
-  toHR(el: Element): string {
-    const state = el.querySelector('Set')?.getAttribute('state') ?? 'True';
-    return `Set Error Capture [ ${state === 'True' ? 'On' : 'Off'} ]`;
-  },
-});
+// XML→HR for Set Error Capture is rendered by the catalog grammar engine; only
+// its HR→XML stays hand-coded here.
 
 // --- Perform Script ---
 registerHrToXml({
@@ -331,17 +323,8 @@ registerHrToXml({
   },
 });
 
-registerXmlToHr({
-  xmlStepNames: ['Perform Script'],
-  toHR(el: Element): string {
-    const script = el.querySelector('Script');
-    const name = script?.getAttribute('name') ?? '';
-    const calc = el.querySelector('Calculation')?.textContent ?? '';
-    const specified = name ? 'Specified: From list' : 'Specified: By calculation';
-    const parts = [`"${name}"`, specified, `Parameter: ${calc}`];
-    return `Perform Script [ ${parts.join(' ; ')} ]`;
-  },
-});
+// XML→HR for Perform Script is rendered by the catalog grammar engine; only its
+// HR→XML stays hand-coded here.
 
 // --- Halt Script ---
 registerHrToXml({
@@ -351,9 +334,5 @@ registerHrToXml({
   },
 });
 
-registerXmlToHr({
-  xmlStepNames: ['Halt Script'],
-  toHR(): string {
-    return 'Halt Script';
-  },
-});
+// XML→HR for Halt Script is rendered by the catalog grammar engine (no params);
+// only its HR→XML stays hand-coded here.

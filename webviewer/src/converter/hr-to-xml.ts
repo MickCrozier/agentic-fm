@@ -11,6 +11,7 @@ import { createIdResolver } from './id-resolver';
 import type { FMContext } from '@/context/types';
 import type { StepCatalogEntry } from './catalog-types';
 import { registerCatalogConverters } from './catalog-converter';
+import { initGrammar } from './catalog-grammar';
 
 // Import step registrations (side-effect imports — must come before catalog registration)
 import './steps/control';
@@ -22,11 +23,12 @@ import './steps/miscellaneous';
 
 let catalogLoaded = false;
 
-/** Load catalog entries into the converter registry (idempotent). */
+/** Load catalog entries into both converter registries (idempotent). */
 export function loadCatalog(catalog: StepCatalogEntry[]): void {
   if (catalogLoaded) return;
   catalogLoaded = true;
-  registerCatalogConverters(catalog);
+  registerCatalogConverters(catalog); // HR→XML generic converters
+  initGrammar(catalog); // XML→HR grammar engine (catalog-grammar.ts)
 }
 
 export interface ConversionResult {
