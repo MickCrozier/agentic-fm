@@ -4,6 +4,7 @@ agent/xml_parsed/
 agent/context/
 agent/CONTEXT.json
 agent/sandbox/
+agent/tests/
 .private/
 .venv/
 .cursor/in-development/
