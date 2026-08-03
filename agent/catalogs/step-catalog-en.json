@@ -550,7 +550,8 @@
         "xmlElement": "Calculation",
         "type": "calculation",
         "hrLabel": "File ID",
-        "required": false
+        "required": false,
+        "omitWhenEmpty": true
       }
     ],
     "hrSignature": "[ File ID: calc ]",
@@ -2723,7 +2724,8 @@
         "xmlElement": "Calculation",
         "type": "calculation",
         "hrLabel": "File ID",
-        "required": true
+        "required": true,
+        "omitWhenEmpty": true
       },
       {
         "xmlElement": "Field",
@@ -7515,7 +7517,8 @@
         "xmlElement": "Calculation",
         "type": "calculation",
         "hrLabel": "File ID",
-        "required": true
+        "required": true,
+        "omitWhenEmpty": true
       },
       {
         "xmlElement": "Calculation",
