@@ -4330,7 +4330,7 @@
     "status": "complete",
     "helpUrl": "https://help.claris.com/en/pro-help/content/new-record-request.html"
   },
-  {
+    {
     "name": "New Window",
     "id": 122,
     "category": "windows",
@@ -4342,55 +4342,193 @@
         "type": "enum",
         "hrLabel": null,
         "xmlAttr": "value",
-        "required": false,
         "defaultValue": "SelectedLayout",
         "enumValues": [
           "SelectedLayout"
-        ]
+        ],
+        "hrHidden": true
       },
       {
         "xmlElement": "Calculation",
         "type": "namedCalc",
-        "hrLabel": null,
+        "hrLabel": "Name",
         "wrapperElement": "Name",
-        "required": false
+        "hrSlot": 1
       },
       {
         "xmlElement": "Calculation",
         "type": "namedCalc",
-        "hrLabel": null,
+        "hrLabel": "Height",
         "wrapperElement": "Height",
-        "required": false
+        "hrSlot": 3
       },
       {
         "xmlElement": "Calculation",
         "type": "namedCalc",
-        "hrLabel": null,
+        "hrLabel": "Width",
         "wrapperElement": "Width",
-        "required": false
+        "hrSlot": 4
       },
       {
         "xmlElement": "Calculation",
         "type": "namedCalc",
-        "hrLabel": null,
+        "hrLabel": "Top",
         "wrapperElement": "DistanceFromTop",
-        "required": false
+        "hrSlot": 5
       },
       {
         "xmlElement": "Calculation",
         "type": "namedCalc",
-        "hrLabel": null,
+        "hrLabel": "Left",
         "wrapperElement": "DistanceFromLeft",
-        "required": false
+        "hrSlot": 6
       },
       {
         "xmlElement": "NewWndStyles",
-        "type": "text",
-        "hrLabel": null,
-        "required": false
+        "type": "bitmaskGroup",
+        "hrLabel": "Style",
+        "hrControlsLabel": "Controls",
+        "hrSlot": 0,
+        "bitmaskStyleAttr": "Style",
+        "bitmaskValueAttr": "Styles",
+        "bitmaskResizeFlag": "Resize",
+        "bitmaskBase": 1073741824,
+        "bitmaskFixedBit": 2147483648,
+        "bitmaskAttrOrder": [
+          "DimParentWindow",
+          "Toolbars",
+          "MenuBar",
+          "Style",
+          "Close",
+          "Minimize",
+          "Maximize",
+          "Resize",
+          "Styles"
+        ],
+        "bitmaskFlags": [
+          {
+            "hrLabel": "Dim parent window",
+            "xmlAttr": "DimParentWindow",
+            "bit": 1048576
+          },
+          {
+            "hrLabel": "Toolbars",
+            "xmlAttr": "Toolbars",
+            "bit": 2097152
+          },
+          {
+            "hrLabel": "Menu Bar",
+            "xmlAttr": "MenuBar",
+            "bit": 1024
+          },
+          {
+            "hrLabel": "Close",
+            "xmlAttr": "Close",
+            "bit": 65536
+          },
+          {
+            "hrLabel": "Minimize",
+            "xmlAttr": "Minimize",
+            "bit": 131072
+          },
+          {
+            "hrLabel": "Maximize",
+            "xmlAttr": "Maximize",
+            "bit": 262144
+          },
+          {
+            "hrLabel": "Resize",
+            "xmlAttr": "Resize",
+            "bit": 512
+          }
+        ],
+        "bitmaskStyles": [
+          {
+            "hrToken": "Document",
+            "xmlValue": "Document",
+            "baseBit": 2,
+            "docResizable": true,
+            "legalFlags": [
+              "Close",
+              "Minimize",
+              "Maximize",
+              "Resize",
+              "Menu Bar",
+              "Toolbars"
+            ],
+            "defaultFlags": [
+              "Close",
+              "Minimize",
+              "Maximize",
+              "Resize"
+            ]
+          },
+          {
+            "hrToken": "Floating Document",
+            "xmlValue": "Floating",
+            "baseBit": 256,
+            "aliases": [
+              "Floating"
+            ],
+            "legalFlags": [
+              "Close",
+              "Minimize",
+              "Maximize",
+              "Resize",
+              "Menu Bar",
+              "Toolbars"
+            ],
+            "defaultFlags": [
+              "Close",
+              "Minimize",
+              "Maximize",
+              "Resize",
+              "Menu Bar",
+              "Toolbars"
+            ]
+          },
+          {
+            "hrToken": "Dialog",
+            "xmlValue": "Dialog",
+            "baseBit": 4,
+            "legalFlags": [
+              "Close",
+              "Maximize",
+              "Resize",
+              "Menu Bar",
+              "Toolbars"
+            ],
+            "defaultFlags": [
+              "Close",
+              "Maximize",
+              "Resize",
+              "Menu Bar",
+              "Toolbars"
+            ]
+          },
+          {
+            "hrToken": "Card",
+            "xmlValue": "Card",
+            "baseBit": 16,
+            "legalFlags": [
+              "Close",
+              "Dim parent window"
+            ],
+            "defaultFlags": [
+              "Close"
+            ]
+          }
+        ]
+      },
+      {
+        "xmlElement": "Layout",
+        "type": "layout",
+        "hrLabel": "Layout",
+        "required": true,
+        "hrSlot": 2
       }
     ],
-    "hrSignature": "[ Name: \"name\" ; Style: Document|Floating Document|Dialog|Card ; Controls: Close, Resize ]",
+    "hrSignature": "[ Style: Document ; Name: \"name\" ; Layout: <unknown> ; Controls: Close, Resize ]",
     "blockPair": null,
     "status": "complete",
     "helpUrl": "https://help.claris.com/en/pro-help/content/new-window.html"
