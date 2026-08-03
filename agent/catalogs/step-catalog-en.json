@@ -7485,13 +7485,15 @@
         "xmlElement": "Calculation",
         "type": "calculation",
         "hrLabel": null,
-        "required": true
+        "required": true,
+        "hrSlot": 1
       },
       {
         "xmlElement": "Field",
         "type": "field",
         "hrLabel": null,
-        "required": false
+        "required": false,
+        "hrSlot": 0
       }
     ],
     "hrSignature": "[ Table::Field ; value ]",
