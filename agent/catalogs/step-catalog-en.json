@@ -7861,7 +7861,7 @@
         "required": true
       }
     ],
-    "hrSignature": "[ $name ; value ]",
+    "hrSignature": "[ $name ; Value: value ]",
     "blockPair": null,
     "status": "complete",
     "helpUrl": "https://help.claris.com/en/pro-help/content/set-variable.html"
