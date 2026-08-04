@@ -550,7 +550,8 @@
         "xmlElement": "Calculation",
         "type": "calculation",
         "hrLabel": "File ID",
-        "required": false
+        "required": false,
+        "omitWhenEmpty": true
       }
     ],
     "hrSignature": "[ File ID: calc ]",
@@ -2723,7 +2724,8 @@
         "xmlElement": "Calculation",
         "type": "calculation",
         "hrLabel": "File ID",
-        "required": true
+        "required": true,
+        "omitWhenEmpty": true
       },
       {
         "xmlElement": "Field",
@@ -5377,7 +5379,7 @@
             ]
           }
         },
-        "note": "P5.2c-ii labeled-reveal governing discriminator: keeps its own 'Action: <mapped>' token AND reveals per-value companions inline (FM's HR order interleaves the outside-RAGSpace Stream + Response Target into the RAGSpace companions). Remove Data reveals nothing -> falls through to the plain labeled-enum render 'Action: Remove Data'."
+        "note": "Labeled-reveal governing discriminator: keeps its own 'Action: <mapped>' token AND reveals per-value companions inline (FM's HR order interleaves the outside-RAGSpace Stream + Response Target into the RAGSpace companions). Remove Data reveals nothing -> falls through to the plain labeled-enum render 'Action: Remove Data'."
       },
       {
         "xmlElement": "DataSource",
@@ -5830,7 +5832,7 @@
             ]
           }
         },
-        "note": "P5.2c-iii labeled-reveal governing discriminator (reuses the Perform RAG Action facet): keeps its own 'Options specified: <mapped>' token AND reveals per-value companions inline. By List -> 'From list' + Action/Data Tables/Tables...; By JSON data -> raw (unmapped) + bare JSON options. The always-present tail (Stream/Prompt Template Name/Parameters/Response Target) is listed in BOTH values' reveal[] so it renders after the discriminator group in FM's HR order while catalog order keeps XML grouping."
+        "note": "Labeled-reveal governing discriminator (reuses the Perform RAG Action facet): keeps its own 'Options specified: <mapped>' token AND reveals per-value companions inline. By List -> 'From list' + Action/Data Tables/Tables...; By JSON data -> raw (unmapped) + bare JSON options. The always-present tail (Stream/Prompt Template Name/Parameters/Response Target) is listed in BOTH values' reveal[] so it renders after the discriminator group in FM's HR order while catalog order keeps XML grouping."
       },
       {
         "xmlElement": "Action",
@@ -7515,7 +7517,8 @@
         "xmlElement": "Calculation",
         "type": "calculation",
         "hrLabel": "File ID",
-        "required": true
+        "required": true,
+        "omitWhenEmpty": true
       },
       {
         "xmlElement": "Calculation",
@@ -7858,7 +7861,7 @@
         "required": true
       }
     ],
-    "hrSignature": "[ $name ; value ]",
+    "hrSignature": "[ $name ; Value: value ]",
     "blockPair": null,
     "status": "complete",
     "helpUrl": "https://help.claris.com/en/pro-help/content/set-variable.html"
