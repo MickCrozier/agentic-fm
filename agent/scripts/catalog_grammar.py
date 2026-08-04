@@ -518,6 +518,39 @@ def is_driven_discriminator(entry: CatalogEntry, param: StepParam) -> bool:
     )
 
 
+def value_reveals_companion(discrim: StepParam, value: str, elem: str) -> bool:
+    """Whether governing discriminator ``discrim``'s XML ``value`` reveals ``elem``.
+
+    Port of the reference ``ValueRevealsCompanion`` (and TS ``valueRevealsCompanion``);
+    shared by the HR→XML emit engine (P6.3 TS / P6.4 Python).
+    """
+    branch = discrim.discriminator_values.get(value)
+    if branch is None:
+        return False
+    return elem in branch.reveal
+
+
+def candidate_hr_labels(param: StepParam) -> list[str]:
+    """Every label a param's HR token may carry — base ``hr_label`` plus any
+    ``hr_label_when`` variant labels — longest first (lexicographic tiebreak),
+    duplicates removed. Port of the reference ``CandidateHrLabels`` (TS
+    ``candidateHrLabels``); the HR parse matcher tries each so a variant-labeled
+    value round-trips.
+    """
+    labels: list[str] = []
+    if param.hr_label:
+        labels.append(param.hr_label)
+    for v in param.hr_label_when:
+        if v.hr_label:
+            labels.append(v.hr_label)
+    labels.sort(key=lambda s: (-len(s), s))
+    out: list[str] = []
+    for i, lbl in enumerate(labels):
+        if i == 0 or lbl != labels[i - 1]:
+            out.append(lbl)
+    return out
+
+
 def governing_discriminator_for(
     entry: CatalogEntry, companion: StepParam
 ) -> StepParam | None:
