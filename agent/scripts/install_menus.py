@@ -7,25 +7,22 @@ Usage:
   python agent/scripts/install_menus.py --set     # loads menu set to clipboard
 
 Reads from:
-  agent/sandbox/custom_menus.xml           snapshot: catalog UUID, file header,
-                                           and each menu's own UUID + ID
-  agent/sandbox/custom_menu_set.xml        snapshot: set catalog UUID, set UUID + ID
-  the agentic-fm plugin                    Agentic-fm Menu script ID (/api/context)
+  agent/sandbox/custom_menus.xml           snapshot with catalog UUID + file header
+  agent/sandbox/custom_menu_set.xml        snapshot with set catalog UUID (--set)
+  agent/xml_parsed/custom_menus/{sol}/     per-menu UUIDs and IDs
+  agent/xml_parsed/custom_menu_sets/{sol}/ set UUID and ID (--set)
+  agent/context/{solution}/scripts.index   Agentic-fm Menu script ID
 
 Writes:
   agent/sandbox/custom_menus.xml           ready to paste in FM (menus)
   agent/sandbox/custom_menu_set.xml        ready to paste in FM (set)
 
-Create the snapshots by copying the menus (and the set) in FileMaker's
-Manage > Custom Menus, then reading the clipboard back:
-  python3 agent/scripts/agfm_bridge.py clipboard-read > agent/sandbox/custom_menus.xml
-
-The snapshot files serve a dual purpose: source of the solution-specific UUIDs,
-then overwritten with the fully populated output. Since every UUID is preserved
-in the output, the script is idempotent.
+The snapshot files serve dual purpose: source of solution-specific catalog UUIDs
+(not available in xml_parsed), then overwritten with the fully populated output.
+Since the catalog UUID is preserved in the output, the script is idempotent.
 """
 
-import re, os, sys, json, subprocess, argparse
+import re, os, glob, sys, subprocess, argparse
 
 SCRIPT_NAME    = 'Agentic-fm Menu'
 TEMPLATE_MENUS = 'filemaker/custom_menu/custom_menus.xml'
@@ -57,7 +54,7 @@ def extract_menus_snapshot(path):
     if not cat_m:
         sys.exit(f"CustomMenuCatalog UUID not found in {path}.\n"
                  f"Recreate by copying any custom menu from FileMaker and running:\n"
-                 f"  python3 agent/scripts/agfm_bridge.py clipboard-read > {path}")
+                 f"  python agent/scripts/clipboard.py read {path}")
     return file_name, file_uuid, cat_m.group(1)
 
 
@@ -76,66 +73,57 @@ def extract_set_snapshot(path):
     return set_cat, set_uuid, (std_m.group(1) if std_m else None)
 
 
-def read_menu_info(path):
-    """Return {menu_name: {id, uuid}} parsed from a multi-menu clipboard snapshot.
+def find_solution(base_dir, hint=None):
+    """Return the solution subfolder name.
 
-    A snapshot taken by selecting all five menus in Manage > Custom Menus contains
-    one <CustomMenu name="..." id="..."> block per menu, each with its own <UUID>.
+    If hint is provided (e.g. 'agentic-fm' derived from the snapshot file name),
+    try to match it against available subfolders before falling back to interactive.
     """
-    c = read_file(path)
-    found = {}
-    for m in re.finditer(
-        r'<CustomMenu\s+name="([^"]+)"\s+id="(\d+)"[^>]*>\s*<UUID[^>]*>([A-F0-9-]{36})</UUID>',
-        c, re.IGNORECASE
-    ):
-        found[m.group(1)] = {'id': m.group(2), 'uuid': m.group(3)}
+    dirs = [d for d in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, d))]
+    if not dirs:
+        sys.exit(f"No solution subfolders in {base_dir}. Run Explode XML first.")
+    if len(dirs) == 1:
+        return dirs[0]
+    # Try to match the hint (file name without extension)
+    if hint:
+        stem = os.path.splitext(hint)[0]
+        matches = [d for d in dirs if d.lower() == stem.lower()]
+        if len(matches) == 1:
+            return matches[0]
+    print("Multiple solutions found:")
+    for i, d in enumerate(dirs, 1):
+        print(f"  [{i}] {d}")
+    return dirs[int(input("Which solution? ").strip()) - 1]
 
+
+def read_menu_info(base_dir, solution):
+    """Return {menu_name: {id, uuid}} from xml_parsed."""
+    menu_dir = os.path.join(base_dir, solution)
     menus = {}
     for name in MENU_NAMES:
-        key = f'agentic-fm \u2014 {name}'
-        if key not in found:
-            sys.exit(
-                f"Menu not found in snapshot: {key}\n"
-                f"Snapshot: {path}\n\n"
-                f"In FileMaker, open Manage > Custom Menus, select all five "
-                f"agentic-fm menus, copy them (Cmd+C), then run:\n"
-                f"  python3 agent/scripts/agfm_bridge.py clipboard-read > {path}"
-            )
-        menus[name] = found[key]
+        files = glob.glob(os.path.join(menu_dir, f'agentic-fm \u2014 {name} - ID *.xml'))
+        if not files:
+            sys.exit(f"Menu not found: agentic-fm \u2014 {name}\nExpected in: {menu_dir}\n"
+                     f"Run Explode XML after creating the placeholder menus in FileMaker.")
+        filepath = files[0]
+        menu_id = re.search(r'ID (\d+)\.xml$', filepath).group(1)
+        c = read_file(filepath)
+        uuid_m = re.search(r'<UUID[^>]*>([A-F0-9-]{36})</UUID>', c, re.IGNORECASE)
+        if not uuid_m:
+            sys.exit(f"UUID not found in {filepath}")
+        menus[name] = {'id': menu_id, 'uuid': uuid_m.group(1)}
     return menus
 
 
-def read_set_info(path):
-    """Return (set_id, set_name) from a menu set clipboard snapshot."""
-    m = re.search(r'<CustomMenuSet\s+name="([^"]+)"\s+id="(\d+)"', read_file(path), re.IGNORECASE)
-    if not m:
-        sys.exit(
-            f"CustomMenuSet not found in snapshot: {path}\n\n"
-            f"In FileMaker, open Manage > Custom Menus, select the agentic-fm "
-            f"menu set, copy it (Cmd+C), then run:\n"
-            f"  python3 agent/scripts/agfm_bridge.py clipboard-read > {path}"
-        )
-    return m.group(2), m.group(1)
-
-
-def find_script_id(name):
-    """Look up a script ID from the plugin's live context."""
-    try:
-        out = subprocess.run(
-            [sys.executable, 'agent/scripts/agfm_bridge.py', 'context'],
-            capture_output=True, text=True, check=True,
-        ).stdout
-        scripts = json.loads(out).get('scripts', {})
-    except (subprocess.CalledProcessError, json.JSONDecodeError, OSError) as exc:
-        sys.exit(f"Could not read context from the plugin: {exc}\n"
-                 f"The plugin is the only source of script IDs — check it is running:\n"
-                 f"  python3 agent/scripts/agfm_bridge.py status")
-
-    info = scripts.get(name)
-    if not info or 'id' not in info:
-        sys.exit(f"Script '{name}' not found in the solution.\n"
-                 f"Install the bridge script first (see filemaker/custom_menu/README.md).")
-    return str(info['id'])
+def find_script_id(name, solution):
+    index_path = f'agent/context/{solution}/scripts.index'
+    with open(index_path) as f:
+        for line in f:
+            parts = line.strip().split('|')
+            if parts and parts[0] == name:
+                return parts[1]
+    sys.exit(f"Script '{name}' not found in {index_path}.\n"
+             f"Install the bridge script first (see filemaker/custom_menu/README.md).")
 
 
 def substitute(template, tokens):
@@ -165,17 +153,22 @@ def main():
                 f"Snapshot not found: {path}\n\n"
                 f"Create it by copying the {kind} from FileMaker (Manage > Custom Menus)\n"
                 f"then running:\n"
-                f"  python3 agent/scripts/agfm_bridge.py clipboard-read > {path}"
+                f"  python agent/scripts/clipboard.py read {path}"
             )
 
-    # Solution name comes from the snapshot's file header
-    solution = re.search(
-        r'<FMObjectTransfer[^>]+File="([^"]+)"', read_file(SNAPSHOT_MENUS)
-    ).group(1)
+    # Derive solution hint from snapshot file name header
+    hint = None
+    if os.path.exists(SNAPSHOT_MENUS):
+        c = read_file(SNAPSHOT_MENUS)
+        m = re.search(r'<FMObjectTransfer[^>]+File="([^"]+)"', c)
+        if m:
+            hint = m.group(1)
+
+    solution = find_solution('agent/xml_parsed/custom_menus', hint=hint)
     print(f"Solution: {solution}")
 
-    menus = read_menu_info(SNAPSHOT_MENUS)
-    script_id = find_script_id(SCRIPT_NAME)
+    menus = read_menu_info('agent/xml_parsed/custom_menus', solution)
+    script_id = find_script_id(SCRIPT_NAME, solution)
 
     print(f"Script '{SCRIPT_NAME}': id={script_id}")
     for name, info in menus.items():
@@ -199,15 +192,18 @@ def main():
         output = substitute(read_file(TEMPLATE_MENUS), tokens)
         write_file(SNAPSHOT_MENUS, output)
         print(f"Written: {SNAPSHOT_MENUS}")
-        subprocess.run([sys.executable, 'agent/scripts/agfm_bridge.py',
-                        'clipboard-write', SNAPSHOT_MENUS], check=True)
+        subprocess.run([sys.executable, 'agent/scripts/clipboard.py', 'write', SNAPSHOT_MENUS],
+                       check=True)
 
     else:
         file_name, file_uuid, _ = extract_menus_snapshot(SNAPSHOT_MENUS)
         set_cat, set_uuid, std_uuid = extract_set_snapshot(SNAPSHOT_SET)
 
-        set_id, set_name = read_set_info(SNAPSHOT_SET)
-        print(f"Menu set: {set_name}")
+        set_dir = f'agent/xml_parsed/custom_menu_sets/{solution}'
+        set_files = glob.glob(os.path.join(set_dir, 'agentic-fm - ID *.xml'))
+        if not set_files:
+            sys.exit(f"Menu set not found in {set_dir}. Run Explode XML first.")
+        set_id = re.search(r'ID (\d+)\.xml$', set_files[0]).group(1)
 
         print(f"Set: id={set_id}, uuid={set_uuid}")
         tokens.update({
@@ -221,7 +217,7 @@ def main():
         output = substitute(read_file(TEMPLATE_SET), tokens)
         write_file(SNAPSHOT_SET, output)
         print(f"Written: {SNAPSHOT_SET}")
-        subprocess.run([sys.executable, 'agent/scripts/agfm_bridge.py', 'clipboard-write', SNAPSHOT_SET],
+        subprocess.run([sys.executable, 'agent/scripts/clipboard.py', 'write', SNAPSHOT_SET],
                        check=True)
 
 

@@ -67,6 +67,8 @@ XML_ELEMENT_TO_CLASS = {
     'ValueList':         'XMVL',
     'Layout':            'XML2',
     'Theme':             'XMTH',
+    'CustomMenu':        'ut16',
+    'CustomMenuSet':     'ut16',
 }
 
 # Class codes that use UTF-16 Unicode text rather than binary FM descriptors
@@ -175,17 +177,13 @@ def detect_class_from_xml(xml_text):
         pass
 
     # Fallback: regex scan for malformed or partially-written XML.
-    # Container elements must be checked before 'Step' — both Script and menu XML
-    # files contain <Step> elements inside them, which would otherwise match XMSS first.
+    # Menu elements must be checked before 'Step' — menu XML files contain <Step>
+    # elements inside their action blocks, which would otherwise match XMSS first.
     for element in ('CustomMenuSet', 'CustomMenu'):
         if re.search(rf'<{element}[\s>/]', xml_text):
             return 'ut16'
-    if re.search(r'<Layout[\s>/]', xml_text):
-        return 'XML2'
-    if re.search(r'<Script[\s>/]', xml_text):
-        return 'XMSC'
     for element, cls in XML_ELEMENT_TO_CLASS.items():
-        if element in ('CustomMenuSet', 'CustomMenu', 'Layout', 'Script'):
+        if element in ('CustomMenuSet', 'CustomMenu'):
             continue
         if re.search(rf'<{element}[\s>/]', xml_text):
             return cls

@@ -7,7 +7,7 @@ from .types import Diagnostic, Severity, LintResult
 from .config import LintConfig
 from .catalog import StepCatalog
 from .context import LintContext
-from .formats.detect import detect_format, detect_format_for_file
+from .formats.detect import detect_format
 from .formats.xml_parser import parse_xml_string, parse_xml_file
 from .formats.hr_parser import parse_hr
 
@@ -72,10 +72,6 @@ class LintRule:
 
     def check_hr(self, lines, catalog, context, config):
         """Check HR format. Returns list of Diagnostic."""
-        return []
-
-    def check_fmcalc(self, content, catalog, context, config):
-        """Check a standalone calculation file (.fmfn). Returns list of Diagnostic."""
         return []
 
     def severity(self, config):
@@ -182,12 +178,6 @@ class LintRunner:
                     parse_result, self.catalog, self.context, self.config
                 )
                 result.diagnostics.extend(diags)
-        elif fmt == "fmcalc":
-            for rule_instance in active_rules:
-                diags = rule_instance.check_fmcalc(
-                    content, self.catalog, self.context, self.config
-                )
-                result.diagnostics.extend(diags)
         else:
             lines = parse_hr(content)
             for rule_instance in active_rules:
@@ -203,24 +193,23 @@ class LintRunner:
         return result
 
     def lint_file(self, filepath: str, fmt: Optional[str] = None) -> LintResult:
-        """Lint a file. Auto-detects format from extension and content."""
+        """Lint a file. Auto-detects format from content."""
         path = Path(filepath)
         with open(path, "r", encoding="utf-8") as f:
             content = f.read()
         if fmt is None:
-            fmt = detect_format_for_file(str(path), content)
+            fmt = detect_format(content)
         return self.lint(content, fmt=fmt, source=str(path))
 
     def _active_rules(self, fmt: str) -> list:
         """Get instantiated rules that apply to this format and tier."""
-        check_fmt = fmt
         active = []
         for cls in get_rules():
             if not self.config.is_enabled(cls.rule_id):
                 continue
             if cls.tier > self.tier:
                 continue
-            if check_fmt not in cls.formats:
+            if fmt not in cls.formats:
                 continue
             active.append(cls())
         return active
