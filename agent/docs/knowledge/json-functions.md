@@ -104,8 +104,8 @@ FileMaker uses special key notation to append to and reference elements in JSON 
 // Correct — [+] creates the new element, [:] addresses the same element
 JSONSetElement ( $input ;
     [ "[+].id"       ; "10001" ; JSONNumber ] ;
-    [ "[:].name"     ; "My Name"      ; JSONString ] ;
-    [ "[:].category" ; "Cateory""  ; JSONString ]
+    [ "[:].name"     ; "Name"      ; JSONString ] ;
+    [ "[:].category" ; "Category""  ; JSONString ]
 )
 ```
 
