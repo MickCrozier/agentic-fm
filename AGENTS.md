@@ -40,7 +40,7 @@ If `PROJECT.md` exists at the project root, read it at session start. It contain
 
 This project is designed to create FileMaker objects — in the clipboard-supported fmxmlsnippet format. Developers reference and use the HR (human-readable) format for scripts. The following folders are used.
 
-- _sandbox/_ is where all newly created or in-progress work is stored. **Always organise sandbox files into a subfolder named after the solution** — e.g. `agent/sandbox/MySolution/MyScript.fmscript`. The solution name comes from the plugin `/api/context`. Never write files directly into the sandbox root.
+- _sandbox/_ is where all newly created or in-progress work is stored. **Always organise sandbox files into a subfolder named after the solution** — e.g. `agent/sandbox/MySolution/MyScript.xml`. The solution name comes from the plugin `/api/context`. Never write files directly into the sandbox root.
 - _catalogs/_ contains the step catalog (`step-catalog-en.json`) — a structured index of all FileMaker script steps with parameter definitions, types, enums, and HR signatures. This is the primary reference for step XML structure.
 - _snippet_examples/_ is an **archival** reference folder. The step catalog is the single source of truth for step structure. Read snippet_examples only when the catalog's `notes` field is insufficient.
 - _fmlint/_ is the FMLint linter package. Run via `python3 -m agent.fmlint` to validate fmxmlsnippet XML, human-readable scripts, or standalone calculation files (`.fmfn`).
@@ -171,14 +171,13 @@ The agentic-fm plugin interface (`agfm_bridge.py`) and OData-based automation ar
 
 ## Scripts
 
-**Always write scripts as human-readable (`.fmscript`).** This is the required format — readable, diffable, and auto-converted to XML by `agfm_bridge.py` via `/api/hr-to-xml` before deployment or bundling.
+**Always write scripts directly as fmxmlsnippet XML (`.xml`)** — construct the XML by hand from the step catalog's `id`, `params`, and `selfClosing` fields for each step. Do NOT write the human-readable `.fmscript` format and rely on `agfm_bridge.py`'s `/api/hr-to-xml` converter — it is unreliable and often produces incorrect step XML.
 
-Note: HR→XML conversion requires the plugin. If the plugin is unavailable at deploy time, the `.fmscript` file is still the correct output — hold deployment until the plugin is reachable.
-
-- **Always use `.fmscript` as the file extension** — never `.xml` or `.txt`. `agfm_bridge.py` detects `.fmscript` to trigger automatic HR→XML conversion.
+- **Always use `.xml` as the file extension** for script deliverables — never `.fmscript`.
 - Use the simplified fmxmlsnippet syntax from the step catalog, NOT the verbose Save As XML (SaXML) format.
-- Line numbers always reference the human-readable script, never the raw XML.
+- Line numbers always reference step position within the script, not raw byte offsets.
 - Scripts should be written in a testable way with clear inputs and outputs where possible
+- Only produce a human-readable preview of a script when the developer explicitly asks for one — use the `script-preview` skill for this. Do not auto-generate an HR preview alongside the XML.
 
 ## Calculations
 Calculations are text based. Written to `agent/sandbox/`. 
@@ -229,10 +228,10 @@ Custom Functions are stored in the Custom Function space of FileMaker. Written t
 
 ```bash
 # Existing script — replace steps
-python3 agent/scripts/agfm_bridge.py deploy agent/sandbox/MySolution/MyScript.fmscript "My Script"
+python3 agent/scripts/agfm_bridge.py deploy agent/sandbox/MySolution/MyScript.xml "My Script"
 
 # New script — create directly via plugin (no paste required)
-python3 agent/scripts/agfm_bridge.py bundle agent/sandbox/MySolution/MyScript.fmscript --names "My Script"
+python3 agent/scripts/agfm_bridge.py bundle agent/sandbox/MySolution/MyScript.xml --names "My Script"
 
 # Surgical edits
 python3 agent/scripts/agfm_bridge.py patch agent/sandbox/MySolution/mypatch.json
@@ -240,7 +239,7 @@ python3 agent/scripts/agfm_bridge.py patch agent/sandbox/MySolution/mypatch.json
 
 **If deploy fails, stop and ask the developer.** Do not retry with different flags or clipboard workarounds. Ask what they see and wait for their guidance.
 
-If the plugin is unreachable, do not attempt a workaround — the `.fmscript` file is still the correct deliverable. Say the plugin is down and hold deployment.
+If the plugin is unreachable, do not attempt a workaround — the `.xml` file is still the correct deliverable. Say the plugin is down and hold deployment.
 
 **Patch file format** (for `agfm_bridge.py patch`):
 ```json

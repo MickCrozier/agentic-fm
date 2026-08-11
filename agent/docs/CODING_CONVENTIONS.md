@@ -262,6 +262,8 @@ Every script follows this documentation pattern at the top, written entirely as 
 # 
 ```
 
+**Blank line after the header:** Always insert a blank `# (comment)` step (per the `#` syntax above) between the documentation header and the first real step, and between logical sections within the script body. Blank comment steps are free in Script Workspace — use them liberally to break code into readable blocks rather than leaving steps packed edge-to-edge.
+
 **Error code convention:**
 
 Scripts that return JSON always include `errorCode` in the failure shape:
