@@ -149,7 +149,12 @@ def _parse_line(raw: str, line_number: int) -> ParsedLine:
     trimmed = raw.strip()
 
     if not trimmed:
-        return ParsedLine(raw=raw, line_number=line_number, is_empty=True)
+        # Blank line -> empty self-closing "# (comment)" step, per fmxmlsnippet
+        # convention: blank-line spacing must round-trip as a real step.
+        return ParsedLine(
+            raw=raw, line_number=line_number, is_empty=True,
+            is_comment=True, comment_text="", step_name="# (comment)",
+        )
 
     # Doc-block comment: # at start of non-indented line
     if trimmed.startswith("#"):
@@ -377,10 +382,10 @@ def _emit_set_field(pl: ParsedLine) -> list:
 
 def _emit_go_to_layout(pl: ParsedLine) -> list:
     content = pl.bracket_content.strip()
-    if content.lower() == 'original layout':
+    first = pl.params[0] if pl.params else content
+    if first.strip().lower() == 'original layout' or content.lower() == 'original layout':
         return ['<LayoutDestination value="OriginalLayout"/>']
     # First param is: "Layout Name" (TO_Name) — extract just the quoted name
-    first = pl.params[0] if pl.params else content
     name_match = re.match(r'^"([^"]*)"', first.strip())
     if name_match:
         name = name_match.group(1)
@@ -609,8 +614,6 @@ def hr_to_xml(text: str) -> str:
     step_parts = []
 
     for pl in lines:
-        if pl.is_empty:
-            continue
         if not pl.step_name:
             continue
 
